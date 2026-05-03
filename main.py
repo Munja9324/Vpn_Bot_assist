@@ -79,6 +79,16 @@ class Settings:
     dashboard_theme_border: str
 
 
+@dataclass(frozen=True)
+class UserLookupCommand:
+    query: str
+    use_database: bool
+
+    @property
+    def is_username(self) -> bool:
+        return bool(normalize_username(self.query))
+
+
 def env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -899,6 +909,73 @@ def extract_user_id(text: str) -> str | None:
     return None
 
 
+def normalize_username(value: str) -> str:
+    cleaned = (value or "").strip()
+    if cleaned.startswith("@"):
+        cleaned = cleaned[1:]
+    cleaned = cleaned.strip().casefold()
+    if not re.fullmatch(r"[a-z0-9_]{3,32}", cleaned):
+        return ""
+    return cleaned
+
+
+def extract_username_from_text(text: str) -> str:
+    ignored = {
+        normalize_username(settings.admin_bot_username),
+        normalize_username(settings.wizard_target_username),
+    }
+    for match in re.finditer(r"(?<![A-Za-z0-9_])@([A-Za-z0-9_]{3,32})", text or ""):
+        username = normalize_username(match.group(1))
+        if username and username not in ignored:
+            return username
+
+    label_match = re.search(
+        r"(?:username|user\s*name|login|telegram)\s*[:=\-]\s*@?([A-Za-z0-9_]{3,32})",
+        text or "",
+        flags=re.IGNORECASE,
+    )
+    if label_match:
+        username = normalize_username(label_match.group(1))
+        if username and username not in ignored:
+            return username
+
+    return ""
+
+
+def extract_username_from_record(record: dict) -> str:
+    explicit = normalize_username(str(record.get("username") or ""))
+    if explicit:
+        return explicit
+    return extract_username_from_text(str(record.get("user_text") or ""))
+
+
+def parse_user_lookup_command(command: str, text: str) -> UserLookupCommand | None:
+    match = re.match(rf"^\s*/?{re.escape(command)}\s+(.+?)\s*$", text or "", flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    parts = [part.strip() for part in match.group(1).split() if part.strip()]
+    if not parts:
+        return None
+
+    use_database = False
+    query_parts: list[str] = []
+    for part in parts:
+        if part.casefold() in {"-b", "--base", "--db", "db", "base"}:
+            use_database = True
+            continue
+        query_parts.append(part)
+
+    if len(query_parts) != 1:
+        return None
+
+    query = query_parts[0].strip()
+    if re.fullmatch(r"\d{1,20}", query) or normalize_username(query):
+        return UserLookupCommand(query=query, use_database=use_database)
+
+    return None
+
+
 def parse_mail_command(text: str) -> tuple[str, str] | None:
     match = re.match(r"^\s*mail\s+(\d{1,20})(?:\s+([\s\S]+))?\s*$", text, flags=re.IGNORECASE)
     if not match:
@@ -909,11 +986,8 @@ def parse_mail_command(text: str) -> tuple[str, str] | None:
     return user_id, message_text
 
 
-def parse_help_command(text: str) -> str | None:
-    match = re.match(r"^\s*help\s+(\d{1,20})\s*$", text, flags=re.IGNORECASE)
-    if not match:
-        return None
-    return match.group(1)
+def parse_help_command(text: str) -> UserLookupCommand | None:
+    return parse_user_lookup_command("help", text)
 
 
 def is_help_overview_command(text: str) -> bool:
@@ -1036,11 +1110,8 @@ def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None
     return None
 
 
-def parse_info_command(text: str) -> str | None:
-    match = re.match(r"^\s*info\s+(\d{1,20})\s*$", text, flags=re.IGNORECASE)
-    if not match:
-        return None
-    return match.group(1)
+def parse_info_command(text: str) -> UserLookupCommand | None:
+    return parse_user_lookup_command("info", text)
 
 
 def parse_wizard_command(text: str) -> str | None:
@@ -1071,8 +1142,10 @@ def build_command_menu_text() -> str:
             "Меню команд",
             "",
             "Выбери кнопку или отправь команду вручную:",
-            "help <user_id> - найти пользователя",
-            "info <user_id> - подробная информация и подписки",
+            "help <user_id|username> - найти пользователя через админ-бот",
+            "help <user_id|username> -b - взять пользователя из SQLite базы",
+            "info <user_id|username> - подробная информация и подписки",
+            "info <user_id|username> -b - подробная информация из SQLite базы",
             "wizard <user_id> - подготовить карточку и отправить в wizard",
             "mail <user_id> <текст> - отправить сообщение пользователю",
             "scan - меню скана",
@@ -1094,6 +1167,7 @@ def build_command_menu_buttons():
         [Button.text("scan new"), Button.text("scan continue")],
         [Button.text("stop скан"), Button.text("scan reset")],
         [Button.text("help 123456789"), Button.text("info 123456789")],
+        [Button.text("help username -b"), Button.text("info username -b")],
         [Button.text("wizard 123456789"), Button.text("mail 123456789")],
     ]
 
@@ -1483,22 +1557,78 @@ def format_user_summary(user_id: str, user_text: str, subscriptions_message) -> 
 def format_user_summary_from_record(record: dict) -> str:
     user_id = str(record.get("user_id") or "")
     user_text = str(record.get("user_text") or "")
+    username = extract_username_from_record(record)
     subscriptions = list(record.get("subscriptions") or [])
+    subscriptions_text_for_number = "\n".join(
+        str(subscription.get("button_text") or "") for subscription in subscriptions
+    )
     subscription_numbers = [
         str(subscription.get("subscription_id") or "").strip()
         for subscription in subscriptions
         if str(subscription.get("subscription_id") or "").strip()
     ]
     subscriptions_text = ", ".join(subscription_numbers) if subscription_numbers else "подписок нет"
-    user_number = extract_user_number(user_text)
+    user_number = extract_user_number(user_text, subscriptions_text_for_number)
 
     return "\n".join(
         (
             f"1. Username бота: @{settings.admin_bot_username}",
-            f"2. ID пользователей: {user_number or user_id}",
-            f"3. Айди подписки пользователей: {subscriptions_text}",
+            f"2. ID пользователя: {user_number or user_id}",
+            f"3. Username пользователя: @{username}" if username else "3. Username пользователя: нет в базе",
+            f"4. Айди подписок: {subscriptions_text}",
+            "5. Источник: SQLite база",
         )
     )
+
+
+def format_subscription_info_from_record_html(record: dict) -> str:
+    user_id = str(record.get("user_id") or "")
+    user_text = str(record.get("user_text") or "")
+    username = extract_username_from_record(record)
+    subscriptions = list(record.get("subscriptions") or [])
+    subscriptions_text_for_number = "\n".join(
+        str(subscription.get("button_text") or "") for subscription in subscriptions
+    )
+    user_number = extract_user_number(user_text, subscriptions_text_for_number)
+    registration_date = str(record.get("registration_date") or "").strip()
+    if not registration_date:
+        parsed_registration_date = extract_registration_date(user_text)
+        registration_date = parsed_registration_date.strftime("%Y-%m-%d") if parsed_registration_date else ""
+
+    lines = [
+        f"1. Username бота: @{html.escape(settings.admin_bot_username)}",
+        f"2. ID пользователя: {html.escape(user_number or user_id)}",
+        (
+            f"3. Username пользователя: @{html.escape(username)}"
+            if username
+            else "3. Username пользователя: нет в базе"
+        ),
+        (
+            f"4. Дата регистрации: {html.escape(registration_date)}"
+            if registration_date
+            else "4. Дата регистрации: нет в базе"
+        ),
+        f"5. Подписок в базе: {len(subscriptions)}",
+    ]
+
+    if user_text.strip():
+        lines.extend(("", "6. Карточка из базы:", html.escape(user_text.strip())))
+
+    if not subscriptions:
+        lines.append("\n7. Инфо подписок: подписок нет")
+        return "\n".join(lines)
+
+    lines.append("\n7. Инфо подписок:")
+    for subscription in subscriptions:
+        subscription_id = str(subscription.get("subscription_id") or "")
+        button_text = str(subscription.get("button_text") or "")
+        detail_text = str(subscription.get("detail_text") or "").strip()
+        lines.append("")
+        lines.append(f"[{html.escape(subscription_id)}] {html.escape(button_text)}")
+        lines.append(make_keys_copyable_html(detail_text or "[empty subscription response]"))
+
+    lines.append("\n8. Источник: SQLite база")
+    return "\n".join(lines)
 
 
 def log_message(label: str, message) -> None:
@@ -1755,6 +1885,12 @@ def connect_database() -> sqlite3.Connection:
     return conn
 
 
+def ensure_database_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
 def initialize_database(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -1774,6 +1910,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id INTEGER NOT NULL,
             user_id TEXT NOT NULL,
+            username TEXT NOT NULL DEFAULT '',
             user_button_text TEXT NOT NULL DEFAULT '',
             user_text TEXT NOT NULL DEFAULT '',
             registration_date TEXT,
@@ -1811,6 +1948,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS latest_users (
             user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL DEFAULT '',
             user_button_text TEXT NOT NULL DEFAULT '',
             user_text TEXT NOT NULL DEFAULT '',
             registration_date TEXT,
@@ -1840,6 +1978,10 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_latest_subscriptions_expires_at ON latest_subscriptions(expires_at);
         """
     )
+    ensure_database_column(conn, "users", "username", "TEXT NOT NULL DEFAULT ''")
+    ensure_database_column(conn, "latest_users", "username", "TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_latest_users_username ON latest_users(username)")
     conn.commit()
 
 
@@ -1957,11 +2099,13 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
 
         for record in records:
             subscriptions = list(record.get("subscriptions") or [])
+            username = extract_username_from_record(record)
             user_cursor = conn.execute(
                 """
                 INSERT INTO users (
                     run_id,
                     user_id,
+                    username,
                     user_button_text,
                     user_text,
                     registration_date,
@@ -1973,6 +2117,7 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
                 (
                     run_id,
                     str(record.get("user_id") or ""),
+                    username,
                     str(record.get("user_button_text") or ""),
                     str(record.get("user_text") or ""),
                     record.get("registration_date"),
@@ -2011,6 +2156,12 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
                         json.dumps(subscription, ensure_ascii=False),
                     ),
                 )
+
+        conn.execute("DELETE FROM latest_subscriptions")
+        conn.execute("DELETE FROM latest_users")
+        observed_at = datetime.now().isoformat(timespec="seconds")
+        for record in records:
+            upsert_latest_record_with_conn(conn, record, observed_at=observed_at)
 
         for scan_error in list(stats.get("scan_errors") or []):
             conn.execute(
@@ -2064,10 +2215,12 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
         return
 
     subscriptions = list(record.get("subscriptions") or [])
+    username = extract_username_from_record(record)
     conn.execute(
         """
         INSERT INTO latest_users (
             user_id,
+            username,
             user_button_text,
             user_text,
             registration_date,
@@ -2075,8 +2228,9 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
             raw_json,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
+            username=excluded.username,
             user_button_text=excluded.user_button_text,
             user_text=excluded.user_text,
             registration_date=excluded.registration_date,
@@ -2086,6 +2240,7 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
         """,
         (
             user_id,
+            username,
             str(record.get("user_button_text") or ""),
             str(record.get("user_text") or ""),
             record.get("registration_date"),
@@ -2138,7 +2293,7 @@ def load_latest_records_from_database() -> list[dict]:
         seed_latest_records_from_scan_runs(conn)
         user_rows = conn.execute(
             """
-            SELECT user_id, user_button_text, user_text, registration_date
+            SELECT user_id, username, user_button_text, user_text, registration_date
             FROM latest_users
             ORDER BY CAST(user_id AS INTEGER)
             """
@@ -2172,6 +2327,7 @@ def load_latest_records_from_database() -> list[dict]:
         records.append(
             {
                 "user_id": user_id,
+                "username": str(row["username"] or ""),
                 "user_button_text": str(row["user_button_text"] or ""),
                 "user_text": str(row["user_text"] or ""),
                 "registration_date": row["registration_date"],
@@ -2191,7 +2347,7 @@ def load_latest_record_from_database(user_id: str) -> dict | None:
         seed_latest_records_from_scan_runs(conn)
         row = conn.execute(
             """
-            SELECT user_id, user_button_text, user_text, registration_date
+            SELECT user_id, username, user_button_text, user_text, registration_date
             FROM latest_users
             WHERE user_id = ?
             """,
@@ -2211,6 +2367,7 @@ def load_latest_record_from_database(user_id: str) -> dict | None:
 
     return {
         "user_id": str(row["user_id"] or ""),
+        "username": str(row["username"] or ""),
         "user_button_text": str(row["user_button_text"] or ""),
         "user_text": str(row["user_text"] or ""),
         "registration_date": row["registration_date"],
@@ -2224,6 +2381,44 @@ def load_latest_record_from_database(user_id: str) -> dict | None:
             for sub_row in sub_rows
         ],
     }
+
+
+def load_latest_record_by_lookup_from_database(query: str) -> dict | None:
+    cleaned = (query or "").strip()
+    if not cleaned:
+        return None
+
+    if re.fullmatch(r"\d{1,20}", cleaned):
+        return load_latest_record_from_database(cleaned)
+
+    username = normalize_username(cleaned)
+    if not username:
+        return None
+
+    with connect_database() as conn:
+        initialize_database(conn)
+        seed_latest_records_from_scan_runs(conn)
+        row = conn.execute(
+            """
+            SELECT user_id
+            FROM latest_users
+            WHERE username = ?
+               OR lower(user_text) LIKE ?
+               OR lower(raw_json) LIKE ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (username, f"%@{username}%", f"%@{username}%"),
+        ).fetchone()
+
+    if row:
+        return load_latest_record_from_database(str(row["user_id"] or ""))
+
+    for record in load_latest_records_from_database():
+        if extract_username_from_record(record) == username:
+            return record
+
+    return None
 
 
 def analyze_business_status(stats: dict) -> dict:
@@ -4388,6 +4583,36 @@ async def get_user_subscriptions_info_in_admin_bot(
             subscriptions_message,
             details,
         )
+        resolved_user_id = (
+            extract_user_number(result_message.raw_text or "", subscriptions_message.raw_text or "")
+            or (user_id if re.fullmatch(r"\d{1,20}", str(user_id)) else "")
+            or extract_user_id(result_message.raw_text or "")
+            or user_id
+        )
+        record = {
+            "user_id": resolved_user_id,
+            "username": extract_username_from_text(result_message.raw_text or ""),
+            "user_button_text": f"ID {user_id}",
+            "user_text": result_message.raw_text or "",
+            "registration_date": (
+                extract_registration_date(result_message.raw_text or "").strftime("%Y-%m-%d")
+                if extract_registration_date(result_message.raw_text or "")
+                else None
+            ),
+            "subscriptions": [
+                {
+                    "subscription_id": subscription_id,
+                    "button_text": button_text,
+                    "location": extract_location_from_subscription_button(button_text),
+                    "detail_text": detail_text,
+                }
+                for subscription_id, button_text, detail_text in details
+            ],
+        }
+        try:
+            upsert_latest_record(record)
+        except Exception:
+            logging.exception("Failed to upsert latest SQL record after info lookup=%s", user_id)
         print("\n===== USER INFO RESULT =====")
         print(result_text)
         print("============================\n")
@@ -4582,6 +4807,7 @@ async def collect_user_record_via_search(
     registration_date = extract_registration_date(result_message.raw_text or "")
     record = {
         "user_id": user_id,
+        "username": extract_username_from_text(result_message.raw_text or ""),
         "user_button_text": f"ID {user_id}",
         "user_text": result_message.raw_text or "",
         "registration_date": registration_date.strftime("%Y-%m-%d") if registration_date else None,
@@ -4681,6 +4907,7 @@ async def collect_current_user_record(
     registration_date = extract_registration_date(user_message.raw_text or "")
     record = {
         "user_id": user_id,
+        "username": extract_username_from_text(user_message.raw_text or ""),
         "user_button_text": str(user_button["text"]),
         "user_text": user_message.raw_text or "",
         "registration_date": registration_date.strftime("%Y-%m-%d") if registration_date else None,
@@ -5603,9 +5830,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     "Доступные команды:",
                     "/help — показать список всех команд",
                     "/version — показать версию, commit и дату запуска",
-                    "help <user_id> — найти пользователя в админ-боте",
+                    "help <user_id|username> — найти пользователя в админ-боте",
+                    "help <user_id|username> -b — взять пользователя из SQLite базы",
                     "wizard <user_id> — найти и отправить карточку в @wizardvpn_manager (с подтверждением)",
-                    "info <user_id> — получить подробную информацию и подписки",
+                    "info <user_id|username> — получить подробную информацию и подписки",
+                    "info <user_id|username> -b — получить подробную информацию из SQLite базы",
                     "mail <user_id> <текст> — отправить сообщение пользователю",
                     "mail <user_id> — отправить сообщение по умолчанию (MAIL_TEXT)",
                     "scan или scan start — старт / продолжение scan",
@@ -5827,9 +6056,16 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             active_scan_base_delay_seconds = settings.scan_action_delay_seconds
         return
 
-    user_id = parse_info_command(event.raw_text or "")
-    if user_id:
-        logging.info("Received info command user_id=%s from chat_id=%s sender_id=%s", user_id, event.chat_id, event.sender_id)
+    info_lookup = parse_info_command(event.raw_text or "")
+    if info_lookup:
+        user_id = info_lookup.query
+        logging.info(
+            "Received info command query=%s database=%s from chat_id=%s sender_id=%s",
+            user_id,
+            info_lookup.use_database,
+            event.chat_id,
+            event.sender_id,
+        )
         status_message = await safe_event_reply(
             event,
             build_process_status(
@@ -5844,12 +6080,33 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_info_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
-        scan_interruption = await request_scan_pause_for_priority_command(event, f"info {user_id}")
+        scan_interruption = None
         try:
-            result = await get_user_subscriptions_info_in_admin_bot(
-                user_id,
-                progress_callback=update_info_status,
-            )
+            if info_lookup.use_database:
+                await update_info_status(
+                    build_process_status(
+                        "Info пользователя",
+                        INFO_STEPS,
+                        len(INFO_STEPS),
+                        user_id=user_id,
+                        extra_lines=["Читаю SQLite базу", "Админ-бот не трогаю"],
+                        done=True,
+                    )
+                )
+                record = load_latest_record_by_lookup_from_database(user_id)
+                if not record:
+                    await safe_event_reply(
+                        event,
+                        "В базе нет такого пользователя. Запусти `scan new` или попробуй без `-b`, чтобы искать через админ-бота.",
+                    )
+                    return
+                result = format_subscription_info_from_record_html(record)
+            else:
+                scan_interruption = await request_scan_pause_for_priority_command(event, f"info {user_id}")
+                result = await get_user_subscriptions_info_in_admin_bot(
+                    user_id,
+                    progress_callback=update_info_status,
+                )
             await update_info_status(
                 build_process_status(
                     "Info пользователя",
@@ -5862,7 +6119,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             )
             await safe_event_reply(event, result, parse_mode="html")
         except Exception:
-            logging.exception("Admin info failed for user_id=%s", user_id)
+            logging.exception("Info failed for query=%s database=%s", user_id, info_lookup.use_database)
             await update_info_status(
                 build_process_status(
                     "Info пользователя",
@@ -5878,9 +6135,16 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             schedule_scan_auto_resume(scan_interruption)
         return
 
-    user_id = parse_help_command(event.raw_text or "")
-    if user_id:
-        logging.info("Received help command user_id=%s from chat_id=%s sender_id=%s", user_id, event.chat_id, event.sender_id)
+    help_lookup = parse_help_command(event.raw_text or "")
+    if help_lookup:
+        user_id = help_lookup.query
+        logging.info(
+            "Received help command query=%s database=%s from chat_id=%s sender_id=%s",
+            user_id,
+            help_lookup.use_database,
+            event.chat_id,
+            event.sender_id,
+        )
         status_message = await safe_event_reply(
             event,
             build_process_status(
@@ -5895,12 +6159,33 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_help_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
-        scan_interruption = await request_scan_pause_for_priority_command(event, f"help {user_id}")
+        scan_interruption = None
         try:
-            result = await find_user_in_admin_bot(
-                user_id,
-                progress_callback=update_help_status,
-            )
+            if help_lookup.use_database:
+                await update_help_status(
+                    build_process_status(
+                        "Поиск пользователя",
+                        SEARCH_STEPS,
+                        len(SEARCH_STEPS),
+                        user_id=user_id,
+                        extra_lines=["Читаю SQLite базу", "Админ-бот не трогаю"],
+                        done=True,
+                    )
+                )
+                record = load_latest_record_by_lookup_from_database(user_id)
+                if not record:
+                    await safe_event_reply(
+                        event,
+                        "В базе нет такого пользователя. Запусти `scan new` или попробуй без `-b`, чтобы искать через админ-бота.",
+                    )
+                    return
+                result = format_user_summary_from_record(record)
+            else:
+                scan_interruption = await request_scan_pause_for_priority_command(event, f"help {user_id}")
+                result = await find_user_in_admin_bot(
+                    user_id,
+                    progress_callback=update_help_status,
+                )
             await update_help_status(
                 build_process_status(
                     "Поиск пользователя",
@@ -5913,7 +6198,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             )
             await safe_event_reply(event, result)
         except Exception:
-            logging.exception("Admin search failed for user_id=%s", user_id)
+            logging.exception("Help search failed for query=%s database=%s", user_id, help_lookup.use_database)
             await update_help_status(
                 build_process_status(
                     "Поиск пользователя",
