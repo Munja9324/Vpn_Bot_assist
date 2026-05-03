@@ -1167,7 +1167,7 @@ def parse_promo_command(text: str) -> tuple[str, str, str] | None:
         return None
 
     user_id = match.group(1)
-    promo_code = f"{user_id}_Promo"
+    promo_code = f"{user_id}nPromo"
     message_text = (match.group(2) or "").strip() or format_promo_mail_text(user_id, promo_code)
     return user_id, promo_code, message_text
 
@@ -1344,7 +1344,7 @@ def build_command_menu_text() -> str:
             "info <user_id|username> - подробная информация и подписки",
             "info <user_id|username> -b - подробная информация из SQLite базы",
             "wizard <user_id> - подготовить карточку и отправить в wizard",
-            "promo <user_id> - создать промокод <user_id>_Promo и отправить пользователю",
+            "promo <user_id> - создать промокод <user_id>nPromo и отправить пользователю",
             "mail <user_id> <текст> - отправить сообщение пользователю",
             "/roots - список запросников",
             "/roots add <user_id|@username|me> - добавить запросника",
@@ -6902,7 +6902,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     "wizard <user_id> — найти и отправить карточку в @wizardvpn_manager (с подтверждением)",
                     "info <user_id|username> — получить подробную информацию и подписки",
                     "info <user_id|username> -b — получить подробную информацию из SQLite базы",
-                    "promo <user_id> — создать промокод <user_id>_Promo и отправить пользователю через mail",
+                    "promo <user_id> — создать промокод <user_id>nPromo и отправить пользователю через mail",
                     "mail <user_id> <текст> — отправить сообщение пользователю",
                     "mail <user_id> — отправить сообщение по умолчанию (MAIL_TEXT)",
                     "/roots — список запросников",
