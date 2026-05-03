@@ -306,6 +306,7 @@ client = TelegramClient(
 )
 already_replied_chat_ids: set[int] = set()
 admin_flow_lock = asyncio.Lock()
+scan_auto_resume_lock = asyncio.Lock()
 own_user_id: int | None = None
 admin_bot_entity_cache = None
 wizard_target_entity_cache = None
@@ -317,6 +318,7 @@ active_scan_cancel_event: asyncio.Event | None = None
 active_scan_owner_id: int | None = None
 active_scan_menu_owner_id: int | None = None
 active_scan_reset_requested = False
+active_scan_auto_resume_task: asyncio.Task | None = None
 pending_wizard_requests: dict[int, dict[str, object]] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
 logging_is_configured = False
@@ -4193,6 +4195,28 @@ async def send_latest_dashboard_to_chat(event) -> bool:
     return sent is not None
 
 
+async def send_latest_dashboard_to_chat_id(chat_id: int) -> bool:
+    _, _, _, dashboard_path = latest_scan_report_paths()
+    if not dashboard_path:
+        return False
+    try:
+        await client.send_file(
+            chat_id,
+            file=str(dashboard_path),
+            caption="Dashboard scan (HTML). Открой файл в Telegram.",
+        )
+        note_success_action()
+        return True
+    except FloodWaitError as error:
+        wait_seconds = int(getattr(error, "seconds", 1) or 1)
+        note_floodwait(wait_seconds)
+        logging.warning("FloodWait on dashboard send: message suppressed for %ss", wait_seconds)
+        return False
+    except Exception:
+        logging.exception("Failed to send latest dashboard to chat_id=%s", chat_id)
+        return False
+
+
 async def send_status_dashboard_from_database(event) -> bool:
     built = build_status_dashboard_from_database()
     if not built:
@@ -4976,6 +5000,142 @@ async def scan_all_users_in_admin_bot(
         )
 
 
+async def request_scan_pause_for_priority_command(event, command_name: str) -> dict | None:
+    if not active_scan_cancel_event or active_scan_cancel_event.is_set():
+        return None
+
+    active_scan_cancel_event.set()
+    interruption = {
+        "chat_id": int(event.chat_id),
+        "owner_id": int(active_scan_owner_id or event.sender_id or 0),
+        "requested_by": int(event.sender_id or 0),
+        "command": command_name,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    logging.info(
+        "Auto-pausing active scan for priority command=%s chat_id=%s owner_id=%s",
+        command_name,
+        interruption["chat_id"],
+        interruption["owner_id"],
+    )
+    await safe_event_reply(
+        event,
+        (
+            f"[SCAN] Активный scan временно ставлю на паузу для команды `{command_name}`.\n"
+            "Завершу текущего пользователя, выполню команду и продолжу scan автоматически."
+        ),
+    )
+    return interruption
+
+
+def schedule_scan_auto_resume(interruption: dict | None) -> None:
+    global active_scan_auto_resume_task
+    if not interruption:
+        return
+    active_scan_auto_resume_task = asyncio.create_task(auto_resume_scan_after_priority_command(interruption))
+
+
+async def auto_resume_scan_after_priority_command(interruption: dict) -> None:
+    async with scan_auto_resume_lock:
+        await run_scan_auto_resume_after_priority_command(interruption)
+
+
+async def run_scan_auto_resume_after_priority_command(interruption: dict) -> None:
+    global active_scan_cancel_event, active_scan_owner_id, active_scan_reset_requested
+    global active_scan_action_delay_seconds, active_scan_base_delay_seconds
+
+    chat_id = int(interruption.get("chat_id") or 0)
+    owner_id = int(interruption.get("owner_id") or 0)
+    command_name = str(interruption.get("command") or "admin command")
+    if not chat_id:
+        return
+
+    try:
+        for _ in range(120):
+            if active_scan_cancel_event is None:
+                break
+            await asyncio.sleep(0.5)
+
+        if active_scan_reset_requested:
+            logging.info("Skip scan auto-resume after %s: reset requested", command_name)
+            return
+        if active_scan_cancel_event is not None:
+            logging.warning("Skip scan auto-resume after %s: previous scan state is still active", command_name)
+            return
+        if not load_scan_checkpoint():
+            logging.info("Skip scan auto-resume after %s: checkpoint is empty", command_name)
+            return
+
+        active_scan_cancel_event = asyncio.Event()
+        active_scan_owner_id = owner_id or None
+        active_scan_reset_requested = False
+        active_scan_base_delay_seconds = max(
+            0.08,
+            min(settings.scan_action_delay_seconds, settings.scan_turbo_delay_seconds),
+        )
+        active_scan_action_delay_seconds = active_scan_base_delay_seconds
+
+        progress_interval_seconds = max(0.25, env_float("SCAN_PROGRESS_INTERVAL_SECONDS", 0.5))
+        progress_message = await client.send_message(
+            chat_id,
+            build_scan_status(
+                f"Продолжаю scan после команды `{command_name}`.",
+                checkpoint_text=format_scan_checkpoint_text(),
+            ),
+            buttons=[[Button.inline("Пауза scan", data=SCAN_CANCEL_CALLBACK_DATA)]],
+        )
+
+        async def update_auto_scan_progress(
+            text: str,
+            *,
+            done: bool = False,
+            failed: bool = False,
+            paused: bool = False,
+        ) -> None:
+            buttons = None if done or failed or paused else [[Button.inline("Пауза scan", data=SCAN_CANCEL_CALLBACK_DATA)]]
+            await edit_status_message(
+                progress_message,
+                build_scan_status(
+                    text,
+                    checkpoint_text=format_scan_checkpoint_text(),
+                    done=done,
+                    failed=failed,
+                    paused=paused,
+                ),
+                buttons=buttons,
+                force=done or failed or paused,
+            )
+
+        result = await scan_all_users_in_admin_bot(
+            progress_callback=update_auto_scan_progress,
+            progress_interval_seconds=progress_interval_seconds,
+            cancel_event=active_scan_cancel_event,
+        )
+        if "на паузе" in result.casefold():
+            await update_auto_scan_progress("Scan снова на паузе. Прогресс сохранен.", paused=True)
+        elif "сброшен" in result.casefold():
+            await update_auto_scan_progress("Scan сброшен. Сохраненный прогресс очищен.", done=True)
+        else:
+            await update_auto_scan_progress("Scan завершен. Итоговый отчет готов.", done=True)
+        await client.send_message(chat_id, result)
+        await send_latest_dashboard_to_chat_id(chat_id)
+    except Exception:
+        logging.exception("Scan auto-resume failed after priority command=%s", command_name)
+        try:
+            await client.send_message(
+                chat_id,
+                "Не удалось автоматически продолжить scan. Отправь `scan continue`, чтобы продолжить вручную.",
+            )
+        except Exception:
+            logging.exception("Failed to notify chat about scan auto-resume failure")
+    finally:
+        active_scan_cancel_event = None
+        active_scan_owner_id = None
+        active_scan_reset_requested = False
+        active_scan_action_delay_seconds = settings.scan_action_delay_seconds
+        active_scan_base_delay_seconds = settings.scan_action_delay_seconds
+
+
 async def send_mail_to_user_in_admin_bot(
     user_id: str,
     message_text: str,
@@ -5356,6 +5516,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_mail_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
+        scan_interruption = await request_scan_pause_for_priority_command(event, f"mail {user_id}")
         try:
             result = await send_mail_to_user_in_admin_bot(
                 user_id,
@@ -5386,6 +5547,8 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
             )
             await safe_event_reply(event, "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c mail. \u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u0438 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u044b \u0432 \u043b\u043e\u0433.")
+        finally:
+            schedule_scan_auto_resume(scan_interruption)
         return
 
     if is_help_overview_command(event.raw_text or ""):
@@ -5435,6 +5598,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_wizard_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
+        scan_interruption = None
         try:
             cached_record = load_latest_record_from_database(wizard_user_id)
             if cached_record:
@@ -5465,6 +5629,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
                 return
 
+            scan_interruption = await request_scan_pause_for_priority_command(event, f"wizard {wizard_user_id}")
             result = await find_user_in_admin_bot(
                 wizard_user_id,
                 progress_callback=update_wizard_status,
@@ -5527,6 +5692,8 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
             )
             await safe_event_reply(event, "Не удалось подготовить сообщение для wizard. Подробности в логе.")
+        finally:
+            schedule_scan_auto_resume(scan_interruption)
         return
 
     scan_action = scan_menu_action or parse_scan_command(event.raw_text or "")
@@ -5633,6 +5800,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_info_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
+        scan_interruption = await request_scan_pause_for_priority_command(event, f"info {user_id}")
         try:
             result = await get_user_subscriptions_info_in_admin_bot(
                 user_id,
@@ -5662,6 +5830,8 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
             )
             await safe_event_reply(event, "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c info. \u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u0438 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u044b \u0432 \u043b\u043e\u0433.")
+        finally:
+            schedule_scan_auto_resume(scan_interruption)
         return
 
     user_id = parse_help_command(event.raw_text or "")
@@ -5681,6 +5851,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_help_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
+        scan_interruption = await request_scan_pause_for_priority_command(event, f"help {user_id}")
         try:
             result = await find_user_in_admin_bot(
                 user_id,
@@ -5710,6 +5881,8 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
             )
             await safe_event_reply(event, "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043d\u0430\u0439\u0442\u0438 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f. \u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u0438 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u044b \u0432 \u043b\u043e\u0433.")
+        finally:
+            schedule_scan_auto_resume(scan_interruption)
         return
 
     if (event.raw_text or "").strip():
