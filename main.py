@@ -37,6 +37,7 @@ class Settings:
     auto_reply_enabled: bool
     reply_once_per_chat: bool
     default_reply: str
+    root_requester_ids: tuple[str, ...]
     admin_bot_username: str
     admin_command: str
     users_button_text: str
@@ -118,6 +119,18 @@ def env_text(name: str, default: str) -> str:
         return default
 
     return value
+
+
+def env_list(name: str) -> tuple[str, ...]:
+    raw = os.getenv(name, "")
+    if not raw:
+        return ()
+    items = []
+    for part in re.split(r"[\s,;]+", raw):
+        cleaned = part.strip()
+        if cleaned:
+            items.append(cleaned)
+    return tuple(items)
 
 
 def env_float(name: str, default: float) -> float:
@@ -284,6 +297,7 @@ def load_settings() -> Settings:
             "DEFAULT_REPLY",
             "\u041f\u0440\u0438\u0432\u0435\u0442! \u042f \u0441\u0435\u0439\u0447\u0430\u0441 \u0437\u0430\u043d\u044f\u0442, \u043e\u0442\u0432\u0435\u0447\u0443 \u043f\u043e\u0437\u0436\u0435.",
         ),
+        root_requester_ids=env_list("ROOT_REQUESTER_IDS"),
         admin_bot_username=os.getenv("ADMIN_BOT_USERNAME", "vpn_kbr_bot"),
         admin_command=os.getenv("ADMIN_COMMAND", "/admin"),
         users_button_text=env_text("USERS_BUTTON_TEXT", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438"),
@@ -546,6 +560,11 @@ WIZARD_STEPS = [
     "Жду ответ: 1 отправить, 2 добавить, 0 отмена",
     "Отправляю в wizard",
 ]
+
+REQUESTER_DENY_MESSAGE = (
+    "Этот аккаунт не предназначен для получения сообшений, это сообщение "
+    "сгенерировано автоматически, отвечать на него не нужно"
+)
 
 
 def make_progress_bar(done_units: int, total_units: int, width: int = 16) -> tuple[str, int]:
@@ -1028,6 +1047,10 @@ def is_version_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
 
 
+def is_roots_command(text: str) -> bool:
+    return bool(re.match(r"^\s*/?roots(?:\s+.*)?$", text or "", flags=re.IGNORECASE))
+
+
 def is_stop_scan_command(text: str) -> bool:
     return bool(
         re.match(
@@ -1145,6 +1168,13 @@ def parse_wizard_command(text: str) -> str | None:
 
 def parse_wizard_reply_choice(text: str) -> str | None:
     cleaned = text.strip().casefold()
+    first_token = cleaned.split(maxsplit=1)[0] if cleaned else ""
+    if first_token == "1":
+        return "send_now"
+    if first_token == "2":
+        return "add_text"
+    if first_token == "0":
+        return "cancel"
     if cleaned in {"1", "нет", "no", "n", "отправить", "send"}:
         return "send_now"
     if cleaned in {"2", "да", "yes", "y", "добавить", "add"}:
@@ -1170,6 +1200,9 @@ def build_command_menu_text() -> str:
             "info <user_id|username> -b - подробная информация из SQLite базы",
             "wizard <user_id> - подготовить карточку и отправить в wizard",
             "mail <user_id> <текст> - отправить сообщение пользователю",
+            "/roots - список запросников",
+            "/roots add <user_id|@username|me> - добавить запросника",
+            "/roots del <user_id|@username> - удалить запросника",
             "scan - меню скана",
             "scan new - новый скан с первой страницы",
             "scan continue - продолжить сохраненный скан",
@@ -1191,6 +1224,7 @@ def build_command_menu_buttons():
         [Button.text("help 123456789"), Button.text("info 123456789")],
         [Button.text("help username -b"), Button.text("info username -b")],
         [Button.text("wizard 123456789"), Button.text("mail 123456789")],
+        [Button.text("/roots"), Button.text("/roots add me")],
     ]
 
 
@@ -2126,6 +2160,15 @@ def initialize_database(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES scan_runs(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS requesters (
+            lookup_key TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL DEFAULT '',
+            username TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            added_at TEXT NOT NULL,
+            added_by TEXT NOT NULL DEFAULT ''
+        );
+
         CREATE TABLE IF NOT EXISTS latest_users (
             user_id TEXT PRIMARY KEY,
             username TEXT NOT NULL DEFAULT '',
@@ -2154,6 +2197,8 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_subscriptions_run_user_id ON subscriptions(run_id, user_id);
         CREATE INDEX IF NOT EXISTS idx_subscriptions_expires_at ON subscriptions(expires_at);
         CREATE INDEX IF NOT EXISTS idx_scan_errors_run_user_id ON scan_errors(run_id, user_id);
+        CREATE INDEX IF NOT EXISTS idx_requesters_user_id ON requesters(user_id);
+        CREATE INDEX IF NOT EXISTS idx_requesters_username ON requesters(username);
         CREATE INDEX IF NOT EXISTS idx_latest_subscriptions_user_id ON latest_subscriptions(user_id);
         CREATE INDEX IF NOT EXISTS idx_latest_subscriptions_expires_at ON latest_subscriptions(expires_at);
         """
@@ -2189,6 +2234,173 @@ def ensure_database_file() -> None:
     with connect_database() as conn:
         initialize_database(conn)
         seed_latest_records_from_scan_runs(conn)
+
+
+def requester_key_for_id(user_id: str | int) -> str:
+    return f"id:{str(user_id).strip()}"
+
+
+def requester_key_for_username(username: str) -> str:
+    return f"username:{normalize_username(username)}"
+
+
+def requester_count() -> int:
+    with connect_database() as conn:
+        initialize_database(conn)
+        return int(conn.execute("SELECT COUNT(*) FROM requesters").fetchone()[0])
+
+
+def sender_username(sender) -> str:
+    return normalize_username(str(getattr(sender, "username", "") or ""))
+
+
+def upsert_requester(
+    lookup: str,
+    *,
+    username: str = "",
+    note: str = "",
+    added_by: str = "",
+) -> str:
+    cleaned = (lookup or "").strip()
+    normalized_username = normalize_username(username)
+    if cleaned.casefold() == "me":
+        raise ValueError("me must be resolved before upsert_requester")
+
+    user_id = ""
+    lookup_key = ""
+    if re.fullmatch(r"\d{1,20}", cleaned):
+        user_id = cleaned
+        lookup_key = requester_key_for_id(user_id)
+    else:
+        normalized_username = normalize_username(cleaned)
+        if not normalized_username:
+            raise ValueError("Use numeric user_id, @username, or me")
+        lookup_key = requester_key_for_username(normalized_username)
+
+    with connect_database() as conn:
+        initialize_database(conn)
+        conn.execute(
+            """
+            INSERT INTO requesters (lookup_key, user_id, username, note, added_at, added_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(lookup_key) DO UPDATE SET
+                user_id=excluded.user_id,
+                username=excluded.username,
+                note=excluded.note,
+                added_at=excluded.added_at,
+                added_by=excluded.added_by
+            """,
+            (
+                lookup_key,
+                user_id,
+                normalized_username,
+                note.strip(),
+                datetime.now().isoformat(timespec="seconds"),
+                added_by,
+            ),
+        )
+        conn.commit()
+    return lookup_key
+
+
+def delete_requester(lookup: str) -> bool:
+    cleaned = (lookup or "").strip()
+    if re.fullmatch(r"\d{1,20}", cleaned):
+        keys = [requester_key_for_id(cleaned)]
+    else:
+        username = normalize_username(cleaned)
+        if not username:
+            return False
+        keys = [requester_key_for_username(username)]
+
+    with connect_database() as conn:
+        initialize_database(conn)
+        cursor = conn.execute(
+            "DELETE FROM requesters WHERE lookup_key IN ({})".format(",".join("?" for _ in keys)),
+            keys,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def load_requesters() -> list[sqlite3.Row]:
+    with connect_database() as conn:
+        initialize_database(conn)
+        return list(
+            conn.execute(
+                """
+                SELECT lookup_key, user_id, username, note, added_at, added_by
+                FROM requesters
+                ORDER BY added_at, lookup_key
+                """
+            ).fetchall()
+        )
+
+
+def is_requester_allowed(sender_id: int, sender) -> bool:
+    username = sender_username(sender)
+    keys = [requester_key_for_id(sender_id)]
+    if username:
+        keys.append(requester_key_for_username(username))
+
+    with connect_database() as conn:
+        initialize_database(conn)
+        row = conn.execute(
+            "SELECT 1 FROM requesters WHERE lookup_key IN ({}) LIMIT 1".format(",".join("?" for _ in keys)),
+            keys,
+        ).fetchone()
+    return bool(row)
+
+
+def seed_requesters_from_settings() -> None:
+    for lookup in settings.root_requester_ids:
+        try:
+            upsert_requester(lookup, note="seed from ROOT_REQUESTER_IDS", added_by="env")
+        except ValueError:
+            logging.warning("Invalid ROOT_REQUESTER_IDS item ignored: %r", lookup)
+
+
+def build_roots_text() -> str:
+    rows = load_requesters()
+    lines = [
+        "Список запросников",
+        "",
+        "Только эти аккаунты могут отправлять команды этому аккаунту.",
+        "",
+    ]
+    if not rows:
+        lines.extend(
+            [
+                "Список пуст.",
+                "Чтобы добавить себя: /roots add me",
+                "Чтобы добавить другого: /roots add 123456789 комментарий",
+                "Можно добавить username: /roots add @username комментарий",
+            ]
+        )
+        return "\n".join(lines)
+
+    for index, row in enumerate(rows, start=1):
+        identity = row["user_id"] or (f"@{row['username']}" if row["username"] else row["lookup_key"])
+        note = f" — {row['note']}" if row["note"] else ""
+        lines.append(f"{index}. {identity}{note}")
+    lines.extend(
+        [
+            "",
+            "Команды:",
+            "/roots add me",
+            "/roots add <user_id|@username> [комментарий]",
+            "/roots del <user_id|@username>",
+            "/roots clear",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_roots_buttons():
+    return [
+        [Button.text("/roots"), Button.text("/roots add me")],
+        [Button.text("/roots del 123456789"), Button.text("menu")],
+    ]
 
 
 def seed_latest_records_from_scan_runs(conn: sqlite3.Connection) -> None:
@@ -5694,6 +5906,114 @@ async def send_to_wizard_target(text: str) -> None:
         note_success_action()
 
 
+async def ask_wizard_confirmation(
+    event,
+    *,
+    sender_id: int,
+    user_id: str,
+    base_text: str,
+    status_message,
+    update_status,
+) -> None:
+    wizard_target = f"@{settings.wizard_target_username.lstrip('@')}"
+    pending_wizard_requests[sender_id] = {
+        "stage": "await_choice",
+        "user_id": user_id,
+        "base_text": base_text,
+        "final_text": base_text,
+        "status_message": status_message,
+    }
+    await update_status(
+        build_process_status(
+            "Wizard",
+            WIZARD_STEPS,
+            6,
+            user_id=user_id,
+            target=wizard_target,
+            extra_lines=[
+                "Карточка подготовлена",
+                "Проверь текст перед отправкой",
+                "Ответь: 1 - отправить, 2 - дописать, 0 - отмена",
+            ],
+        )
+    )
+    await safe_event_reply(event, f"Предпросмотр wizard:\n\n{base_text}")
+    await safe_event_reply(
+        event,
+        "Отправлять в wizard?",
+        buttons=[
+            [Button.text("1 отправить"), Button.text("2 дописать")],
+            [Button.text("0 отмена")],
+        ],
+    )
+
+
+async def handle_roots_command(event, sender) -> None:
+    sender_id = int(event.sender_id or 0)
+    sender_user = sender_username(sender)
+    text = (event.raw_text or "").strip()
+    parts = [part for part in text.split() if part]
+
+    if len(parts) == 1 or (len(parts) > 1 and parts[1].casefold() in {"list", "show", "список"}):
+        await safe_event_reply(event, build_roots_text(), buttons=build_roots_buttons())
+        return
+
+    action = parts[1].casefold()
+    if action in {"help", "помощь"}:
+        await safe_event_reply(event, build_roots_text(), buttons=build_roots_buttons())
+        return
+
+    if action in {"add", "добавить"}:
+        if len(parts) < 3:
+            await safe_event_reply(event, "Формат: /roots add <user_id|@username|me> [комментарий]")
+            return
+        target = parts[2].strip()
+        note = " ".join(parts[3:]).strip()
+        if target.casefold() == "me":
+            target = str(sender_id)
+            if not note:
+                note = "owner"
+        try:
+            lookup_key = upsert_requester(
+                target,
+                username=sender_user if target == str(sender_id) else "",
+                note=note,
+                added_by=str(sender_id),
+            )
+        except ValueError as error:
+            await safe_event_reply(event, f"Не смог добавить запросника: {error}")
+            return
+        await safe_event_reply(event, f"Запросник добавлен: {lookup_key}\n\n{build_roots_text()}")
+        return
+
+    if action in {"del", "delete", "remove", "rm", "удалить"}:
+        if len(parts) < 3:
+            await safe_event_reply(event, "Формат: /roots del <user_id|@username>")
+            return
+        target = parts[2].strip()
+        if target.casefold() == "me":
+            target = str(sender_id)
+        removed = delete_requester(target)
+        await safe_event_reply(
+            event,
+            ("Запросник удален." if removed else "Такого запросника не нашел.") + f"\n\n{build_roots_text()}",
+        )
+        return
+
+    if action in {"clear", "очистить"}:
+        if len(parts) < 3 or parts[2].casefold() not in {"yes", "confirm", "да"}:
+            await safe_event_reply(event, "Чтобы очистить весь список запросников, отправь: /roots clear yes")
+            return
+        with connect_database() as conn:
+            initialize_database(conn)
+            conn.execute("DELETE FROM requesters")
+            conn.commit()
+        await safe_event_reply(event, "Список запросников очищен. Чтобы снова добавить себя: /roots add me")
+        return
+
+    await safe_event_reply(event, "Не понял команду /roots. Отправь /roots, чтобы посмотреть список и подсказки.")
+
+
 @client.on(events.CallbackQuery(data=SCAN_CANCEL_CALLBACK_DATA))
 async def handle_scan_cancel(event: events.CallbackQuery.Event) -> None:
     if not active_scan_cancel_event:
@@ -5727,6 +6047,21 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         return
     sender_id = int(event.sender_id or 0)
     incoming_text = (event.raw_text or "").strip()
+    roots_command = is_roots_command(incoming_text)
+    roots_empty = requester_count() == 0
+    if roots_command and (roots_empty or is_requester_allowed(sender_id, sender)):
+        await handle_roots_command(event, sender)
+        return
+
+    if not is_requester_allowed(sender_id, sender):
+        await safe_event_reply(event, REQUESTER_DENY_MESSAGE)
+        logging.info(
+            "Rejected private message from non-requester sender_id=%s username=%s text=%r",
+            sender_id,
+            sender_username(sender),
+            incoming_text,
+        )
+        return
 
     pending_wizard = pending_wizard_requests.get(sender_id)
     if pending_wizard:
@@ -5769,7 +6104,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                             extra_lines=["Отправляю подготовленную карточку без дополнения"],
                         )
                     )
-                    await send_to_wizard_target(str(pending_wizard["base_text"]))
+                    await send_to_wizard_target(str(pending_wizard.get("final_text") or pending_wizard["base_text"]))
                     pending_wizard_requests.pop(sender_id, None)
                     await update_pending_wizard_status(
                         build_process_status(
@@ -5849,6 +6184,80 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     f"Дополнение:\n{extra_text}",
                 )
             )
+            pending_wizard["extra_text"] = extra_text
+            pending_wizard["final_text"] = full_text
+            pending_wizard["stage"] = "await_final_choice"
+            await update_pending_wizard_status(
+                build_process_status(
+                    "Wizard",
+                    WIZARD_STEPS,
+                    6,
+                    user_id=pending_wizard_user_id,
+                    target=wizard_target,
+                    extra_lines=[
+                        "Дополнение добавлено",
+                        "Проверь итоговый текст",
+                        "Ответь: 1 - отправить, 2 - изменить дописку, 0 - отмена",
+                    ],
+                )
+            )
+            await safe_event_reply(event, f"Итоговый предпросмотр wizard:\n\n{full_text}")
+            await safe_event_reply(
+                event,
+                "Отправлять этот вариант?",
+                buttons=[
+                    [Button.text("1 отправить"), Button.text("2 изменить дописку")],
+                    [Button.text("0 отмена")],
+                ],
+            )
+            return
+
+        elif stage == "await_final_choice":
+            choice = parse_wizard_reply_choice(incoming_text)
+            if choice == "cancel":
+                pending_wizard_requests.pop(sender_id, None)
+                await update_pending_wizard_status(
+                    build_process_status(
+                        "Wizard",
+                        WIZARD_STEPS,
+                        6,
+                        user_id=pending_wizard_user_id,
+                        target=wizard_target,
+                        extra_lines=["Отправка отменена пользователем"],
+                        done=True,
+                    )
+                )
+                return
+            if choice == "add_text":
+                pending_wizard["stage"] = "await_extra_text"
+                await update_pending_wizard_status(
+                    build_process_status(
+                        "Wizard",
+                        WIZARD_STEPS,
+                        6,
+                        user_id=pending_wizard_user_id,
+                        target=wizard_target,
+                        extra_lines=[
+                            "Ожидаю новый дополнительный текст",
+                            "Следующее сообщение заменит прошлую дописку",
+                            "Для отмены отправьте 0",
+                        ],
+                    )
+                )
+                return
+            if choice != "send_now":
+                await update_pending_wizard_status(
+                    build_process_status(
+                        "Wizard",
+                        WIZARD_STEPS,
+                        6,
+                        user_id=pending_wizard_user_id,
+                        target=wizard_target,
+                        extra_lines=["Не понял ответ. Напишите 1, 2 или 0"],
+                    )
+                )
+                return
+
             try:
                 await update_pending_wizard_status(
                     build_process_status(
@@ -5858,13 +6267,13 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
                         extra_lines=[
-                            "Дополнение получено",
-                            f"Длина дополнения: {len(extra_text)} символов",
-                            "Отправляю карточку с дополнением",
+                            "Подтверждение получено",
+                            f"Длина итогового текста: {len(str(pending_wizard.get('final_text') or ''))} символов",
+                            "Отправляю в wizard",
                         ],
                     )
                 )
-                await send_to_wizard_target(full_text)
+                await send_to_wizard_target(str(pending_wizard.get("final_text") or pending_wizard["base_text"]))
                 pending_wizard_requests.pop(sender_id, None)
                 await update_pending_wizard_status(
                     build_process_status(
@@ -5873,7 +6282,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         7,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["Карточка с дополнением отправлена"],
+                        extra_lines=["Карточка отправлена после подтверждения"],
                         done=True,
                     )
                 )
@@ -6023,6 +6432,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     "info <user_id|username> -b — получить подробную информацию из SQLite базы",
                     "mail <user_id> <текст> — отправить сообщение пользователю",
                     "mail <user_id> — отправить сообщение по умолчанию (MAIL_TEXT)",
+                    "/roots — список запросников",
+                    "/roots add <user_id|@username|me> — добавить запросника",
+                    "/roots del <user_id|@username> — удалить запросника",
                     "scan или scan start — старт / продолжение scan",
                     "scan pause или /stopscan — поставить scan на паузу",
                     "scan reset — сбросить сохраненный прогресс scan",
@@ -6061,30 +6473,13 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         try:
             cached_record = load_latest_record_from_database(wizard_user_id)
             if cached_record:
-                await update_wizard_status(
-                    build_process_status(
-                        "Wizard",
-                        WIZARD_STEPS,
-                        7,
-                        user_id=wizard_user_id,
-                        target=wizard_target,
-                        extra_lines=[
-                            "Быстрый режим: карточка взята из SQL-базы",
-                            "Отправляю в wizard",
-                        ],
-                    )
-                )
-                await send_to_wizard_target(format_user_summary_from_record(cached_record))
-                await update_wizard_status(
-                    build_process_status(
-                        "Wizard",
-                        WIZARD_STEPS,
-                        7,
-                        user_id=wizard_user_id,
-                        target=wizard_target,
-                        extra_lines=["Карточка из SQL-базы отправлена в wizard"],
-                        done=True,
-                    )
+                await ask_wizard_confirmation(
+                    event,
+                    sender_id=sender_id,
+                    user_id=wizard_user_id,
+                    base_text=format_user_summary_from_record(cached_record),
+                    status_message=status_message,
+                    update_status=update_wizard_status,
                 )
                 return
 
@@ -6095,47 +6490,13 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 progress_title="Wizard",
                 progress_steps=WIZARD_STEPS,
             )
-            await update_wizard_status(
-                build_process_status(
-                    "Wizard",
-                    WIZARD_STEPS,
-                    7,
-                    user_id=wizard_user_id,
-                    target=wizard_target,
-                    extra_lines=["Карточка подготовлена", "Отправляю в wizard"],
-                )
-            )
-            await send_to_wizard_target(result)
-            await update_wizard_status(
-                build_process_status(
-                    "Wizard",
-                    WIZARD_STEPS,
-                    7,
-                    user_id=wizard_user_id,
-                    target=wizard_target,
-                    extra_lines=["Карточка отправлена в wizard"],
-                    done=True,
-                )
-            )
-            return
-            pending_wizard_requests[sender_id] = {
-                "stage": "await_choice",
-                "user_id": wizard_user_id,
-                "base_text": result,
-                "status_message": status_message,
-            }
-            await update_wizard_status(
-                build_process_status(
-                    "Wizard",
-                    WIZARD_STEPS,
-                    6,
-                    user_id=wizard_user_id,
-                    target=wizard_target,
-                    extra_lines=[
-                        "Карточка подготовлена",
-                        "Ответьте: 1 - отправить сразу, 2 - добавить текст, 0 - отмена",
-                    ],
-                )
+            await ask_wizard_confirmation(
+                event,
+                sender_id=sender_id,
+                user_id=wizard_user_id,
+                base_text=result,
+                status_message=status_message,
+                update_status=update_wizard_status,
             )
         except Exception:
             logging.exception("Wizard search failed for user_id=%s", wizard_user_id)
@@ -6423,7 +6784,9 @@ async def main() -> None:
     )
 
     ensure_database_file()
+    seed_requesters_from_settings()
     logging.info("SQLite database file: %s", database_path())
+    logging.info("Requesters configured: %s", requester_count())
     start_dashboard_http_server()
 
     me = await client.get_me()
