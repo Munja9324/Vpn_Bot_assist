@@ -122,6 +122,7 @@ FIND_USER_BUTTON_TEXT=Найти пользователя
 SUBSCRIPTIONS_BUTTON_TEXT=Подписки пользователя
 WRITE_USER_BUTTON_TEXT=Написать пользователю
 MAIL_NEXT_BUTTON_TEXT=Далее
+MAIL2_SEND_DELAY_SECONDS=0.5
 PROMO_BUTTON_TEXT=Промокоды
 PROMO_CREATE_BUTTON_TEXT=Создать промокод
 PROMO_SUBMIT_BUTTON_TEXT=Создать
@@ -343,7 +344,33 @@ mail 123456789 Текст сообщения
 mail 123456789
 ```
 
-## 14. Scan
+## 14. Команда `/mail2`
+
+`/mail2` делает рассылку только по тем пользователям, которые уже есть в SQLite базе и у которых нет подписок.
+
+Сразу с текстом:
+
+```text
+/mail2 Текст сообщения для пользователей без подписки
+```
+
+Или сначала отправить команду, а текст прислать следующим сообщением:
+
+```text
+/mail2
+```
+
+После `/mail2` userbot:
+
+1. читает SQLite базу;
+2. выбирает пользователей без подписок;
+3. по очереди открывает каждого пользователя через админ-бота;
+4. отправляет введенный текст через обычный `mail`;
+5. показывает итог: сколько отправлено и где были ошибки.
+
+Скорость между отправками регулируется настройкой `MAIL2_SEND_DELAY_SECONDS`.
+
+## 15. Scan
 
 Открыть меню scan:
 
@@ -720,6 +747,7 @@ FIND_USER_BUTTON_TEXT=Найти пользователя
 SUBSCRIPTIONS_BUTTON_TEXT=Подписки пользователя
 WRITE_USER_BUTTON_TEXT=Написать пользователю
 MAIL_NEXT_BUTTON_TEXT=Далее
+MAIL2_SEND_DELAY_SECONDS=0.5
 PROMO_BUTTON_TEXT=Промокоды
 PROMO_CREATE_BUTTON_TEXT=Создать промокод
 PROMO_SUBMIT_BUTTON_TEXT=Создать

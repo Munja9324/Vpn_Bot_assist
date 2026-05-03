@@ -57,6 +57,7 @@ info 123456789
 info @username -b
 wizard 123456789
 promo 123456789
+/mail2 Текст рассылки
 scan
 scan results
 /status

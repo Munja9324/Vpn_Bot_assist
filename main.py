@@ -63,6 +63,7 @@ class Settings:
     report_dir: str
     database_path: str
     mail_text: str
+    mail2_send_delay_seconds: float
     log_file: str
     log_max_bytes: int
     log_backup_count: int
@@ -338,6 +339,12 @@ def load_settings() -> Settings:
         report_dir=os.getenv("REPORT_DIR", "reports"),
         database_path=os.getenv("DATABASE_PATH", "scan-data.sqlite3"),
         mail_text=env_text("MAIL_TEXT", "\u0417\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439\u0442\u0435!"),
+        mail2_send_delay_seconds=normalized_positive_float(
+            "MAIL2_SEND_DELAY_SECONDS",
+            0.5,
+            minimum=0.0,
+            maximum=60.0,
+        ),
         log_file=os.getenv("LOG_FILE", "userbot.log"),
         log_max_bytes=max(100_000, env_int("LOG_MAX_BYTES", 5_000_000)),
         log_backup_count=max(1, env_int("LOG_BACKUP_COUNT", 5)),
@@ -435,6 +442,7 @@ active_scan_menu_owner_id: int | None = None
 active_scan_reset_requested = False
 active_scan_auto_resume_task: asyncio.Task | None = None
 pending_wizard_requests: dict[int, dict[str, object]] = {}
+pending_mail2_requests: dict[int, dict[str, object]] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
 logging_is_configured = False
 runtime_version_logged = False
@@ -578,6 +586,13 @@ MAIL_STEPS = [
     "Открываю форму сообщения",
     "Передаю текст письма",
     "Подтверждаю отправку",
+]
+MAIL2_STEPS = [
+    "Читаю SQLite базу",
+    "Ищу пользователей без подписки",
+    "Готовлю текст рассылки",
+    "Отправляю сообщения через mail",
+    "Формирую итоговый отчет",
 ]
 PROMO_STEPS = [
     "Подключаюсь к админ-боту",
@@ -1150,6 +1165,13 @@ def parse_mail_command(text: str) -> tuple[str, str] | None:
     return user_id, message_text
 
 
+def parse_mail2_command(text: str) -> str | None:
+    match = re.match(r"^\s*/?mail2(?:\s+([\s\S]+))?\s*$", text or "", flags=re.IGNORECASE)
+    if not match:
+        return None
+    return (match.group(1) or "").strip()
+
+
 def format_promo_mail_text(user_id: str, promo_code: str) -> str:
     try:
         return settings.promo_mail_text.format(
@@ -1348,6 +1370,7 @@ def build_command_menu_text() -> str:
             "wizard <user_id> - подготовить карточку и отправить в wizard",
             "promo <user_id> - создать промокод <user_id>nPromo и отправить пользователю",
             "mail <user_id> <текст> - отправить сообщение пользователю",
+            "/mail2 <текст> - отправить текст всем пользователям без подписки из SQLite базы",
             "/roots - список запросников",
             "/roots add <user_id|@username|me> - добавить запросника",
             "/roots del <user_id|@username> - удалить запросника",
@@ -1372,7 +1395,7 @@ def build_command_menu_buttons():
         [Button.text("help 123456789"), Button.text("info 123456789")],
         [Button.text("help username -b"), Button.text("info username -b")],
         [Button.text("wizard 123456789"), Button.text("promo 123456789")],
-        [Button.text("mail 123456789")],
+        [Button.text("mail 123456789"), Button.text("/mail2")],
         [Button.text("/roots"), Button.text("/roots add me")],
     ]
 
@@ -2876,6 +2899,24 @@ def load_latest_records_from_database() -> list[dict]:
             }
         )
     return records
+
+
+def load_users_without_subscriptions_from_database() -> list[str]:
+    users: list[str] = []
+    for record in load_latest_records_from_database():
+        user_id = str(record.get("user_id") or "").strip()
+        if not user_id:
+            continue
+        if record.get("subscriptions"):
+            continue
+        users.append(user_id)
+
+    def sort_key(value: str) -> tuple[int, str]:
+        if value.isdigit():
+            return int(value), value
+        return 0, value
+
+    return sorted(set(users), key=sort_key)
 
 
 def load_latest_record_from_database(user_id: str) -> dict | None:
@@ -6273,6 +6314,94 @@ async def create_promo_code_in_admin_bot(
     return result_text
 
 
+async def send_mail2_to_users_without_subscriptions(
+    message_text: str,
+    progress_callback: ProgressCallback | None = None,
+) -> str:
+    users = load_users_without_subscriptions_from_database()
+    total = len(users)
+    await emit_process_progress(
+        progress_callback,
+        "Mail2 без подписки",
+        MAIL2_STEPS,
+        1,
+        extra_lines=[
+            f"SQLite: {database_path()}",
+            f"Найдено пользователей без подписки: {total}",
+            f"Длина текста: {len(message_text)} символов",
+        ],
+    )
+    if not users:
+        return "Mail2: в базе нет пользователей без подписки. Запусти `scan new`, если база устарела."
+
+    sent: list[str] = []
+    failed: list[dict[str, str]] = []
+    for index, user_id in enumerate(users, start=1):
+        await emit_process_progress(
+            progress_callback,
+            "Mail2 без подписки",
+            MAIL2_STEPS,
+            4,
+            user_id=user_id,
+            extra_lines=[
+                f"Пользователь {index}/{total}",
+                f"Отправлено: {len(sent)}",
+                f"Ошибок: {len(failed)}",
+            ],
+        )
+        try:
+            await send_mail_to_user_in_admin_bot(user_id, message_text)
+            sent.append(user_id)
+            logging.info("Mail2 sent user_id=%s progress=%s/%s", user_id, index, total)
+        except Exception as error:
+            failed.append(
+                {
+                    "user_id": user_id,
+                    "error": f"{type(error).__name__}: {error}",
+                }
+            )
+            logging.exception("Mail2 failed user_id=%s progress=%s/%s", user_id, index, total)
+
+        if settings.mail2_send_delay_seconds > 0 and index < total:
+            await asyncio.sleep(settings.mail2_send_delay_seconds)
+
+    await emit_process_progress(
+        progress_callback,
+        "Mail2 без подписки",
+        MAIL2_STEPS,
+        5,
+        extra_lines=[
+            f"Всего найдено: {total}",
+            f"Отправлено: {len(sent)}",
+            f"Ошибок: {len(failed)}",
+        ],
+        done=not failed,
+        failed=bool(failed),
+    )
+
+    lines = [
+        "Mail2 завершен",
+        f"Текст: {len(message_text)} символов",
+        f"Пользователей без подписки: {total}",
+        f"Отправлено: {len(sent)}",
+        f"Ошибок: {len(failed)}",
+    ]
+    if sent:
+        lines.append("")
+        lines.append("Отправлено пользователям:")
+        lines.extend(f"- {user_id}" for user_id in sent[:50])
+        if len(sent) > 50:
+            lines.append(f"...и еще {len(sent) - 50}")
+    if failed:
+        lines.append("")
+        lines.append("Ошибки:")
+        for item in failed[:50]:
+            lines.append(f"- {item['user_id']}: {item['error'][:180]}")
+        if len(failed) > 50:
+            lines.append(f"...и еще ошибок: {len(failed) - 50}")
+    return "\n".join(lines)
+
+
 async def send_mail_to_user_in_admin_bot(
     user_id: str,
     message_text: str,
@@ -6770,6 +6899,61 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 await safe_event_reply(event, "Не удалось отправить в wizard. Подробности в логе.")
             return
 
+    pending_mail2 = pending_mail2_requests.get(sender_id)
+    if pending_mail2:
+        if incoming_text.strip().casefold() in {"0", "отмена", "cancel", "/cancel"}:
+            pending_mail2_requests.pop(sender_id, None)
+            status_message = pending_mail2.get("status_message")
+            cancel_text = build_process_status(
+                "Mail2 без подписки",
+                MAIL2_STEPS,
+                3,
+                extra_lines=["Рассылка отменена пользователем"],
+                done=True,
+            )
+            if status_message:
+                await edit_status_message(status_message, cancel_text, force=True)
+            else:
+                await safe_event_reply(event, cancel_text)
+            return
+
+        message_text = incoming_text.strip()
+        if not message_text:
+            await safe_event_reply(event, "Пришли текст для /mail2 или `0 отмена`.")
+            return
+
+        pending_mail2_requests.pop(sender_id, None)
+        status_message = pending_mail2.get("status_message")
+
+        async def update_pending_mail2_status(text: str) -> None:
+            if status_message:
+                await edit_status_message(status_message, text)
+            else:
+                await safe_event_reply(event, text)
+
+        scan_interruption = await request_scan_pause_for_priority_command(event, "mail2")
+        try:
+            result = await send_mail2_to_users_without_subscriptions(
+                message_text,
+                progress_callback=update_pending_mail2_status,
+            )
+            await safe_event_reply(event, result)
+        except Exception:
+            logging.exception("Mail2 failed after pending text sender_id=%s", sender_id)
+            await update_pending_mail2_status(
+                build_process_status(
+                    "Mail2 без подписки",
+                    MAIL2_STEPS,
+                    len(MAIL2_STEPS),
+                    extra_lines=["Рассылка завершилась ошибкой", "Подробности записаны в лог"],
+                    failed=True,
+                )
+            )
+            await safe_event_reply(event, "Не удалось выполнить /mail2. Подробности записаны в лог.")
+        finally:
+            schedule_scan_auto_resume(scan_interruption)
+        return
+
     if is_command_menu_command(event.raw_text or ""):
         await safe_event_reply(event, build_command_menu_text(), buttons=build_command_menu_buttons())
         return
@@ -6830,6 +7014,65 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             clear_scan_checkpoint()
             reset_scan_database()
             await safe_event_reply(event, "Сохраненный прогресс scan и SQL база очищены. Старые готовые отчеты оставлены.")
+        return
+
+    mail2_text = parse_mail2_command(event.raw_text or "")
+    if mail2_text is not None:
+        if not mail2_text:
+            status_message = await safe_event_reply(
+                event,
+                build_process_status(
+                    "Mail2 без подписки",
+                    MAIL2_STEPS,
+                    3,
+                    extra_lines=[
+                        "Жду текст рассылки следующим сообщением",
+                        "Для отмены отправь: 0 отмена",
+                    ],
+                ),
+            )
+            pending_mail2_requests[sender_id] = {"status_message": status_message}
+            await safe_event_reply(
+                event,
+                "Пришли текст, который нужно отправить всем пользователям без подписки из базы.\n\nОтмена: `0 отмена`",
+            )
+            return
+
+        logging.info("Received mail2 command from chat_id=%s sender_id=%s", event.chat_id, event.sender_id)
+        status_message = await safe_event_reply(
+            event,
+            build_process_status(
+                "Mail2 без подписки",
+                MAIL2_STEPS,
+                1,
+                extra_lines=[f"Текст: {len(mail2_text)} символов"],
+            ),
+        )
+
+        async def update_mail2_status(text: str) -> None:
+            await edit_status_message(status_message, text)
+
+        scan_interruption = await request_scan_pause_for_priority_command(event, "mail2")
+        try:
+            result = await send_mail2_to_users_without_subscriptions(
+                mail2_text,
+                progress_callback=update_mail2_status,
+            )
+            await safe_event_reply(event, result)
+        except Exception:
+            logging.exception("Mail2 command failed sender_id=%s", sender_id)
+            await update_mail2_status(
+                build_process_status(
+                    "Mail2 без подписки",
+                    MAIL2_STEPS,
+                    len(MAIL2_STEPS),
+                    extra_lines=["Рассылка завершилась ошибкой", "Подробности записаны в лог"],
+                    failed=True,
+                )
+            )
+            await safe_event_reply(event, "Не удалось выполнить /mail2. Подробности записаны в лог.")
+        finally:
+            schedule_scan_auto_resume(scan_interruption)
         return
 
     promo_command = parse_promo_command(event.raw_text or "")
@@ -6981,6 +7224,8 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     "promo <user_id> — создать промокод <user_id>nPromo и отправить пользователю через mail",
                     "mail <user_id> <текст> — отправить сообщение пользователю",
                     "mail <user_id> — отправить сообщение по умолчанию (MAIL_TEXT)",
+                    "/mail2 <текст> — отправить текст всем пользователям без подписки из SQLite базы",
+                    "/mail2 — попросить текст следующим сообщением и потом запустить рассылку",
                     "/roots — список запросников",
                     "/roots add <user_id|@username|me> — добавить запросника",
                     "/roots del <user_id|@username> — удалить запросника",
