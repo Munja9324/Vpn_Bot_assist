@@ -1,6 +1,8 @@
-# VPN_KBR_BOT userbot
+# Vpn_Bot_assist
 
-`VPN_KBR_BOT userbot` - это Telegram userbot на Telethon для работы с админ-панелью VPN-бота через личный Telegram-аккаунт.
+`Vpn_Bot_assist` - это Telegram userbot на Telethon для работы с админ-панелью VPN-бота через личный Telegram-аккаунт.
+
+Разработчик: `DevM29`.
 
 Он умеет:
 

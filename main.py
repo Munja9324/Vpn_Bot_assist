@@ -34,6 +34,8 @@ class Settings:
     api_id: int
     api_hash: str
     session_name: str
+    app_name: str
+    app_developer: str
     auto_reply_enabled: bool
     reply_once_per_chat: bool
     default_reply: str
@@ -294,6 +296,8 @@ def load_settings() -> Settings:
         api_id=env_required_int("API_ID"),
         api_hash=env_required_text("API_HASH"),
         session_name=os.getenv("SESSION_NAME", "my_profile_session"),
+        app_name=env_text("APP_NAME", "Vpn_Bot_assist"),
+        app_developer=env_text("APP_DEVELOPER", "DevM29"),
         auto_reply_enabled=env_bool("AUTO_REPLY_ENABLED", True),
         reply_once_per_chat=env_bool("REPLY_ONCE_PER_CHAT", True),
         default_reply=os.getenv(
@@ -346,7 +350,7 @@ def load_settings() -> Settings:
         telegram_proxy_username=os.getenv("TELEGRAM_PROXY_USERNAME", "").strip(),
         telegram_proxy_password=os.getenv("TELEGRAM_PROXY_PASSWORD", "").strip(),
         wizard_target_username=os.getenv("WIZARD_TARGET_USERNAME", "wizardvpn_manager"),
-        dashboard_brand_name=env_text("DASHBOARD_BRAND_NAME", "VPN_KBR_BOT"),
+        dashboard_brand_name=env_text("DASHBOARD_BRAND_NAME", env_text("APP_NAME", "Vpn_Bot_assist")),
         dashboard_title=env_text("DASHBOARD_TITLE", "Понятный отчёт по подпискам"),
         dashboard_subtitle=env_text(
             "DASHBOARD_SUBTITLE",
@@ -980,7 +984,8 @@ def collect_runtime_version_info() -> dict[str, str]:
     dirty_suffix = "+local" if tracked_changes else ""
     version = f"{short_commit or 'nogit'}{dirty_suffix}"
     return {
-        "app": settings.dashboard_brand_name or "VPN_KBR_BOT",
+        "app": settings.app_name or "Vpn_Bot_assist",
+        "developer": settings.app_developer or "DevM29",
         "version": version,
         "branch": branch,
         "commit": full_commit or "unknown",
@@ -996,6 +1001,7 @@ def build_runtime_version_text() -> str:
     return "\n".join(
         (
             f"{info['app']} runtime version",
+            f"Developer: {info['developer']}",
             f"Version: {info['version']}",
             f"Branch: {info['branch']}",
             f"Commit: {info['commit']}",
@@ -4280,7 +4286,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
     theme_warn = sanitize_hex_color(settings.dashboard_theme_warn, "#f59e0b")
     theme_bad = sanitize_hex_color(settings.dashboard_theme_bad, "#f87171")
     theme_border = sanitize_hex_color(settings.dashboard_theme_border, "#2a3564")
-    dashboard_brand = esc(settings.dashboard_brand_name or "VPN_KBR_BOT")
+    dashboard_brand = esc(settings.dashboard_brand_name or settings.app_name or "Vpn_Bot_assist")
     dashboard_title = esc(settings.dashboard_title or "VPN Dashboard")
     dashboard_subtitle = esc(settings.dashboard_subtitle or "")
 
