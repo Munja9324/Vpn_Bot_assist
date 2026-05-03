@@ -464,6 +464,7 @@ runtime_version_logged = False
 startup_cleanup_done = False
 dashboard_http_server: ThreadingHTTPServer | None = None
 dashboard_http_thread: threading.Thread | None = None
+dashboard_intro_template_cache: tuple[Path, float, str] | None = None
 STATUS_EDIT_MIN_INTERVAL_SECONDS = max(0.25, env_float("STATUS_EDIT_MIN_INTERVAL_SECONDS", 0.7))
 status_edit_state: dict[int, tuple[float, str]] = {}
 ADMIN_CONVERSATION_MAX_MESSAGES = max(5000, env_int("ADMIN_CONVERSATION_MAX_MESSAGES", 120000))
@@ -2185,6 +2186,38 @@ def dashboard_loader_file_name(dashboard_file_name: str) -> str:
     return f"{stem}-loader.html"
 
 
+def direct_dashboard_file_name_from_loader(loader_file_name: str) -> str | None:
+    if not loader_file_name.endswith("-loader.html"):
+        return None
+    return f"{loader_file_name[:-len('-loader.html')]}.html"
+
+
+def read_dashboard_intro_template() -> str:
+    global dashboard_intro_template_cache
+    template_path = dashboard_intro_template_path()
+    try:
+        mtime = template_path.stat().st_mtime
+    except OSError:
+        logging.exception("Dashboard intro template is not available: %s", template_path)
+        return fallback_dashboard_loader_html()
+
+    if (
+        dashboard_intro_template_cache is not None
+        and dashboard_intro_template_cache[0] == template_path
+        and dashboard_intro_template_cache[1] == mtime
+    ):
+        return dashboard_intro_template_cache[2]
+
+    try:
+        template = template_path.read_text(encoding="utf-8")
+    except OSError:
+        logging.exception("Dashboard intro template read failed: %s", template_path)
+        return fallback_dashboard_loader_html()
+
+    dashboard_intro_template_cache = (template_path, mtime, template)
+    return template
+
+
 def fallback_dashboard_loader_html() -> str:
     return """<!doctype html>
 <html lang="ru">
@@ -2240,13 +2273,7 @@ def fallback_dashboard_loader_html() -> str:
 
 
 def build_dashboard_loader_html(target_url: str) -> str:
-    template_path = dashboard_intro_template_path()
-    try:
-        template = template_path.read_text(encoding="utf-8")
-    except OSError:
-        logging.exception("Dashboard intro template is not available: %s", template_path)
-        template = fallback_dashboard_loader_html()
-
+    template = read_dashboard_intro_template()
     target_json = json.dumps(target_url, ensure_ascii=False)
     delay_ms = int(settings.dashboard_intro_seconds * 1000)
     redirect_script = f"""
@@ -2291,14 +2318,28 @@ def prune_dashboard_public_files() -> None:
     files = [
         path
         for path in public_dir.glob("*.html")
-        if path.is_file() and not path.name.startswith("latest-")
+        if path.is_file()
+        and not path.name.startswith("latest-")
+        and direct_dashboard_file_name_from_loader(path.name) is None
     ]
     files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
     for old_path in files[settings.dashboard_public_retention:]:
         try:
             old_path.unlink()
+            loader_path = public_dir / dashboard_loader_file_name(old_path.name)
+            if loader_path.exists():
+                loader_path.unlink()
         except OSError:
             logging.exception("Failed to prune old public dashboard: %s", old_path)
+
+    direct_names = {path.name for path in public_dir.glob("*.html") if path.is_file()}
+    for loader_path in public_dir.glob("*-loader.html"):
+        target_name = direct_dashboard_file_name_from_loader(loader_path.name)
+        if target_name and target_name not in direct_names and not loader_path.name.startswith("latest-"):
+            try:
+                loader_path.unlink()
+            except OSError:
+                logging.exception("Failed to prune orphan dashboard loader: %s", loader_path)
 
 
 def publish_dashboard_file(source_path: Path, latest_name: str | None = None) -> tuple[Path, str]:
@@ -5128,19 +5169,6 @@ def build_scan_menu_text() -> str:
         f"Админ-бот: {format_admin_bot_health()}",
         f"Checkpoint: {checkpoint_text}",
         "",
-        "Выбери действие (можно цифрой, без команд):",
-        "1 — Старт / продолжить scan",
-        "2 — Пауза scan",
-        "3 — Сброс scan",
-        "4 — Результаты scan",
-        "5 — Обновить статус",
-    ]
-    lines = [
-        "Меню scan",
-        f"Активный scan: {running_text}",
-        f"Админ-бот: {format_admin_bot_health()}",
-        f"Checkpoint: {checkpoint_text}",
-        "",
         "Выбери действие кнопкой или цифрой:",
         "1 - Новый scan с первой страницы",
         "2 - Продолжить сохраненный scan",
@@ -5167,54 +5195,7 @@ def build_scan_menu_buttons():
 
 
 def build_scan_menu_text_fast() -> str:
-    checkpoint = load_scan_checkpoint()
-    checkpoint_text = "нет"
-    if checkpoint:
-        next_user_id = int(checkpoint.get("next_user_id") or checkpoint.get("page_number") or 1)
-        total_users_hint = int(checkpoint.get("total_users_hint") or 0)
-        range_text = f"{next_user_id}" if total_users_hint <= 0 else f"{next_user_id}/{total_users_hint}"
-        checkpoint_text = (
-            f"позиция ID {range_text}, "
-            f"пользователей {len(checkpoint.get('records') or [])}, "
-            f"сохранен {checkpoint.get('saved_at', '-')}"
-        )
-
-    report_dir = Path(settings.report_dir)
-    recent_reports: list[str] = []
-    if report_dir.exists():
-        report_files = sorted(
-            report_dir.glob("scan-*.txt"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        for path in report_files:
-            if path.name.endswith("-detailed.txt"):
-                continue
-            recent_reports.append(path.name)
-            if len(recent_reports) >= 3:
-                break
-
-    running_text = "да" if active_scan_cancel_event and not active_scan_cancel_event.is_set() else "нет"
-    lines = [
-        "Меню scan",
-        f"Активный scan: {running_text}",
-        f"Checkpoint: {checkpoint_text}",
-        "",
-        "Выбери действие кнопкой или цифрой:",
-        "1 - Новый scan с первого ID",
-        "2 - Продолжить сохраненный scan",
-        "3 - Stop scan: пауза и текущие результаты",
-        "4 - Результаты scan",
-        "5 - Сброс сохраненного scan",
-        "6 - Обновить статус",
-        "",
-        "Команды: scan new, scan continue, stop скан, scan results, scan reset.",
-    ]
-    if recent_reports:
-        lines.append("")
-        lines.append("Последние отчеты:")
-        lines.extend(f"- {name}" for name in recent_reports)
-    return "\n".join(lines)
+    return build_scan_menu_text()
 
 
 def format_scan_checkpoint_text() -> str:
@@ -5345,6 +5326,19 @@ def build_scan_results_text() -> str:
     return "\n".join(lines)
 
 
+def dashboard_link_buttons(url: str):
+    if not url or not re.match(r"^https?://", url, flags=re.IGNORECASE):
+        return None
+    return [[Button.url("Открыть dashboard", url)]]
+
+
+def dashboard_message_text(title: str, url: str, fallback_path: Path | None = None) -> str:
+    target = url or str(fallback_path or "")
+    if url and settings.dashboard_intro_enabled:
+        return f"{title}\n{target}\n\nСначала откроется короткая VPN_KBR-анимация, потом dashboard."
+    return f"{title}\n{target}"
+
+
 async def send_latest_dashboard_to_chat(event) -> bool:
     _, _, _, dashboard_path = latest_scan_report_paths()
     if not dashboard_path:
@@ -5352,7 +5346,11 @@ async def send_latest_dashboard_to_chat(event) -> bool:
     dashboard_url = ensure_dashboard_public_url(dashboard_path, "latest-scan-dashboard.html")
     if not dashboard_url:
         _, dashboard_url = publish_dashboard_file(dashboard_path, latest_name="latest-scan-dashboard.html")
-    sent = await safe_event_reply(event, f"Dashboard scan:\n{dashboard_url or dashboard_path}")
+    sent = await safe_event_reply(
+        event,
+        dashboard_message_text("Dashboard scan:", dashboard_url, dashboard_path),
+        buttons=dashboard_link_buttons(dashboard_url),
+    )
     return sent is not None
 
 
@@ -5364,7 +5362,11 @@ async def send_latest_dashboard_to_chat_id(chat_id: int) -> bool:
         dashboard_url = ensure_dashboard_public_url(dashboard_path, "latest-scan-dashboard.html")
         if not dashboard_url:
             _, dashboard_url = publish_dashboard_file(dashboard_path, latest_name="latest-scan-dashboard.html")
-        await client.send_message(chat_id, f"Dashboard scan:\n{dashboard_url or dashboard_path}")
+        await client.send_message(
+            chat_id,
+            dashboard_message_text("Dashboard scan:", dashboard_url, dashboard_path),
+            buttons=dashboard_link_buttons(dashboard_url),
+        )
         note_success_action()
         return True
     except FloodWaitError as error:
@@ -5387,7 +5389,8 @@ async def send_status_dashboard_from_database(event) -> bool:
         return False
     dashboard_path, stats = built
     summary_text = build_status_summary_from_stats(stats, dashboard_path)
-    sent = await safe_event_reply(event, summary_text)
+    dashboard_url = str(stats.get("dashboard_public_url") or "")
+    sent = await safe_event_reply(event, summary_text, buttons=dashboard_link_buttons(dashboard_url))
     return sent is not None
 
 
