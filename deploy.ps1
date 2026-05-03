@@ -14,19 +14,19 @@ Set-Location -LiteralPath $Repo
 
 git add --all
 
-$ignoredPathspecs = @(
-    ".env",
-    "*.session",
-    "*.session-journal",
-    "*.sqlite3",
-    "*.sqlite3-*",
-    "*.db",
-    "*.log",
-    "*.bak",
-    "reports"
-)
-
-git reset -q HEAD -- @ignoredPathspecs 2>$null
+@(git diff --cached --name-status) | ForEach-Object {
+    $parts = $_ -split "`t", 2
+    $status = $parts[0]
+    $path = $parts[-1]
+    $isSensitive =
+        $path -match '(^|/)\.env$' -or
+        $path -match '\.session(-journal)?$' -or
+        $path -match '\.(sqlite3|sqlite3-.*|db|log|bak)$' -or
+        $path -match '(^|/)reports/'
+    if ($isSensitive -and $status -ne "D") {
+        git reset -q HEAD -- $path 2>$null
+    }
+}
 
 $stagedRows = @(git diff --cached --name-status)
 $staged = @($stagedRows | ForEach-Object { ($_ -split "`t", 2)[-1] })
