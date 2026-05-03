@@ -125,6 +125,7 @@ MAIL_NEXT_BUTTON_TEXT=Далее
 PROMO_BUTTON_TEXT=Промокоды
 PROMO_CREATE_BUTTON_TEXT=Создать промокод
 PROMO_SUBMIT_BUTTON_TEXT=Создать
+PROMO_SUCCESS_TEXT=Промокод успешно добавлен
 PROMO_BUDGET_RUB=100
 PROMO_AMOUNT_RUB=100
 PROMO_MAIL_TEXT=Для вас создан промокод {promo_code} на {promo_amount} руб.
@@ -323,9 +324,10 @@ promo 123456789
 5. вводит бюджет `100`;
 6. вводит размер суммы `100`;
 7. нажимает `Создать`;
-8. отправляет пользователю текст с промокодом через обычный mail-сценарий.
+8. ждет ответ `Промокод успешно добавлен`;
+9. только после этого отправляет пользователю текст с промокодом через обычный mail-сценарий.
 
-Настройки находятся в `.env`: `PROMO_BUTTON_TEXT`, `PROMO_CREATE_BUTTON_TEXT`, `PROMO_SUBMIT_BUTTON_TEXT`, `PROMO_BUDGET_RUB`, `PROMO_AMOUNT_RUB`, `PROMO_MAIL_TEXT`.
+Настройки находятся в `.env`: `PROMO_BUTTON_TEXT`, `PROMO_CREATE_BUTTON_TEXT`, `PROMO_SUBMIT_BUTTON_TEXT`, `PROMO_SUCCESS_TEXT`, `PROMO_BUDGET_RUB`, `PROMO_AMOUNT_RUB`, `PROMO_MAIL_TEXT`.
 
 ## 13. Команда `mail`
 
@@ -721,6 +723,7 @@ MAIL_NEXT_BUTTON_TEXT=Далее
 PROMO_BUTTON_TEXT=Промокоды
 PROMO_CREATE_BUTTON_TEXT=Создать промокод
 PROMO_SUBMIT_BUTTON_TEXT=Создать
+PROMO_SUCCESS_TEXT=Промокод успешно добавлен
 PROMO_BUDGET_RUB=100
 PROMO_AMOUNT_RUB=100
 PROMO_MAIL_TEXT=Для вас создан промокод {promo_code} на {promo_amount} руб.

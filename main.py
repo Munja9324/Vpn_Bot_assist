@@ -53,6 +53,7 @@ class Settings:
     promo_button_text: str
     promo_create_button_text: str
     promo_submit_button_text: str
+    promo_success_text: str
     promo_budget_rub: str
     promo_amount_rub: str
     promo_mail_text: str
@@ -324,6 +325,7 @@ def load_settings() -> Settings:
         promo_button_text=env_text("PROMO_BUTTON_TEXT", "\u041f\u0440\u043e\u043c\u043e\u043a\u043e\u0434\u044b"),
         promo_create_button_text=env_text("PROMO_CREATE_BUTTON_TEXT", "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043f\u0440\u043e\u043c\u043e\u043a\u043e\u0434"),
         promo_submit_button_text=env_text("PROMO_SUBMIT_BUTTON_TEXT", "\u0421\u043e\u0437\u0434\u0430\u0442\u044c"),
+        promo_success_text=env_text("PROMO_SUCCESS_TEXT", "\u041f\u0440\u043e\u043c\u043e\u043a\u043e\u0434 \u0443\u0441\u043f\u0435\u0448\u043d\u043e \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d"),
         promo_budget_rub=env_text("PROMO_BUDGET_RUB", "100"),
         promo_amount_rub=env_text("PROMO_AMOUNT_RUB", "100"),
         promo_mail_text=env_text(
@@ -6128,47 +6130,11 @@ def is_promo_created_message(message, promo_code: str) -> bool:
         return False
 
     lowered = text.casefold()
-    promo_code_lower = promo_code.casefold()
-    success_tokens = (
-        "создан",
-        "создано",
-        "создали",
-        "успеш",
-        "сохран",
-        "готов",
-        "created",
-        "success",
-        "saved",
-        "done",
-    )
-    promo_tokens = (
-        promo_code_lower,
-        "промокод",
-        "promo",
-        "coupon",
-    )
-    prompt_tokens = (
-        "введите",
-        "укажите",
-        "напишите",
-        "название",
-        "бюджет",
-        "размер",
-        "сумм",
-        "enter",
-        "input",
-    )
-
-    has_success = any(token in lowered for token in success_tokens)
-    has_promo_context = any(token and token in lowered for token in promo_tokens)
-    if has_success and has_promo_context:
-        return True
-
-    # Some admin bots answer with a short success line without repeating the promo name.
-    if has_success and not message.buttons and not any(token in lowered for token in prompt_tokens):
-        return True
-
-    return False
+    expected_text = settings.promo_success_text.strip().casefold()
+    if not expected_text:
+        logging.warning("PROMO_SUCCESS_TEXT is empty; promo success cannot be confirmed for %s", promo_code)
+        return False
+    return expected_text in lowered
 
 
 async def create_promo_code_in_admin_bot(
@@ -6280,7 +6246,7 @@ async def create_promo_code_in_admin_bot(
                 user_id=user_id,
                 extra_lines=[
                     f"Кнопка: {settings.promo_submit_button_text}",
-                    "Жду финальный ответ: промокод создан",
+                    f"Жду финальный ответ: {settings.promo_success_text}",
                 ],
             )
             final_message = await click_keyword_button_and_wait_ready(
