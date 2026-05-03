@@ -3300,6 +3300,62 @@ async def click_keyword_button_and_read(
     )
 
 
+async def click_keyword_button_and_wait_ready(
+    bot,
+    message,
+    required_groups: tuple[tuple[str, ...], ...],
+    *,
+    label: str,
+    ready,
+    timeout_seconds: float | None = None,
+    optional_keywords: tuple[str, ...] = (),
+    exclude_keywords: tuple[str, ...] = (),
+):
+    button = find_button_by_keywords(
+        message,
+        required_groups,
+        optional_keywords=optional_keywords,
+        exclude_keywords=exclude_keywords,
+    )
+    if not button:
+        available = [str(item["text"]) for item in extract_all_buttons(message)]
+        raise RuntimeError(f"Button for {label!r} not found. Available buttons: {available}")
+
+    ready_task = asyncio.create_task(
+        wait_bot_update(
+            bot,
+            message_snapshot(message),
+            ready=ready,
+            timeout_seconds=timeout_seconds,
+        )
+    )
+
+    async def click_with_retry():
+        try:
+            result = await message.click(int(button["row"]), int(button["column"]))
+            note_success_action()
+            return result
+        except FloodWaitError as error:
+            wait_seconds = int(getattr(error, "seconds", 1) or 1)
+            note_floodwait(wait_seconds)
+            logging.warning(
+                "FloodWait on click_keyword_button_and_wait_ready: waiting %ss and retrying button %r",
+                wait_seconds,
+                button["text"],
+            )
+            await asyncio.sleep(wait_seconds + 1)
+            result = await message.click(int(button["row"]), int(button["column"]))
+            note_success_action()
+            return result
+
+    click_task = asyncio.create_task(click_with_retry())
+    next_message = await wait_for_click_or_update(click_task, ready_task)
+    if POST_ACTION_SETTLE_SECONDS > 0:
+        await asyncio.sleep(POST_ACTION_SETTLE_SECONDS)
+    log_message(f"After clicking {label!r} and waiting ready", next_message)
+    return next_message
+
+
 async def ensure_message_with_keyword_button(
     conv,
     bot,
@@ -6066,6 +6122,55 @@ async def send_promo_value_and_read(bot, current_message, value: str, label: str
     return next_message
 
 
+def is_promo_created_message(message, promo_code: str) -> bool:
+    text = (message.raw_text or "").strip()
+    if not text:
+        return False
+
+    lowered = text.casefold()
+    promo_code_lower = promo_code.casefold()
+    success_tokens = (
+        "создан",
+        "создано",
+        "создали",
+        "успеш",
+        "сохран",
+        "готов",
+        "created",
+        "success",
+        "saved",
+        "done",
+    )
+    promo_tokens = (
+        promo_code_lower,
+        "промокод",
+        "promo",
+        "coupon",
+    )
+    prompt_tokens = (
+        "введите",
+        "укажите",
+        "напишите",
+        "название",
+        "бюджет",
+        "размер",
+        "сумм",
+        "enter",
+        "input",
+    )
+
+    has_success = any(token in lowered for token in success_tokens)
+    has_promo_context = any(token and token in lowered for token in promo_tokens)
+    if has_success and has_promo_context:
+        return True
+
+    # Some admin bots answer with a short success line without repeating the promo name.
+    if has_success and not message.buttons and not any(token in lowered for token in prompt_tokens):
+        return True
+
+    return False
+
+
 async def create_promo_code_in_admin_bot(
     user_id: str,
     promo_code: str,
@@ -6173,13 +6278,18 @@ async def create_promo_code_in_admin_bot(
                 PROMO_STEPS,
                 7,
                 user_id=user_id,
-                extra_lines=[f"Кнопка: {settings.promo_submit_button_text}"],
+                extra_lines=[
+                    f"Кнопка: {settings.promo_submit_button_text}",
+                    "Жду финальный ответ: промокод создан",
+                ],
             )
-            final_message = await click_keyword_button_and_read(
+            final_message = await click_keyword_button_and_wait_ready(
                 bot,
                 submit_message,
                 ((settings.promo_submit_button_text, "созд", "сохран", "готов", "create", "save"),),
                 label="submit promo",
+                ready=lambda message: is_promo_created_message(message, promo_code),
+                timeout_seconds=max(settings.bot_response_timeout_seconds, 90.0),
                 optional_keywords=("промокод", "promo", "coupon"),
                 exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
             )
