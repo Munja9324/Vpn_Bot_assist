@@ -3,11 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>vpn_kbr minimal loader</title>
+    <title>VPN_KBR loader</title>
     <style>
       :root {
-        --bg: #f4f1ea;
-        --ink: #151515;
+        --bg: #f7f8f8;
+        --ink: #111111;
+        --red: #e11919;
       }
 
       * {
@@ -27,7 +28,7 @@
         place-items: center;
         background: var(--bg);
         color: var(--ink);
-        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-family: Inter, Arial, Helvetica, system-ui, sans-serif;
       }
 
       .stage {
@@ -44,108 +45,90 @@
         position: absolute;
         inset: 42px;
         border: 1px solid var(--ink);
-        opacity: 0.16;
+        opacity: 0.08;
       }
 
-      .mark {
+      .logo-wrap {
         position: relative;
-        width: min(430px, 58vw);
-        height: min(430px, 58vw);
+        width: min(620px, 68vw);
+        height: min(620px, 68vw);
         display: grid;
         place-items: center;
-        animation: intro 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+        animation: intro 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
 
-      .arc {
-        position: absolute;
-        border-radius: 50%;
-        border-style: solid;
-        border-color: var(--ink);
-        animation: rotate 2.4s linear infinite, arcFade 2.4s ease-in-out infinite;
-      }
-
-      .arc.one {
-        width: 91%;
-        height: 91%;
-        border-width: 3px;
-        opacity: 0.92;
-        clip-path: polygon(50% 50%, 100% 0, 100% 84%, 0 100%, 0 0);
-      }
-
-      .arc.two {
-        width: 71%;
-        height: 71%;
-        border-width: 2px;
-        opacity: 0.4;
-        clip-path: polygon(50% 50%, 100% 0, 100% 54%, 0 100%, 0 0);
-        animation-delay: -0.6s;
-        animation-direction: reverse;
-      }
-
-      .tile {
-        width: min(132px, 22vw);
-        height: min(132px, 22vw);
-        min-width: 88px;
-        min-height: 88px;
-        border: 2px solid var(--ink);
-        border-radius: 24px;
-        display: grid;
-        place-items: center;
-      }
-
-      .lock {
+      .card {
         position: relative;
-        width: 46px;
-        height: 58px;
-        border: 3px solid var(--ink);
-        border-radius: 8px 8px 6px 6px;
+        width: min(500px, 55vw);
+        height: min(500px, 55vw);
+        min-width: 230px;
+        min-height: 230px;
+        border-radius: 34px;
+        background: #fff;
+        overflow: hidden;
+        box-shadow: 0 28px 80px rgb(0 0 0 / 8%);
       }
 
-      .lock::before {
-        content: "";
-        position: absolute;
-        left: 7px;
-        top: -26px;
-        width: 26px;
-        height: 28px;
-        border: 3px solid var(--ink);
-        border-bottom: 0;
-        border-radius: 18px 18px 0 0;
+      .logo {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        filter: grayscale(1) contrast(1.24) brightness(0.98);
+        opacity: 0.98;
+        animation: breathe 5s ease-in-out infinite;
       }
 
-      .lock::after {
-        content: "";
+      .trace {
         position: absolute;
-        left: 18px;
-        top: 22px;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--ink);
-        animation: blink 1s linear infinite;
+        inset: 0;
+        z-index: 3;
+        width: 100%;
+        height: 100%;
+        mix-blend-mode: normal;
+        opacity: 0.96;
+        pointer-events: none;
+      }
+
+      .mountain-trace {
+        stroke-dasharray: 1320;
+        stroke-dashoffset: 1320;
+        animation: traceMountains 5s linear infinite;
+      }
+
+      .river-trace {
+        stroke-dasharray: 420;
+        stroke-dashoffset: 420;
+        animation: traceRiver 5s linear infinite;
       }
 
       .caption {
         position: absolute;
         left: 50%;
-        bottom: 14%;
-        width: min(520px, 72vw);
+        bottom: 11%;
+        width: min(520px, 64vw);
         transform: translateX(-50%);
+        animation: caption 1.1s ease both;
       }
 
       .row {
         display: flex;
-        justify-content: space-between;
         align-items: baseline;
+        justify-content: center;
         gap: 24px;
-        font-size: clamp(20px, 3vw, 28px);
-        font-weight: 600;
+      }
+
+      .percent {
+        color: var(--ink);
+        opacity: 0.72;
+        font-size: clamp(16px, 2.2vw, 22px);
+        line-height: 1;
+        font-weight: 700;
       }
 
       .bar {
-        height: 2px;
-        margin-top: 24px;
-        background: rgb(21 21 21 / 14%);
+        height: 4px;
+        margin-top: 22px;
+        background: rgb(0 0 0 / 12%);
         overflow: hidden;
       }
 
@@ -156,47 +139,35 @@
         animation: load 5s linear infinite;
       }
 
-      .hint {
-        margin-top: 18px;
-        font-size: clamp(12px, 1.6vw, 16px);
-        text-transform: uppercase;
-        opacity: 0.54;
-      }
-
       @keyframes intro {
         from {
           opacity: 0;
-          transform: translateY(18px);
+          transform: translateY(20px) scale(0.96);
         }
         to {
           opacity: 1;
-          transform: translateY(0);
+          transform: translateY(0) scale(1);
         }
       }
 
-      @keyframes rotate {
+      @keyframes caption {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 10px);
+        }
         to {
-          transform: rotate(360deg);
+          opacity: 1;
+          transform: translate(-50%, 0);
         }
       }
 
-      @keyframes arcFade {
+      @keyframes breathe {
         0%,
         100% {
-          opacity: 0.32;
+          transform: scale(0.985);
         }
         50% {
-          opacity: 1;
-        }
-      }
-
-      @keyframes blink {
-        0%,
-        100% {
-          opacity: 0.32;
-        }
-        50% {
-          opacity: 1;
+          transform: scale(1.015);
         }
       }
 
@@ -205,36 +176,92 @@
           width: 100%;
         }
       }
+
+      @keyframes traceMountains {
+        0% {
+          stroke-dashoffset: 1320;
+        }
+        92%,
+        100% {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      @keyframes traceRiver {
+        0%,
+        55% {
+          stroke-dashoffset: 420;
+        }
+        100% {
+          stroke-dashoffset: 0;
+        }
+      }
     </style>
   </head>
   <body>
     <main class="stage">
       <div class="frame"></div>
-      <section class="mark" aria-label="vpn_kbr loading">
-        <div class="arc one"></div>
-        <div class="arc two"></div>
-        <div class="tile">
-          <div class="lock"></div>
+      <section class="logo-wrap" aria-label="VPN_KBR loading">
+        <div class="card">
+          <img class="logo" src="public/vpn-kbr-logo.jpg" alt="VPN_KBR logo" />
+          <svg class="trace" viewBox="0 0 500 500" aria-hidden="true">
+            <defs>
+              <filter id="neonGlow" x="-25%" y="-25%" width="150%" height="150%">
+                <feGaussianBlur stdDeviation="2.2" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <path
+              class="mountain-trace"
+              d="M123 183 C155 167 190 143 224 116 C239 132 257 153 276 174 C288 153 302 137 318 122 C338 144 364 165 397 183"
+              fill="none"
+              stroke="#e11919"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              filter="url(#neonGlow)"
+            />
+            <path
+              class="mountain-trace"
+              d="M224 116 C220 136 203 158 184 174 M318 122 C323 145 344 163 372 176"
+              fill="none"
+              stroke="#e11919"
+              stroke-width="2"
+              stroke-linecap="round"
+              opacity="0.75"
+            />
+            <path
+              class="river-trace"
+              d="M248 224 C226 224 201 229 181 240 C169 247 168 258 181 266 C198 277 224 283 224 303 C224 328 190 340 154 354"
+              fill="none"
+              stroke="#e11919"
+              stroke-width="3.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              filter="url(#neonGlow)"
+              opacity="0.82"
+            />
+          </svg>
         </div>
       </section>
       <section class="caption">
         <div class="row">
-          <span id="name">vpn_kbr_</span>
-          <span id="percent">000%</span>
+          <div class="percent" id="percent">000%</div>
         </div>
         <div class="bar"><div class="fill"></div></div>
-        <div class="hint">establishing secure route</div>
       </section>
     </main>
     <script>
       const percent = document.getElementById("percent");
-      const name = document.getElementById("name");
       const startedAt = performance.now();
 
       const tick = () => {
         const elapsed = ((performance.now() - startedAt) / 1000) % 5;
-        percent.textContent = `${Math.round((elapsed / 5) * 100).toString().padStart(3, "0")}%`;
-        name.textContent = Math.floor(elapsed * 2) % 2 === 0 ? "vpn_kbr_" : "vpn_kbr ";
+        const value = Math.round((elapsed / 5) * 100);
+        percent.textContent = `${value.toString().padStart(3, "0")}%`;
         requestAnimationFrame(tick);
       };
 

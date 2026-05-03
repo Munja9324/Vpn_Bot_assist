@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 from logging.handlers import RotatingFileHandler
+import mimetypes
 import os
 import re
 import shutil
@@ -2186,6 +2187,10 @@ def dashboard_loader_file_name(dashboard_file_name: str) -> str:
     return f"{stem}-loader.html"
 
 
+def safe_dashboard_public_file_name(file_name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", Path(file_name).name)
+
+
 def direct_dashboard_file_name_from_loader(loader_file_name: str) -> str | None:
     if not loader_file_name.endswith("-loader.html"):
         return None
@@ -2216,6 +2221,36 @@ def read_dashboard_intro_template() -> str:
 
     dashboard_intro_template_cache = (template_path, mtime, template)
     return template
+
+
+def publish_dashboard_intro_asset(asset_name: str) -> str:
+    safe_name = safe_dashboard_public_file_name(asset_name)
+    if not safe_name:
+        return asset_name
+
+    source_path = (dashboard_intro_template_path().parent / "public" / asset_name).resolve()
+    source_root = (dashboard_intro_template_path().parent / "public").resolve()
+    if source_root not in source_path.parents or not source_path.is_file():
+        logging.warning("Dashboard intro asset is not available: %s", source_path)
+        return asset_name
+
+    target_path = dashboard_public_dir() / safe_name
+    try:
+        if not target_path.exists() or source_path.stat().st_mtime > target_path.stat().st_mtime:
+            shutil.copy2(source_path, target_path)
+    except OSError:
+        logging.exception("Failed to publish dashboard intro asset: %s", source_path)
+        return asset_name
+    return build_dashboard_public_url(safe_name) or safe_name
+
+
+def rewrite_dashboard_intro_asset_urls(template: str) -> str:
+    def replace(match: re.Match) -> str:
+        prefix = match.group(1)
+        asset_name = match.group(2)
+        return f"{prefix}{publish_dashboard_intro_asset(asset_name)}"
+
+    return re.sub(r'((?:src|href)=["\'])public/([^"\']+)', replace, template)
 
 
 def fallback_dashboard_loader_html() -> str:
@@ -2273,7 +2308,7 @@ def fallback_dashboard_loader_html() -> str:
 
 
 def build_dashboard_loader_html(target_url: str) -> str:
-    template = read_dashboard_intro_template()
+    template = rewrite_dashboard_intro_asset_urls(read_dashboard_intro_template())
     target_json = json.dumps(target_url, ensure_ascii=False)
     delay_ms = int(settings.dashboard_intro_seconds * 1000)
     redirect_script = f"""
@@ -2345,14 +2380,14 @@ def prune_dashboard_public_files() -> None:
 def publish_dashboard_file(source_path: Path, latest_name: str | None = None) -> tuple[Path, str]:
     source_path = Path(source_path)
     public_dir = dashboard_public_dir()
-    public_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", source_path.name)
+    public_name = safe_dashboard_public_file_name(source_path.name)
     if not public_name.endswith(".html"):
         public_name = f"{public_name}.html"
     public_path = public_dir / public_name
     shutil.copy2(source_path, public_path)
 
     if latest_name:
-        latest_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", latest_name)
+        latest_name = safe_dashboard_public_file_name(latest_name)
         if not latest_name.endswith(".html"):
             latest_name = f"{latest_name}.html"
         latest_path = public_dir / latest_name
@@ -2364,17 +2399,17 @@ def publish_dashboard_file(source_path: Path, latest_name: str | None = None) ->
 
 
 def public_dashboard_url_from_report_path(report_path: Path) -> str:
-    public_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", Path(report_path).name)
+    public_name = safe_dashboard_public_file_name(Path(report_path).name)
     return publish_dashboard_loader_file(public_name)
 
 
 def ensure_dashboard_public_url(report_path: Path, latest_name: str | None = None) -> str:
-    public_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", Path(report_path).name)
+    public_name = safe_dashboard_public_file_name(Path(report_path).name)
     public_path = dashboard_public_dir() / public_name
     if not public_path.exists() and Path(report_path).exists():
         publish_dashboard_file(Path(report_path), latest_name=latest_name)
     elif latest_name and Path(report_path).exists():
-        latest_path = dashboard_public_dir() / re.sub(r"[^A-Za-z0-9_.-]+", "-", latest_name)
+        latest_path = dashboard_public_dir() / safe_dashboard_public_file_name(latest_name)
         if not latest_path.exists():
             shutil.copy2(report_path, latest_path)
         publish_dashboard_loader_file(latest_path.name)
@@ -2413,7 +2448,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
 
         file_name = parts[0]
-        if "/" in file_name or "\\" in file_name or not file_name.endswith(".html"):
+        allowed_suffixes = {".html", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".css", ".js"}
+        suffix = Path(file_name).suffix.casefold()
+        if "/" in file_name or "\\" in file_name or suffix not in allowed_suffixes:
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
 
@@ -2425,7 +2462,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
         content = file_path.read_bytes()
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        if suffix == ".html":
+            content_type = "text/html; charset=utf-8"
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
