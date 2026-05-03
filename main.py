@@ -441,6 +441,7 @@ active_scan_owner_id: int | None = None
 active_scan_menu_owner_id: int | None = None
 active_scan_reset_requested = False
 active_scan_auto_resume_task: asyncio.Task | None = None
+active_mail2_cancel_event: asyncio.Event | None = None
 pending_wizard_requests: dict[int, dict[str, object]] = {}
 pending_mail2_requests: dict[int, dict[str, object]] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
@@ -3374,6 +3375,13 @@ async def click_keyword_button_and_wait_ready(
     )
 
     async def click_with_retry():
+        logging.info(
+            "Clicking ready-wait button %r at row=%s column=%s for %s",
+            button["text"],
+            button["row"],
+            button["column"],
+            label,
+        )
         try:
             result = await message.click(int(button["row"]), int(button["column"]))
             note_success_action()
@@ -6048,6 +6056,21 @@ async def request_scan_pause_for_priority_command(event, command_name: str) -> d
     return interruption
 
 
+async def request_mail2_stop_for_priority_command(event, command_name: str) -> bool:
+    if not active_mail2_cancel_event or active_mail2_cancel_event.is_set():
+        return False
+    active_mail2_cancel_event.set()
+    logging.info("Mail2 stop requested for priority command=%s", command_name)
+    await safe_event_reply(
+        event,
+        (
+            f"[MAIL2] Активную рассылку останавливаю для команды `{command_name}`.\n"
+            "Дождусь завершения текущего пользователя и освобожу админ-процесс."
+        ),
+    )
+    return True
+
+
 def schedule_scan_auto_resume(interruption: dict | None) -> None:
     global active_scan_auto_resume_task
     if not interruption:
@@ -6317,6 +6340,7 @@ async def create_promo_code_in_admin_bot(
 async def send_mail2_to_users_without_subscriptions(
     message_text: str,
     progress_callback: ProgressCallback | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> str:
     users = load_users_without_subscriptions_from_database()
     total = len(users)
@@ -6336,7 +6360,11 @@ async def send_mail2_to_users_without_subscriptions(
 
     sent: list[str] = []
     failed: list[dict[str, str]] = []
+    stopped = False
     for index, user_id in enumerate(users, start=1):
+        if cancel_event and cancel_event.is_set():
+            stopped = True
+            break
         await emit_process_progress(
             progress_callback,
             "Mail2 без подписки",
@@ -6362,6 +6390,10 @@ async def send_mail2_to_users_without_subscriptions(
             )
             logging.exception("Mail2 failed user_id=%s progress=%s/%s", user_id, index, total)
 
+        if cancel_event and cancel_event.is_set():
+            stopped = True
+            break
+
         if settings.mail2_send_delay_seconds > 0 and index < total:
             await asyncio.sleep(settings.mail2_send_delay_seconds)
 
@@ -6374,18 +6406,21 @@ async def send_mail2_to_users_without_subscriptions(
             f"Всего найдено: {total}",
             f"Отправлено: {len(sent)}",
             f"Ошибок: {len(failed)}",
+            "Остановлено ради другой админ-команды" if stopped else "",
         ],
         done=not failed,
         failed=bool(failed),
     )
 
     lines = [
-        "Mail2 завершен",
+        "Mail2 остановлен" if stopped else "Mail2 завершен",
         f"Текст: {len(message_text)} символов",
         f"Пользователей без подписки: {total}",
         f"Отправлено: {len(sent)}",
         f"Ошибок: {len(failed)}",
     ]
+    if stopped:
+        lines.append("Причина: пришла другая админ-команда, админ-процесс освобожден.")
     if sent:
         lines.append("")
         lines.append("Отправлено пользователям:")
@@ -6628,6 +6663,7 @@ async def handle_scan_cancel(event: events.CallbackQuery.Event) -> None:
 @client.on(events.NewMessage)
 async def handle_private_message(event: events.NewMessage.Event) -> None:
     global active_scan_cancel_event, active_scan_owner_id, active_scan_menu_owner_id, active_scan_action_delay_seconds, active_scan_base_delay_seconds, active_scan_reset_requested
+    global active_mail2_cancel_event
 
     if not event.is_private:
         return
@@ -6932,10 +6968,12 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 await safe_event_reply(event, text)
 
         scan_interruption = await request_scan_pause_for_priority_command(event, "mail2")
+        active_mail2_cancel_event = asyncio.Event()
         try:
             result = await send_mail2_to_users_without_subscriptions(
                 message_text,
                 progress_callback=update_pending_mail2_status,
+                cancel_event=active_mail2_cancel_event,
             )
             await safe_event_reply(event, result)
         except Exception:
@@ -6951,6 +6989,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             )
             await safe_event_reply(event, "Не удалось выполнить /mail2. Подробности записаны в лог.")
         finally:
+            active_mail2_cancel_event = None
             schedule_scan_auto_resume(scan_interruption)
         return
 
@@ -7053,10 +7092,12 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             await edit_status_message(status_message, text)
 
         scan_interruption = await request_scan_pause_for_priority_command(event, "mail2")
+        active_mail2_cancel_event = asyncio.Event()
         try:
             result = await send_mail2_to_users_without_subscriptions(
                 mail2_text,
                 progress_callback=update_mail2_status,
+                cancel_event=active_mail2_cancel_event,
             )
             await safe_event_reply(event, result)
         except Exception:
@@ -7072,6 +7113,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             )
             await safe_event_reply(event, "Не удалось выполнить /mail2. Подробности записаны в лог.")
         finally:
+            active_mail2_cancel_event = None
             schedule_scan_auto_resume(scan_interruption)
         return
 
@@ -7103,6 +7145,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_promo_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
+        await request_mail2_stop_for_priority_command(event, f"promo {user_id}")
         scan_interruption = await request_scan_pause_for_priority_command(event, f"promo {user_id}")
         try:
             promo_result = await create_promo_code_in_admin_bot(
@@ -7173,6 +7216,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         async def update_mail_status(text: str) -> None:
             await edit_status_message(status_message, text)
 
+        await request_mail2_stop_for_priority_command(event, f"mail {user_id}")
         scan_interruption = await request_scan_pause_for_priority_command(event, f"mail {user_id}")
         try:
             result = await send_mail_to_user_in_admin_bot(
@@ -7277,6 +7321,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
                 return
 
+            await request_mail2_stop_for_priority_command(event, f"wizard {wizard_user_id}")
             scan_interruption = await request_scan_pause_for_priority_command(event, f"wizard {wizard_user_id}")
             result = await find_user_in_admin_bot(
                 wizard_user_id,
@@ -7443,6 +7488,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     return
                 result = format_subscription_info_from_record_html(record)
             else:
+                await request_mail2_stop_for_priority_command(event, f"info {user_id}")
                 scan_interruption = await request_scan_pause_for_priority_command(event, f"info {user_id}")
                 result = await get_user_subscriptions_info_in_admin_bot(
                     user_id,
@@ -7522,6 +7568,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     return
                 result = format_user_summary_from_record(record)
             else:
+                await request_mail2_stop_for_priority_command(event, f"help {user_id}")
                 scan_interruption = await request_scan_pause_for_priority_command(event, f"help {user_id}")
                 result = await find_user_in_admin_bot(
                     user_id,
