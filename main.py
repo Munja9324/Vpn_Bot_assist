@@ -1860,8 +1860,39 @@ def format_subscription_info_from_record_html(record: dict) -> str:
     return "\n".join(lines)
 
 
+def collect_message_text_variants(message) -> list[str]:
+    variants: list[str] = []
+    for attribute in ("raw_text", "message", "text"):
+        value = getattr(message, attribute, None)
+        if value:
+            variants.append(str(value))
+
+    action = getattr(message, "action", None)
+    if action is not None:
+        variants.append(type(action).__name__)
+        variants.append(repr(action))
+        for attribute in ("message", "title", "reason"):
+            value = getattr(action, attribute, None)
+            if value:
+                variants.append(str(value))
+
+    reply_to = getattr(message, "reply_to", None)
+    if reply_to is not None:
+        variants.append(repr(reply_to))
+    return variants
+
+
 def log_message(label: str, message) -> None:
-    logging.info("%s message_id=%s text=%r", label, getattr(message, "id", None), message.raw_text or "")
+    action = getattr(message, "action", None)
+    logging.info(
+        "%s message_id=%s text=%r action=%s",
+        label,
+        getattr(message, "id", None),
+        message.raw_text or "",
+        type(action).__name__ if action is not None else None,
+    )
+    if action is not None:
+        logging.info("%s action_repr=%r", label, action)
     if message.buttons:
         button_texts = []
         for row in message.buttons:
@@ -6189,16 +6220,42 @@ async def send_promo_value_and_read(bot, current_message, value: str, label: str
 
 
 def is_promo_created_message(message, promo_code: str) -> bool:
-    text = (message.raw_text or "").strip()
-    if not text:
-        return False
-
-    lowered = text.casefold()
     expected_text = settings.promo_success_text.strip().casefold()
     if not expected_text:
         logging.warning("PROMO_SUCCESS_TEXT is empty; promo success cannot be confirmed for %s", promo_code)
         return False
-    return expected_text in lowered
+
+    variants = collect_message_text_variants(message)
+    haystack = "\n".join(variants).casefold()
+    if expected_text in haystack:
+        return True
+
+    action = getattr(message, "action", None)
+    action_name = type(action).__name__.casefold() if action is not None else ""
+    text = (message.raw_text or "").strip()
+    promo_code_lowered = promo_code.casefold()
+    is_pin_notice = "pin" in action_name or "pin" in haystack or "закреп" in haystack
+    is_promo_context = any(
+        token in haystack
+        for token in (
+            promo_code_lowered,
+            "promo",
+            "промо",
+            "промокод",
+            "добав",
+            "создан",
+            "успеш",
+        )
+    )
+    if is_pin_notice and (is_promo_context or not text):
+        logging.info(
+            "Promo success detected from pinned/service message promo_code=%s action=%s text=%r",
+            promo_code,
+            type(action).__name__ if action is not None else None,
+            text,
+        )
+        return True
+    return False
 
 
 async def create_promo_code_in_admin_bot(
