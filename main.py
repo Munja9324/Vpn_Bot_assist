@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -19,6 +20,9 @@ from telethon import Button, TelegramClient, events
 
 
 load_dotenv()
+
+APP_STARTED_AT = datetime.now().astimezone().replace(microsecond=0)
+APP_ROOT = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True)
@@ -757,6 +761,66 @@ def configure_logging() -> None:
     logging.getLogger("telethon").setLevel(logging.WARNING)
 
 
+def run_git_metadata_command(args: list[str]) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(APP_ROOT), *args],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.strip()
+
+
+def collect_runtime_version_info() -> dict[str, str]:
+    full_commit = run_git_metadata_command(["rev-parse", "HEAD"])
+    short_commit = run_git_metadata_command(["rev-parse", "--short=12", "HEAD"])
+    branch = run_git_metadata_command(["branch", "--show-current"]) or "unknown"
+    commit_date = run_git_metadata_command(["log", "-1", "--format=%cd", "--date=iso-strict"])
+    tracked_changes = run_git_metadata_command(["status", "--porcelain", "--untracked-files=no"])
+    dirty_suffix = "+local" if tracked_changes else ""
+    version = f"{short_commit or 'nogit'}{dirty_suffix}"
+    return {
+        "app": settings.dashboard_brand_name or "VPN_KBR_BOT",
+        "version": version,
+        "branch": branch,
+        "commit": full_commit or "unknown",
+        "commit_short": short_commit or "unknown",
+        "commit_date": commit_date or "unknown",
+        "started_at": APP_STARTED_AT.isoformat(sep=" ", timespec="seconds"),
+        "project_dir": str(APP_ROOT),
+    }
+
+
+def build_runtime_version_text() -> str:
+    info = collect_runtime_version_info()
+    return "\n".join(
+        (
+            f"{info['app']} runtime version",
+            f"Version: {info['version']}",
+            f"Branch: {info['branch']}",
+            f"Commit: {info['commit']}",
+            f"Commit date: {info['commit_date']}",
+            f"Started at: {info['started_at']}",
+            f"Project: {info['project_dir']}",
+        )
+    )
+
+
+def log_runtime_version() -> None:
+    version_text = build_runtime_version_text()
+    logging.warning("STARTUP VERSION\n%s", version_text)
+    try:
+        (APP_ROOT / "runtime-version.txt").write_text(version_text + "\n", encoding="utf-8")
+    except Exception:
+        logging.exception("Failed to write runtime-version.txt")
+
+
 def pick_reply(text: str) -> str:
     lowered = text.lower()
     for keyword, reply in KEYWORD_REPLIES.items():
@@ -804,6 +868,10 @@ def is_command_menu_command(text: str) -> bool:
 
 def is_status_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:status|статус)\s*$", text, flags=re.IGNORECASE))
+
+
+def is_version_command(text: str) -> bool:
+    return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_stop_scan_command(text: str) -> bool:
@@ -956,6 +1024,7 @@ def build_command_menu_text() -> str:
             "scan results - результаты scan",
             "scan reset - сброс сохраненного scan",
             "/status - собрать dashboard из SQL базы и отправить в чат",
+            "/version - показать версию, commit и дату запуска",
         )
     )
 
@@ -963,7 +1032,7 @@ def build_command_menu_text() -> str:
 def build_command_menu_buttons():
     return [
         [Button.text("scan"), Button.text("scan results")],
-        [Button.text("/status"), Button.text("menu")],
+        [Button.text("/status"), Button.text("/version"), Button.text("menu")],
         [Button.text("scan new"), Button.text("scan continue")],
         [Button.text("stop скан"), Button.text("scan reset")],
         [Button.text("help 123456789"), Button.text("info 123456789")],
@@ -5199,6 +5268,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         await safe_event_reply(event, build_command_menu_text(), buttons=build_command_menu_buttons())
         return
 
+    if is_version_command(event.raw_text or ""):
+        await safe_event_reply(event, build_runtime_version_text())
+        return
+
     if is_status_command(event.raw_text or ""):
         await safe_event_reply(event, "[STATUS] Собираю dashboard из SQL базы...")
         await send_status_dashboard_from_database(event)
@@ -5310,6 +5383,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 (
                     "Доступные команды:",
                     "/help — показать список всех команд",
+                    "/version — показать версию, commit и дату запуска",
                     "help <user_id> — найти пользователя в админ-боте",
                     "wizard <user_id> — найти и отправить карточку в @wizardvpn_manager (с подтверждением)",
                     "info <user_id> — получить подробную информацию и подписки",
@@ -5639,6 +5713,7 @@ async def main() -> None:
     global own_user_id, admin_bot_entity_cache
 
     configure_logging()
+    log_runtime_version()
     loop.set_exception_handler(
         lambda event_loop, context: logging.error(
             "Unhandled async error: %s",

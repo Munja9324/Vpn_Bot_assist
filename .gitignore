@@ -12,3 +12,5 @@ reports/
 *.db
 *.bak
 deploy/update_from_github.log
+deploy/update_from_github.sh
+runtime-version.txt
