@@ -7,3 +7,8 @@ __pycache__/
 venv/
 reports/
 *.log
+*.sqlite3
+*.sqlite3-*
+*.db
+*.bak
+deploy/update_from_github.log

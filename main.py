@@ -1744,38 +1744,56 @@ def ensure_database_file() -> None:
 
 def seed_latest_records_from_scan_runs(conn: sqlite3.Connection) -> None:
     latest_count = int(conn.execute("SELECT COUNT(*) FROM latest_users").fetchone()[0])
-    if latest_count:
-        return
-    row = conn.execute(
-        "SELECT stats_json FROM scan_runs ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    if not row:
-        return
-    try:
-        stats = json.loads(str(row["stats_json"]))
-    except json.JSONDecodeError:
-        logging.exception("Failed to seed latest SQL records from scan_runs")
-        return
-    records = list((stats or {}).get("records") or [])
+    records: list[dict] = []
+    source_name = ""
+
+    def accept_records(candidate_records: list[dict], candidate_source: str) -> None:
+        nonlocal records, source_name
+        if len(candidate_records) > len(records):
+            records = candidate_records
+            source_name = candidate_source
+
+    rows = conn.execute(
+        "SELECT generated_at, stats_json FROM scan_runs ORDER BY id DESC LIMIT 10"
+    ).fetchall()
+    for row in rows:
+        try:
+            stats = json.loads(str(row["stats_json"]))
+        except json.JSONDecodeError:
+            logging.exception("Failed to read scan_runs stats for SQL seed")
+            continue
+        accept_records(
+            list((stats or {}).get("records") or []),
+            f"scan_runs:{row['generated_at']}",
+        )
+
+    report_dir = Path(settings.report_dir)
+    if report_dir.exists():
+        for json_path in report_dir.glob("scan-*.json"):
+            try:
+                file_stats = json.loads(json_path.read_text(encoding="utf-8"))
+            except Exception:
+                logging.exception("Failed to read scan JSON for SQL seed: %s", json_path)
+                continue
+            accept_records(list((file_stats or {}).get("records") or []), str(json_path))
+
     if not records:
-        report_dir = Path(settings.report_dir)
-        if report_dir.exists():
-            for json_path in sorted(report_dir.glob("scan-*.json"), key=lambda path: path.stat().st_mtime, reverse=True):
-                try:
-                    file_stats = json.loads(json_path.read_text(encoding="utf-8"))
-                except Exception:
-                    logging.exception("Failed to read scan JSON for SQL seed: %s", json_path)
-                    continue
-                records = list((file_stats or {}).get("records") or [])
-                if records:
-                    break
-    if not records:
         return
+    if latest_count >= len(records):
+        return
+
+    conn.execute("DELETE FROM latest_subscriptions")
+    conn.execute("DELETE FROM latest_users")
     observed_at = datetime.now().isoformat(timespec="seconds")
     for record in records:
         upsert_latest_record_with_conn(conn, record, observed_at=observed_at)
     conn.commit()
-    logging.info("Seeded latest SQL records from scan_runs: users=%s", len(records))
+    logging.info(
+        "Seeded latest SQL records from %s: users=%s previous_users=%s",
+        source_name or "unknown",
+        len(records),
+        latest_count,
+    )
 
 
 def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dict) -> int:
@@ -2407,7 +2425,7 @@ async def send_admin_and_get_menu(conv, bot):
         previous_snapshot = message_snapshot(await latest_bot_message(bot))
     except Exception:
         previous_snapshot = None
-    await send_conv_message_with_retry(conv, settings.admin_command)
+    await send_conv_message_with_retry(bot, settings.admin_command)
     try:
         admin_message = await wait_bot_update(bot, previous_snapshot)
     except ValueError as error:
@@ -2428,20 +2446,23 @@ async def send_admin_and_get_menu(conv, bot):
     return admin_message
 
 
-async def send_conv_message_with_retry(conv, payload):
+async def send_conv_message_with_retry(bot, payload):
     try:
-        await conv.send_message(payload)
+        await client.send_message(bot, payload)
         note_success_action()
     except ValueError as error:
         if "too many incoming messages" in str(error).casefold():
-            raise RuntimeError("Admin conversation overflow: too many incoming messages") from error
+            logging.warning("Ignored stale conversation overflow while sending admin payload directly")
+            await client.send_message(bot, payload)
+            note_success_action()
+            return
         raise
     except FloodWaitError as error:
         wait_seconds = int(getattr(error, "seconds", 1) or 1)
         note_floodwait(wait_seconds)
-        logging.warning("FloodWait on conv.send_message: waiting %ss before retry", wait_seconds)
+        logging.warning("FloodWait on client.send_message: waiting %ss before retry", wait_seconds)
         await asyncio.sleep(wait_seconds + 1)
-        await conv.send_message(payload)
+        await client.send_message(bot, payload)
         note_success_action()
 
 
@@ -2508,7 +2529,7 @@ async def open_user_in_admin_bot(
 
     logging.info("Sending searched user_id=%s", user_id)
     previous_snapshot = message_snapshot(find_message)
-    await send_conv_message_with_retry(conv, user_id)
+    await send_conv_message_with_retry(bot, user_id)
     result_message = await wait_bot_update(bot, previous_snapshot)
     log_message("Search result", result_message)
     return result_message
@@ -4322,7 +4343,7 @@ async def collect_user_record_via_search(
     await emit_collect_progress(f"Открываю поиск и запрашиваю ID {user_id}.")
     find_message = await click_and_read(bot, users_page_message, settings.find_user_button_text)
     previous_snapshot = message_snapshot(find_message)
-    await send_conv_message_with_retry(conv, user_id)
+    await send_conv_message_with_retry(bot, user_id)
     result_message = await wait_bot_update(bot, previous_snapshot)
     log_message(f"Search result for user_id={user_id}", result_message)
 
@@ -4931,7 +4952,7 @@ async def send_mail_to_user_in_admin_bot(
             )
             logging.info("Sending mail text to admin bot for user_id=%s text=%r", user_id, message_text)
             previous_snapshot = message_snapshot(write_message)
-            await send_conv_message_with_retry(conv, message_text)
+            await send_conv_message_with_retry(bot, message_text)
             preview_message = await wait_bot_update(bot, previous_snapshot)
             log_message("Mail sent response", preview_message)
 
