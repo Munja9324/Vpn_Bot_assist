@@ -122,6 +122,12 @@ FIND_USER_BUTTON_TEXT=Найти пользователя
 SUBSCRIPTIONS_BUTTON_TEXT=Подписки пользователя
 WRITE_USER_BUTTON_TEXT=Написать пользователю
 MAIL_NEXT_BUTTON_TEXT=Далее
+PROMO_BUTTON_TEXT=Промокоды
+PROMO_CREATE_BUTTON_TEXT=Создать промокод
+PROMO_SUBMIT_BUTTON_TEXT=Создать
+PROMO_BUDGET_RUB=100
+PROMO_AMOUNT_RUB=100
+PROMO_MAIL_TEXT=Для вас создан промокод {promo_code} на {promo_amount} руб.
 CANCEL_BUTTON_TEXT=Отменить
 BACK_BUTTON_TEXT=Назад
 NEXT_PAGE_BUTTON_TEXT=Далее
@@ -300,7 +306,28 @@ wizard 123456789
 
 Ничего не отправляется автоматически без подтверждения.
 
-## 12. Команда `mail`
+## 12. Команда `promo`
+
+Создать промокод для пользователя и сразу отправить ему сообщение через `mail`:
+
+```text
+promo 123456789
+```
+
+Что делает команда:
+
+1. открывает `/admin`;
+2. нажимает `Промокоды`;
+3. нажимает `Создать промокод`;
+4. вводит название `123456789_Promo`;
+5. вводит бюджет `100`;
+6. вводит размер суммы `100`;
+7. нажимает `Создать`;
+8. отправляет пользователю текст с промокодом через обычный mail-сценарий.
+
+Настройки находятся в `.env`: `PROMO_BUTTON_TEXT`, `PROMO_CREATE_BUTTON_TEXT`, `PROMO_SUBMIT_BUTTON_TEXT`, `PROMO_BUDGET_RUB`, `PROMO_AMOUNT_RUB`, `PROMO_MAIL_TEXT`.
+
+## 13. Команда `mail`
 
 Отправить пользователю текст через админ-бота:
 
@@ -314,7 +341,7 @@ mail 123456789 Текст сообщения
 mail 123456789
 ```
 
-## 13. Scan
+## 14. Scan
 
 Открыть меню scan:
 
@@ -691,6 +718,12 @@ FIND_USER_BUTTON_TEXT=Найти пользователя
 SUBSCRIPTIONS_BUTTON_TEXT=Подписки пользователя
 WRITE_USER_BUTTON_TEXT=Написать пользователю
 MAIL_NEXT_BUTTON_TEXT=Далее
+PROMO_BUTTON_TEXT=Промокоды
+PROMO_CREATE_BUTTON_TEXT=Создать промокод
+PROMO_SUBMIT_BUTTON_TEXT=Создать
+PROMO_BUDGET_RUB=100
+PROMO_AMOUNT_RUB=100
+PROMO_MAIL_TEXT=Для вас создан промокод {promo_code} на {promo_amount} руб.
 CANCEL_BUTTON_TEXT=Отменить
 BACK_BUTTON_TEXT=Назад
 NEXT_PAGE_BUTTON_TEXT=Далее

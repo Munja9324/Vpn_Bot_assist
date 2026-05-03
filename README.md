@@ -56,6 +56,7 @@ help @username -b
 info 123456789
 info @username -b
 wizard 123456789
+promo 123456789
 scan
 scan results
 /status

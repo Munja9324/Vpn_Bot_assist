@@ -50,6 +50,12 @@ class Settings:
     subscriptions_button_text: str
     write_user_button_text: str
     mail_next_button_text: str
+    promo_button_text: str
+    promo_create_button_text: str
+    promo_submit_button_text: str
+    promo_budget_rub: str
+    promo_amount_rub: str
+    promo_mail_text: str
     cancel_button_text: str
     back_button_text: str
     next_page_button_text: str
@@ -315,6 +321,15 @@ def load_settings() -> Settings:
         subscriptions_button_text=env_text("SUBSCRIPTIONS_BUTTON_TEXT", "\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0438 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f"),
         write_user_button_text=env_text("WRITE_USER_BUTTON_TEXT", "\u041d\u0430\u043f\u0438\u0441\u0430\u0442\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044e"),
         mail_next_button_text=env_text("MAIL_NEXT_BUTTON_TEXT", "\u0414\u0430\u043b\u0435\u0435"),
+        promo_button_text=env_text("PROMO_BUTTON_TEXT", "\u041f\u0440\u043e\u043c\u043e\u043a\u043e\u0434\u044b"),
+        promo_create_button_text=env_text("PROMO_CREATE_BUTTON_TEXT", "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043f\u0440\u043e\u043c\u043e\u043a\u043e\u0434"),
+        promo_submit_button_text=env_text("PROMO_SUBMIT_BUTTON_TEXT", "\u0421\u043e\u0437\u0434\u0430\u0442\u044c"),
+        promo_budget_rub=env_text("PROMO_BUDGET_RUB", "100"),
+        promo_amount_rub=env_text("PROMO_AMOUNT_RUB", "100"),
+        promo_mail_text=env_text(
+            "PROMO_MAIL_TEXT",
+            "\u0414\u043b\u044f \u0432\u0430\u0441 \u0441\u043e\u0437\u0434\u0430\u043d \u043f\u0440\u043e\u043c\u043e\u043a\u043e\u0434 {promo_code} \u043d\u0430 {promo_amount} \u0440\u0443\u0431.",
+        ),
         cancel_button_text=env_text("CANCEL_BUTTON_TEXT", "\u041e\u0442\u043c\u0435\u043d\u0438\u0442\u044c"),
         back_button_text=env_text("BACK_BUTTON_TEXT", "\u041d\u0430\u0437\u0430\u0434"),
         next_page_button_text=env_text("NEXT_PAGE_BUTTON_TEXT", "\u0414\u0430\u043b\u0435\u0435"),
@@ -561,6 +576,16 @@ MAIL_STEPS = [
     "Открываю форму сообщения",
     "Передаю текст письма",
     "Подтверждаю отправку",
+]
+PROMO_STEPS = [
+    "Подключаюсь к админ-боту",
+    "Открываю раздел промокодов",
+    "Открываю создание промокода",
+    "Ввожу название промокода",
+    "Ввожу бюджет",
+    "Ввожу сумму промокода",
+    "Подтверждаю создание",
+    "Отправляю промокод пользователю",
 ]
 WIZARD_STEPS = [
     "Подключаюсь к админ-боту",
@@ -1123,6 +1148,30 @@ def parse_mail_command(text: str) -> tuple[str, str] | None:
     return user_id, message_text
 
 
+def format_promo_mail_text(user_id: str, promo_code: str) -> str:
+    try:
+        return settings.promo_mail_text.format(
+            user_id=user_id,
+            promo_code=promo_code,
+            promo_budget=settings.promo_budget_rub,
+            promo_amount=settings.promo_amount_rub,
+        )
+    except Exception:
+        logging.exception("Failed to format PROMO_MAIL_TEXT; using fallback text")
+        return f"Для вас создан промокод {promo_code} на {settings.promo_amount_rub} руб."
+
+
+def parse_promo_command(text: str) -> tuple[str, str, str] | None:
+    match = re.match(r"^\s*/?promo\s+(\d{1,20})(?:\s+([\s\S]+))?\s*$", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    user_id = match.group(1)
+    promo_code = f"{user_id}_Promo"
+    message_text = (match.group(2) or "").strip() or format_promo_mail_text(user_id, promo_code)
+    return user_id, promo_code, message_text
+
+
 def parse_help_command(text: str) -> UserLookupCommand | None:
     return parse_user_lookup_command("help", text)
 
@@ -1295,6 +1344,7 @@ def build_command_menu_text() -> str:
             "info <user_id|username> - подробная информация и подписки",
             "info <user_id|username> -b - подробная информация из SQLite базы",
             "wizard <user_id> - подготовить карточку и отправить в wizard",
+            "promo <user_id> - создать промокод <user_id>_Promo и отправить пользователю",
             "mail <user_id> <текст> - отправить сообщение пользователю",
             "/roots - список запросников",
             "/roots add <user_id|@username|me> - добавить запросника",
@@ -1319,7 +1369,8 @@ def build_command_menu_buttons():
         [Button.text("stop скан"), Button.text("scan reset")],
         [Button.text("help 123456789"), Button.text("info 123456789")],
         [Button.text("help username -b"), Button.text("info username -b")],
-        [Button.text("wizard 123456789"), Button.text("mail 123456789")],
+        [Button.text("wizard 123456789"), Button.text("promo 123456789")],
+        [Button.text("mail 123456789")],
         [Button.text("/roots"), Button.text("/roots add me")],
     ]
 
@@ -3179,6 +3230,111 @@ def has_button_text(message, expected_text: str) -> bool:
             if expected in button.text.casefold():
                 return True
     return False
+
+
+def find_button_by_keywords(
+    message,
+    required_groups: tuple[tuple[str, ...], ...],
+    *,
+    optional_keywords: tuple[str, ...] = (),
+    exclude_keywords: tuple[str, ...] = (),
+) -> dict[str, int | str] | None:
+    weighted: list[tuple[int, dict[str, int | str]]] = []
+    for button in extract_all_buttons(message):
+        text = str(button["text"])
+        lowered = text.casefold()
+        if any(keyword and keyword.casefold() in lowered for keyword in exclude_keywords):
+            continue
+
+        matched_required = True
+        score = 0
+        for group in required_groups:
+            clean_group = tuple(keyword for keyword in group if keyword)
+            if not clean_group:
+                continue
+            if not any(keyword.casefold() in lowered for keyword in clean_group):
+                matched_required = False
+                break
+            score += 20
+
+        if not matched_required:
+            continue
+
+        for keyword in optional_keywords:
+            if keyword and keyword.casefold() in lowered:
+                score += 5
+        if is_navigation_button_text(text):
+            score -= 50
+        weighted.append((score, button))
+
+    if not weighted:
+        return None
+    weighted.sort(key=lambda item: (item[0], -int(item[1]["row"]), -int(item[1]["column"])), reverse=True)
+    return weighted[0][1]
+
+
+async def click_keyword_button_and_read(
+    bot,
+    message,
+    required_groups: tuple[tuple[str, ...], ...],
+    *,
+    label: str,
+    optional_keywords: tuple[str, ...] = (),
+    exclude_keywords: tuple[str, ...] = (),
+):
+    button = find_button_by_keywords(
+        message,
+        required_groups,
+        optional_keywords=optional_keywords,
+        exclude_keywords=exclude_keywords,
+    )
+    if not button:
+        available = [str(item["text"]) for item in extract_all_buttons(message)]
+        raise RuntimeError(f"Button for {label!r} not found. Available buttons: {available}")
+    return await click_button_position_and_read(
+        bot,
+        message,
+        int(button["row"]),
+        int(button["column"]),
+        str(button["text"]),
+    )
+
+
+async def ensure_message_with_keyword_button(
+    conv,
+    bot,
+    message,
+    required_groups: tuple[tuple[str, ...], ...],
+    *,
+    label: str,
+    optional_keywords: tuple[str, ...] = (),
+    exclude_keywords: tuple[str, ...] = (),
+):
+    if find_button_by_keywords(
+        message,
+        required_groups,
+        optional_keywords=optional_keywords,
+        exclude_keywords=exclude_keywords,
+    ):
+        return message
+
+    if has_button_text(message, settings.cancel_button_text):
+        logging.info("Button for %s not found; clicking cancel before reopening admin menu", label)
+        try:
+            message = await click_and_read(bot, message, settings.cancel_button_text)
+        except Exception:
+            logging.exception("Failed to click cancel while recovering admin menu for %s", label)
+
+    message = await send_admin_and_get_menu(conv, bot)
+    if find_button_by_keywords(
+        message,
+        required_groups,
+        optional_keywords=optional_keywords,
+        exclude_keywords=exclude_keywords,
+    ):
+        return message
+    available = [str(item["text"]) for item in extract_all_buttons(message)]
+    raise RuntimeError(f"Admin menu does not contain button for {label!r}. Available buttons: {available}")
 
 
 async def click_and_read(bot, message, button_text: str, expected_button_text: str | None = None):
@@ -5901,6 +6057,146 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
         active_scan_base_delay_seconds = settings.scan_action_delay_seconds
 
 
+async def send_promo_value_and_read(bot, current_message, value: str, label: str):
+    logging.info("Sending promo %s value=%r", label, value)
+    previous_snapshot = message_snapshot(current_message)
+    await send_conv_message_with_retry(bot, value)
+    next_message = await wait_bot_update(bot, previous_snapshot)
+    log_message(f"Promo after {label}", next_message)
+    return next_message
+
+
+async def create_promo_code_in_admin_bot(
+    user_id: str,
+    promo_code: str,
+    progress_callback: ProgressCallback | None = None,
+) -> str:
+    await emit_process_progress(
+        progress_callback,
+        "Promo",
+        PROMO_STEPS,
+        1,
+        user_id=user_id,
+        extra_lines=["Ожидаю свободный админ-процесс"],
+    )
+    async with admin_flow_lock:
+        await emit_process_progress(
+            progress_callback,
+            "Promo",
+            PROMO_STEPS,
+            1,
+            user_id=user_id,
+            extra_lines=[f"Админ-бот: @{settings.admin_bot_username}"],
+        )
+        bot = await get_admin_bot_entity()
+        logging.info("Starting promo creation user_id=%s promo_code=%s", user_id, promo_code)
+
+        async with admin_conversation(bot) as conv:
+            admin_message = await send_admin_and_get_menu(conv, bot)
+
+            await emit_process_progress(
+                progress_callback,
+                "Promo",
+                PROMO_STEPS,
+                2,
+                user_id=user_id,
+                extra_lines=[f"Ищу раздел: {settings.promo_button_text}"],
+            )
+            admin_message = await ensure_message_with_keyword_button(
+                conv,
+                bot,
+                admin_message,
+                ((settings.promo_button_text, "промокод", "promo", "coupon"),),
+                label="promo section",
+                optional_keywords=("скид", "код"),
+                exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+            )
+            promo_menu_message = await click_keyword_button_and_read(
+                bot,
+                admin_message,
+                ((settings.promo_button_text, "промокод", "promo", "coupon"),),
+                label="promo section",
+                optional_keywords=("скид", "код"),
+                exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+            )
+
+            await emit_process_progress(
+                progress_callback,
+                "Promo",
+                PROMO_STEPS,
+                3,
+                user_id=user_id,
+                extra_lines=[f"Ищу кнопку: {settings.promo_create_button_text}"],
+            )
+            create_form_message = await click_keyword_button_and_read(
+                bot,
+                promo_menu_message,
+                ((settings.promo_create_button_text, "созд", "добав", "new", "create"),),
+                label="create promo",
+                optional_keywords=("промокод", "promo", "coupon"),
+                exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+            )
+
+            await emit_process_progress(
+                progress_callback,
+                "Promo",
+                PROMO_STEPS,
+                4,
+                user_id=user_id,
+                extra_lines=[f"Название: {promo_code}"],
+            )
+            budget_message = await send_promo_value_and_read(bot, create_form_message, promo_code, "code")
+
+            await emit_process_progress(
+                progress_callback,
+                "Promo",
+                PROMO_STEPS,
+                5,
+                user_id=user_id,
+                extra_lines=[f"Бюджет: {settings.promo_budget_rub}"],
+            )
+            amount_message = await send_promo_value_and_read(bot, budget_message, settings.promo_budget_rub, "budget")
+
+            await emit_process_progress(
+                progress_callback,
+                "Promo",
+                PROMO_STEPS,
+                6,
+                user_id=user_id,
+                extra_lines=[f"Размер суммы: {settings.promo_amount_rub}"],
+            )
+            submit_message = await send_promo_value_and_read(bot, amount_message, settings.promo_amount_rub, "amount")
+
+            await emit_process_progress(
+                progress_callback,
+                "Promo",
+                PROMO_STEPS,
+                7,
+                user_id=user_id,
+                extra_lines=[f"Кнопка: {settings.promo_submit_button_text}"],
+            )
+            final_message = await click_keyword_button_and_read(
+                bot,
+                submit_message,
+                ((settings.promo_submit_button_text, "созд", "сохран", "готов", "create", "save"),),
+                label="submit promo",
+                optional_keywords=("промокод", "promo", "coupon"),
+                exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+            )
+            log_message("Promo final response", final_message)
+
+    result_text = "\n".join(
+        (
+            f"Promo создан: {promo_code}",
+            f"Пользователь: {user_id}",
+            f"Бюджет: {settings.promo_budget_rub}",
+            f"Сумма: {settings.promo_amount_rub}",
+        )
+    )
+    logging.info("Promo creation finished user_id=%s promo_code=%s", user_id, promo_code)
+    return result_text
+
+
 async def send_mail_to_user_in_admin_bot(
     user_id: str,
     message_text: str,
@@ -6460,6 +6756,86 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             await safe_event_reply(event, "Сохраненный прогресс scan и SQL база очищены. Старые готовые отчеты оставлены.")
         return
 
+    promo_command = parse_promo_command(event.raw_text or "")
+    if promo_command:
+        user_id, promo_code, promo_mail_text = promo_command
+        logging.info(
+            "Received promo command user_id=%s promo_code=%s from chat_id=%s sender_id=%s",
+            user_id,
+            promo_code,
+            event.chat_id,
+            event.sender_id,
+        )
+        status_message = await safe_event_reply(
+            event,
+            build_process_status(
+                "Promo",
+                PROMO_STEPS,
+                1,
+                user_id=user_id,
+                extra_lines=[
+                    f"Промокод: {promo_code}",
+                    f"Бюджет: {settings.promo_budget_rub}",
+                    f"Сумма: {settings.promo_amount_rub}",
+                ],
+            ),
+        )
+
+        async def update_promo_status(text: str) -> None:
+            await edit_status_message(status_message, text)
+
+        scan_interruption = await request_scan_pause_for_priority_command(event, f"promo {user_id}")
+        try:
+            promo_result = await create_promo_code_in_admin_bot(
+                user_id,
+                promo_code,
+                progress_callback=update_promo_status,
+            )
+            await update_promo_status(
+                build_process_status(
+                    "Promo",
+                    PROMO_STEPS,
+                    8,
+                    user_id=user_id,
+                    extra_lines=["Промокод создан", "Отправляю пользователю через mail"],
+                )
+            )
+            mail_result = await send_mail_to_user_in_admin_bot(
+                user_id,
+                promo_mail_text,
+                progress_callback=update_promo_status,
+            )
+            await update_promo_status(
+                build_process_status(
+                    "Promo",
+                    PROMO_STEPS,
+                    len(PROMO_STEPS),
+                    user_id=user_id,
+                    extra_lines=[
+                        f"Промокод: {promo_code}",
+                        "Промокод создан и отправлен пользователю",
+                    ],
+                    done=True,
+                )
+            )
+            await safe_event_reply(event, f"{promo_result}\n\n{mail_result}")
+        except Exception:
+            logging.exception("Promo flow failed for user_id=%s promo_code=%s", user_id, promo_code)
+            await update_promo_status(
+                build_process_status(
+                    "Promo",
+                    PROMO_STEPS,
+                    len(PROMO_STEPS),
+                    user_id=user_id,
+                    extra_lines=["Не удалось создать или отправить промокод", "Подробности записаны в лог"],
+                    failed=True,
+                )
+            )
+            await safe_event_reply(event, "Не удалось выполнить promo. Подробности записаны в лог.")
+        finally:
+            schedule_scan_auto_resume(scan_interruption)
+        return
+
     mail_command = parse_mail_command(event.raw_text or "")
     if mail_command:
         user_id, message_text = mail_command
@@ -6526,6 +6902,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     "wizard <user_id> — найти и отправить карточку в @wizardvpn_manager (с подтверждением)",
                     "info <user_id|username> — получить подробную информацию и подписки",
                     "info <user_id|username> -b — получить подробную информацию из SQLite базы",
+                    "promo <user_id> — создать промокод <user_id>_Promo и отправить пользователю через mail",
                     "mail <user_id> <текст> — отправить сообщение пользователю",
                     "mail <user_id> — отправить сообщение по умолчанию (MAIL_TEXT)",
                     "/roots — список запросников",
