@@ -52,6 +52,13 @@ class Settings:
     scan_action_delay_seconds: float
     scan_turbo_delay_seconds: float
     bot_response_timeout_seconds: float
+    telegram_proxy_enabled: bool
+    telegram_proxy_type: str
+    telegram_proxy_host: str
+    telegram_proxy_port: int
+    telegram_proxy_rdns: bool
+    telegram_proxy_username: str
+    telegram_proxy_password: str
     wizard_target_username: str
     dashboard_brand_name: str
     dashboard_title: str
@@ -173,6 +180,35 @@ def session_file_path(session_name: str) -> Path:
     return path
 
 
+def build_telegram_proxy():
+    if not settings.telegram_proxy_enabled:
+        return None
+    try:
+        import socks
+    except ImportError as error:
+        raise RuntimeError(
+            "TELEGRAM_PROXY_ENABLED=true, but PySocks is not installed. Run: pip install -r requirements.txt"
+        ) from error
+
+    proxy_types = {
+        "socks5": socks.SOCKS5,
+        "socks4": socks.SOCKS4,
+        "http": socks.HTTP,
+    }
+    proxy_type = proxy_types.get(settings.telegram_proxy_type)
+    if proxy_type is None:
+        raise RuntimeError("Unsupported TELEGRAM_PROXY_TYPE. Use socks5, socks4, or http.")
+
+    return (
+        proxy_type,
+        settings.telegram_proxy_host,
+        settings.telegram_proxy_port,
+        settings.telegram_proxy_rdns,
+        settings.telegram_proxy_username or None,
+        settings.telegram_proxy_password or None,
+    )
+
+
 def repair_telethon_session_if_needed(session_name: str) -> None:
     path = session_file_path(session_name)
     if not path.exists():
@@ -260,6 +296,13 @@ def load_settings() -> Settings:
             minimum=5.0,
             maximum=900.0,
         ),
+        telegram_proxy_enabled=env_bool("TELEGRAM_PROXY_ENABLED", False),
+        telegram_proxy_type=os.getenv("TELEGRAM_PROXY_TYPE", "socks5").strip().casefold(),
+        telegram_proxy_host=os.getenv("TELEGRAM_PROXY_HOST", "127.0.0.1").strip(),
+        telegram_proxy_port=max(1, min(65535, env_int("TELEGRAM_PROXY_PORT", 1080))),
+        telegram_proxy_rdns=env_bool("TELEGRAM_PROXY_RDNS", True),
+        telegram_proxy_username=os.getenv("TELEGRAM_PROXY_USERNAME", "").strip(),
+        telegram_proxy_password=os.getenv("TELEGRAM_PROXY_PASSWORD", "").strip(),
         wizard_target_username=os.getenv("WIZARD_TARGET_USERNAME", "wizardvpn_manager"),
         dashboard_brand_name=env_text("DASHBOARD_BRAND_NAME", "VPN_KBR_BOT"),
         dashboard_title=env_text("DASHBOARD_TITLE", "Понятный отчёт по подпискам"),
@@ -302,6 +345,7 @@ client = TelegramClient(
     settings.session_name,
     settings.api_id,
     settings.api_hash,
+    proxy=build_telegram_proxy(),
     loop=loop,
 )
 already_replied_chat_ids: set[int] = set()
