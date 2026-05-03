@@ -319,6 +319,8 @@ active_scan_menu_owner_id: int | None = None
 active_scan_reset_requested = False
 pending_wizard_requests: dict[int, dict[str, object]] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
+logging_is_configured = False
+runtime_version_logged = False
 STATUS_EDIT_MIN_INTERVAL_SECONDS = max(0.25, env_float("STATUS_EDIT_MIN_INTERVAL_SECONDS", 0.7))
 status_edit_state: dict[int, tuple[float, str]] = {}
 ADMIN_CONVERSATION_MAX_MESSAGES = max(5000, env_int("ADMIN_CONVERSATION_MAX_MESSAGES", 120000))
@@ -725,6 +727,10 @@ def build_scan_status(
 
 
 def configure_logging() -> None:
+    global logging_is_configured
+    if logging_is_configured:
+        return
+
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
 
@@ -759,6 +765,7 @@ def configure_logging() -> None:
         force=True,
     )
     logging.getLogger("telethon").setLevel(logging.WARNING)
+    logging_is_configured = True
 
 
 def run_git_metadata_command(args: list[str]) -> str:
@@ -813,12 +820,17 @@ def build_runtime_version_text() -> str:
 
 
 def log_runtime_version() -> None:
+    global runtime_version_logged
+    if runtime_version_logged:
+        return
+
     version_text = build_runtime_version_text()
     logging.warning("STARTUP VERSION\n%s", version_text)
     try:
         (APP_ROOT / "runtime-version.txt").write_text(version_text + "\n", encoding="utf-8")
     except Exception:
         logging.exception("Failed to write runtime-version.txt")
+    runtime_version_logged = True
 
 
 def pick_reply(text: str) -> str:
@@ -5741,5 +5753,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    configure_logging()
+    log_runtime_version()
     with client:
         loop.run_until_complete(main())
