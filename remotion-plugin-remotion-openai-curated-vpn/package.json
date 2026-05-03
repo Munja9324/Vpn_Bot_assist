@@ -1,0 +1,22 @@
+{
+  "name": "vpn-kbr-loader",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "remotion studio",
+    "preview": "remotion preview",
+    "render": "remotion render VpnKbrLoader out/vpn-kbr-loader.mp4",
+    "still": "remotion still VpnKbrLoader out/vpn-kbr-loader.png --frame=75 --scale=0.5"
+  },
+  "dependencies": {
+    "@remotion/cli": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "remotion": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
+  }
+}

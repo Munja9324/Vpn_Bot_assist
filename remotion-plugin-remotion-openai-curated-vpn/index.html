@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>vpn_kbr minimal loader</title>
+    <style>
+      :root {
+        --bg: #f4f1ea;
+        --ink: #151515;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      }
+
+      .stage {
+        position: relative;
+        width: min(100vw, 100vh);
+        height: min(100vw, 100vh);
+        min-width: 320px;
+        min-height: 320px;
+        display: grid;
+        place-items: center;
+      }
+
+      .frame {
+        position: absolute;
+        inset: 42px;
+        border: 1px solid var(--ink);
+        opacity: 0.16;
+      }
+
+      .mark {
+        position: relative;
+        width: min(430px, 58vw);
+        height: min(430px, 58vw);
+        display: grid;
+        place-items: center;
+        animation: intro 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+
+      .arc {
+        position: absolute;
+        border-radius: 50%;
+        border-style: solid;
+        border-color: var(--ink);
+        animation: rotate 2.4s linear infinite, arcFade 2.4s ease-in-out infinite;
+      }
+
+      .arc.one {
+        width: 91%;
+        height: 91%;
+        border-width: 3px;
+        opacity: 0.92;
+        clip-path: polygon(50% 50%, 100% 0, 100% 84%, 0 100%, 0 0);
+      }
+
+      .arc.two {
+        width: 71%;
+        height: 71%;
+        border-width: 2px;
+        opacity: 0.4;
+        clip-path: polygon(50% 50%, 100% 0, 100% 54%, 0 100%, 0 0);
+        animation-delay: -0.6s;
+        animation-direction: reverse;
+      }
+
+      .tile {
+        width: min(132px, 22vw);
+        height: min(132px, 22vw);
+        min-width: 88px;
+        min-height: 88px;
+        border: 2px solid var(--ink);
+        border-radius: 24px;
+        display: grid;
+        place-items: center;
+      }
+
+      .lock {
+        position: relative;
+        width: 46px;
+        height: 58px;
+        border: 3px solid var(--ink);
+        border-radius: 8px 8px 6px 6px;
+      }
+
+      .lock::before {
+        content: "";
+        position: absolute;
+        left: 7px;
+        top: -26px;
+        width: 26px;
+        height: 28px;
+        border: 3px solid var(--ink);
+        border-bottom: 0;
+        border-radius: 18px 18px 0 0;
+      }
+
+      .lock::after {
+        content: "";
+        position: absolute;
+        left: 18px;
+        top: 22px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--ink);
+        animation: blink 1s linear infinite;
+      }
+
+      .caption {
+        position: absolute;
+        left: 50%;
+        bottom: 14%;
+        width: min(520px, 72vw);
+        transform: translateX(-50%);
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 24px;
+        font-size: clamp(20px, 3vw, 28px);
+        font-weight: 600;
+      }
+
+      .bar {
+        height: 2px;
+        margin-top: 24px;
+        background: rgb(21 21 21 / 14%);
+        overflow: hidden;
+      }
+
+      .fill {
+        height: 100%;
+        width: 0;
+        background: var(--ink);
+        animation: load 5s linear infinite;
+      }
+
+      .hint {
+        margin-top: 18px;
+        font-size: clamp(12px, 1.6vw, 16px);
+        text-transform: uppercase;
+        opacity: 0.54;
+      }
+
+      @keyframes intro {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes rotate {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes arcFade {
+        0%,
+        100% {
+          opacity: 0.32;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 0.32;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes load {
+        to {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="stage">
+      <div class="frame"></div>
+      <section class="mark" aria-label="vpn_kbr loading">
+        <div class="arc one"></div>
+        <div class="arc two"></div>
+        <div class="tile">
+          <div class="lock"></div>
+        </div>
+      </section>
+      <section class="caption">
+        <div class="row">
+          <span id="name">vpn_kbr_</span>
+          <span id="percent">000%</span>
+        </div>
+        <div class="bar"><div class="fill"></div></div>
+        <div class="hint">establishing secure route</div>
+      </section>
+    </main>
+    <script>
+      const percent = document.getElementById("percent");
+      const name = document.getElementById("name");
+      const startedAt = performance.now();
+
+      const tick = () => {
+        const elapsed = ((performance.now() - startedAt) / 1000) % 5;
+        percent.textContent = `${Math.round((elapsed / 5) * 100).toString().padStart(3, "0")}%`;
+        name.textContent = Math.floor(elapsed * 2) % 2 === 0 ? "vpn_kbr_" : "vpn_kbr ";
+        requestAnimationFrame(tick);
+      };
+
+      tick();
+    </script>
+  </body>
+</html>

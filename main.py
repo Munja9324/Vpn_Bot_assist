@@ -103,6 +103,9 @@ class Settings:
     dashboard_public_token: str
     dashboard_public_dir: str
     dashboard_public_retention: int
+    dashboard_intro_enabled: bool
+    dashboard_intro_seconds: float
+    dashboard_intro_template_path: str
 
 
 @dataclass(frozen=True)
@@ -411,6 +414,17 @@ def load_settings() -> Settings:
         dashboard_public_token=os.getenv("DASHBOARD_PUBLIC_TOKEN", "").strip().strip("/"),
         dashboard_public_dir=os.getenv("DASHBOARD_PUBLIC_DIR", "reports/public").strip() or "reports/public",
         dashboard_public_retention=max(1, env_int("DASHBOARD_PUBLIC_RETENTION", 30)),
+        dashboard_intro_enabled=env_bool("DASHBOARD_INTRO_ENABLED", True),
+        dashboard_intro_seconds=normalized_positive_float(
+            "DASHBOARD_INTRO_SECONDS",
+            5.0,
+            minimum=0.5,
+            maximum=30.0,
+        ),
+        dashboard_intro_template_path=os.getenv(
+            "DASHBOARD_INTRO_TEMPLATE_PATH",
+            "remotion-plugin-remotion-openai-curated-vpn/index.html",
+        ).strip(),
     )
 
 
@@ -2158,6 +2172,120 @@ def build_dashboard_public_url(file_name: str) -> str:
     return f"{base_url}/{'/'.join(part for part in parts if part)}"
 
 
+def dashboard_intro_template_path() -> Path:
+    raw_path = settings.dashboard_intro_template_path.strip()
+    path = Path(raw_path) if raw_path else Path("remotion-plugin-remotion-openai-curated-vpn/index.html")
+    if not path.is_absolute():
+        path = APP_ROOT / path
+    return path
+
+
+def dashboard_loader_file_name(dashboard_file_name: str) -> str:
+    stem = Path(dashboard_file_name).stem
+    return f"{stem}-loader.html"
+
+
+def fallback_dashboard_loader_html() -> str:
+    return """<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VPN_KBR_BOT loader</title>
+    <style>
+      :root { --bg: #f4f1ea; --ink: #151515; }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body {
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "IBM Plex Mono", Consolas, monospace;
+      }
+      .stage { width: min(100vw, 100vh); height: min(100vw, 100vh); display: grid; place-items: center; position: relative; }
+      .frame { position: absolute; inset: 42px; border: 1px solid var(--ink); opacity: .16; }
+      .ring { width: min(390px, 72vw); height: min(390px, 72vw); border: 3px solid var(--ink); border-radius: 50%; animation: spin 2.4s linear infinite; clip-path: polygon(50% 50%, 100% 0, 100% 84%, 0 100%, 0 0); }
+      .caption { position: absolute; bottom: 14%; width: min(520px, 72vw); }
+      .row { display: flex; justify-content: space-between; font-size: clamp(20px, 3vw, 28px); font-weight: 600; }
+      .bar { height: 2px; margin-top: 24px; background: rgb(21 21 21 / 14%); overflow: hidden; }
+      .fill { height: 100%; width: 0; background: var(--ink); animation: load 5s linear forwards; }
+      .hint { margin-top: 18px; font-size: clamp(12px, 1.6vw, 16px); text-transform: uppercase; opacity: .54; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes load { to { width: 100%; } }
+    </style>
+  </head>
+  <body>
+    <main class="stage">
+      <div class="frame"></div>
+      <div class="ring"></div>
+      <section class="caption">
+        <div class="row"><span>vpn_kbr_</span><span id="percent">000%</span></div>
+        <div class="bar"><div class="fill"></div></div>
+        <div class="hint">opening dashboard</div>
+      </section>
+    </main>
+    <script>
+      const percent = document.getElementById("percent");
+      const startedAt = performance.now();
+      const tick = () => {
+        const elapsed = Math.min(5, (performance.now() - startedAt) / 1000);
+        percent.textContent = `${Math.round((elapsed / 5) * 100).toString().padStart(3, "0")}%`;
+        requestAnimationFrame(tick);
+      };
+      tick();
+    </script>
+  </body>
+</html>"""
+
+
+def build_dashboard_loader_html(target_url: str) -> str:
+    template_path = dashboard_intro_template_path()
+    try:
+        template = template_path.read_text(encoding="utf-8")
+    except OSError:
+        logging.exception("Dashboard intro template is not available: %s", template_path)
+        template = fallback_dashboard_loader_html()
+
+    target_json = json.dumps(target_url, ensure_ascii=False)
+    delay_ms = int(settings.dashboard_intro_seconds * 1000)
+    redirect_script = f"""
+    <script>
+      (() => {{
+        const dashboardTarget = {target_json};
+        const delayMs = {delay_ms};
+        const openDashboard = () => {{
+          if (dashboardTarget) {{
+            window.location.replace(dashboardTarget);
+          }}
+        }};
+        document.body.style.cursor = "pointer";
+        document.body.addEventListener("click", openDashboard, {{once: true}});
+        window.setTimeout(openDashboard, delayMs);
+      }})();
+    </script>
+"""
+    note_html = """
+    <div style="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);font:600 12px 'IBM Plex Mono',Consolas,monospace;letter-spacing:0;text-transform:uppercase;opacity:.48;color:#151515;white-space:nowrap;">
+      dashboard откроется автоматически
+    </div>
+"""
+    if "</body>" in template:
+        return template.replace("</body>", f"{note_html}{redirect_script}</body>", 1)
+    return f"{template}{note_html}{redirect_script}"
+
+
+def publish_dashboard_loader_file(dashboard_file_name: str) -> str:
+    target_url = build_dashboard_public_url(dashboard_file_name)
+    if not target_url or not settings.dashboard_intro_enabled:
+        return target_url
+
+    loader_name = dashboard_loader_file_name(dashboard_file_name)
+    loader_path = dashboard_public_dir() / loader_name
+    atomic_write_text(loader_path, build_dashboard_loader_html(target_url))
+    return build_dashboard_public_url(loader_name)
+
+
 def prune_dashboard_public_files() -> None:
     public_dir = dashboard_public_dir()
     files = [
@@ -2188,14 +2316,15 @@ def publish_dashboard_file(source_path: Path, latest_name: str | None = None) ->
             latest_name = f"{latest_name}.html"
         latest_path = public_dir / latest_name
         shutil.copy2(source_path, latest_path)
+        publish_dashboard_loader_file(latest_name)
 
     prune_dashboard_public_files()
-    return public_path, build_dashboard_public_url(public_name)
+    return public_path, publish_dashboard_loader_file(public_name)
 
 
 def public_dashboard_url_from_report_path(report_path: Path) -> str:
     public_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", Path(report_path).name)
-    return build_dashboard_public_url(public_name)
+    return publish_dashboard_loader_file(public_name)
 
 
 def ensure_dashboard_public_url(report_path: Path, latest_name: str | None = None) -> str:
@@ -2207,7 +2336,8 @@ def ensure_dashboard_public_url(report_path: Path, latest_name: str | None = Non
         latest_path = dashboard_public_dir() / re.sub(r"[^A-Za-z0-9_.-]+", "-", latest_name)
         if not latest_path.exists():
             shutil.copy2(report_path, latest_path)
-    return build_dashboard_public_url(public_name)
+        publish_dashboard_loader_file(latest_path.name)
+    return publish_dashboard_loader_file(public_name)
 
 
 class DashboardRequestHandler(BaseHTTPRequestHandler):
