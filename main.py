@@ -38,6 +38,9 @@ class Settings:
     reply_once_per_chat: bool
     default_reply: str
     root_requester_ids: tuple[str, ...]
+    cleanup_on_start_enabled: bool
+    cleanup_logs_on_start: bool
+    cleanup_temp_on_start: bool
     admin_bot_username: str
     admin_command: str
     users_button_text: str
@@ -298,6 +301,9 @@ def load_settings() -> Settings:
             "\u041f\u0440\u0438\u0432\u0435\u0442! \u042f \u0441\u0435\u0439\u0447\u0430\u0441 \u0437\u0430\u043d\u044f\u0442, \u043e\u0442\u0432\u0435\u0447\u0443 \u043f\u043e\u0437\u0436\u0435.",
         ),
         root_requester_ids=env_list("ROOT_REQUESTER_IDS"),
+        cleanup_on_start_enabled=env_bool("CLEANUP_ON_START_ENABLED", True),
+        cleanup_logs_on_start=env_bool("CLEANUP_LOGS_ON_START", True),
+        cleanup_temp_on_start=env_bool("CLEANUP_TEMP_ON_START", True),
         admin_bot_username=os.getenv("ADMIN_BOT_USERNAME", "vpn_kbr_bot"),
         admin_command=os.getenv("ADMIN_COMMAND", "/admin"),
         users_button_text=env_text("USERS_BUTTON_TEXT", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438"),
@@ -411,6 +417,7 @@ pending_wizard_requests: dict[int, dict[str, object]] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
 logging_is_configured = False
 runtime_version_logged = False
+startup_cleanup_done = False
 dashboard_http_server: ThreadingHTTPServer | None = None
 dashboard_http_thread: threading.Thread | None = None
 STATUS_EDIT_MIN_INTERVAL_SECONDS = max(0.25, env_float("STATUS_EDIT_MIN_INTERVAL_SECONDS", 0.7))
@@ -725,6 +732,89 @@ async def safe_event_reply(event, *args, **kwargs):
     except Exception:
         logging.exception("Failed to send reply")
         return None
+
+
+def remove_file_quietly(path: Path) -> bool:
+    try:
+        if path.exists() and path.is_file():
+            path.unlink()
+            return True
+    except OSError:
+        return False
+    return False
+
+
+def remove_dir_quietly(path: Path) -> bool:
+    try:
+        if path.exists() and path.is_dir():
+            shutil.rmtree(path)
+            return True
+    except OSError:
+        return False
+    return False
+
+
+def startup_cleanup() -> dict[str, int]:
+    global startup_cleanup_done
+    if startup_cleanup_done or not settings.cleanup_on_start_enabled:
+        return {"files": 0, "dirs": 0}
+    startup_cleanup_done = True
+
+    removed_files = 0
+    removed_dirs = 0
+    root = APP_ROOT.resolve()
+
+    def inside_app(path: Path) -> bool:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return False
+        return resolved == root or root in resolved.parents
+
+    if settings.cleanup_logs_on_start:
+        log_path = Path(settings.log_file)
+        if not log_path.is_absolute():
+            log_path = root / log_path
+        crash_log_path = log_path.with_name(f"{log_path.stem}-crash{log_path.suffix or '.log'}")
+        log_candidates = {
+            log_path,
+            crash_log_path,
+            root / "userbot.log",
+            root / "userbot-crash.log",
+        }
+        for base_path in list(log_candidates):
+            log_candidates.update(base_path.parent.glob(f"{base_path.name}*"))
+        for path in sorted(log_candidates):
+            if inside_app(path) and remove_file_quietly(path):
+                removed_files += 1
+
+    if settings.cleanup_temp_on_start:
+        for path in (
+            root / "__pycache__",
+            root / ".pytest_cache",
+            root / ".mypy_cache",
+            root / ".ruff_cache",
+        ):
+            if inside_app(path) and remove_dir_quietly(path):
+                removed_dirs += 1
+
+        for pattern in (
+            "*.pyc",
+            "*.pyo",
+            "*.tmp",
+            "*.temp",
+            "*.part",
+            "*.swp",
+            "*.swo",
+            "runtime-version.txt",
+        ):
+            for path in root.glob(pattern):
+                if inside_app(path) and remove_file_quietly(path):
+                    removed_files += 1
+
+    if removed_files or removed_dirs:
+        print(f"Startup cleanup: removed files={removed_files}, dirs={removed_dirs}")
+    return {"files": removed_files, "dirs": removed_dirs}
 
 
 async def reply_with_text_file(event, text: str, **kwargs):
@@ -6805,6 +6895,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    startup_cleanup()
     configure_logging()
     log_runtime_version()
     with client:

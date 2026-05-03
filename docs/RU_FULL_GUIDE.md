@@ -710,6 +710,51 @@ scan results
 
 ## 24. Логи и диагностика
 
+### Автоочистка перед запуском
+
+При каждом запуске и перезапуске `vol29app` проект может очищать временные файлы и локальные логи. Это включено по умолчанию:
+
+```env
+CLEANUP_ON_START_ENABLED=true
+CLEANUP_LOGS_ON_START=true
+CLEANUP_TEMP_ON_START=true
+```
+
+Что удаляется:
+
+- `userbot.log`;
+- `userbot-crash.log`;
+- ротации этих логов;
+- `runtime-version.txt`;
+- `__pycache__`;
+- `.pytest_cache`;
+- `.mypy_cache`;
+- `.ruff_cache`;
+- временные файлы в корне проекта: `*.tmp`, `*.temp`, `*.part`, `*.pyc`, `*.pyo`, `*.swp`, `*.swo`.
+
+Что не удаляется:
+
+- `.env`;
+- `*.session`;
+- `scan-data.sqlite3`;
+- `reports/`;
+- dashboard HTML;
+- серверные backups.
+
+Если нужно временно выключить очистку:
+
+```env
+CLEANUP_ON_START_ENABLED=false
+```
+
+Если нужно чистить временные файлы, но оставлять логи:
+
+```env
+CLEANUP_ON_START_ENABLED=true
+CLEANUP_LOGS_ON_START=false
+CLEANUP_TEMP_ON_START=true
+```
+
 Локально:
 
 ```powershell
