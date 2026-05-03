@@ -1,5 +1,7 @@
 import asyncio
 import html
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -8,11 +10,13 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import threading
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
+from urllib.parse import quote, unquote, urlsplit
 
 from dotenv import load_dotenv
 from telethon.errors import FloodWaitError, MediaCaptionTooLongError, MessageNotModifiedError, MessageTooLongError
@@ -77,6 +81,14 @@ class Settings:
     dashboard_theme_warn: str
     dashboard_theme_bad: str
     dashboard_theme_border: str
+    dashboard_http_enabled: bool
+    dashboard_http_host: str
+    dashboard_http_port: int
+    dashboard_public_base_url: str
+    dashboard_public_path_prefix: str
+    dashboard_public_token: str
+    dashboard_public_dir: str
+    dashboard_public_retention: int
 
 
 @dataclass(frozen=True)
@@ -343,6 +355,14 @@ def load_settings() -> Settings:
         dashboard_theme_warn=env_text("DASHBOARD_THEME_WARN", "#f59e0b"),
         dashboard_theme_bad=env_text("DASHBOARD_THEME_BAD", "#f87171"),
         dashboard_theme_border=env_text("DASHBOARD_THEME_BORDER", "#2a3564"),
+        dashboard_http_enabled=env_bool("DASHBOARD_HTTP_ENABLED", False),
+        dashboard_http_host=os.getenv("DASHBOARD_HTTP_HOST", "0.0.0.0").strip() or "0.0.0.0",
+        dashboard_http_port=max(1, min(65535, env_int("DASHBOARD_HTTP_PORT", 8088))),
+        dashboard_public_base_url=os.getenv("DASHBOARD_PUBLIC_BASE_URL", "").strip(),
+        dashboard_public_path_prefix=os.getenv("DASHBOARD_PUBLIC_PATH_PREFIX", "dashboard").strip().strip("/") or "dashboard",
+        dashboard_public_token=os.getenv("DASHBOARD_PUBLIC_TOKEN", "").strip().strip("/"),
+        dashboard_public_dir=os.getenv("DASHBOARD_PUBLIC_DIR", "reports/public").strip() or "reports/public",
+        dashboard_public_retention=max(1, env_int("DASHBOARD_PUBLIC_RETENTION", 30)),
     )
 
 
@@ -377,6 +397,8 @@ pending_wizard_requests: dict[int, dict[str, object]] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
 logging_is_configured = False
 runtime_version_logged = False
+dashboard_http_server: ThreadingHTTPServer | None = None
+dashboard_http_thread: threading.Thread | None = None
 STATUS_EDIT_MIN_INTERVAL_SECONDS = max(0.25, env_float("STATUS_EDIT_MIN_INTERVAL_SECONDS", 0.7))
 status_edit_state: dict[int, tuple[float, str]] = {}
 ADMIN_CONVERSATION_MAX_MESSAGES = max(5000, env_int("ADMIN_CONVERSATION_MAX_MESSAGES", 120000))
@@ -1878,6 +1900,164 @@ def database_path() -> Path:
     return path
 
 
+def dashboard_public_dir() -> Path:
+    path = Path(settings.dashboard_public_dir)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def build_dashboard_public_url(file_name: str) -> str:
+    base_url = settings.dashboard_public_base_url.strip().rstrip("/")
+    if not base_url:
+        return ""
+
+    parts = [settings.dashboard_public_path_prefix.strip("/")]
+    if settings.dashboard_public_token:
+        parts.append(settings.dashboard_public_token.strip("/"))
+    parts.append(quote(file_name, safe=""))
+    return f"{base_url}/{'/'.join(part for part in parts if part)}"
+
+
+def prune_dashboard_public_files() -> None:
+    public_dir = dashboard_public_dir()
+    files = [
+        path
+        for path in public_dir.glob("*.html")
+        if path.is_file() and not path.name.startswith("latest-")
+    ]
+    files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    for old_path in files[settings.dashboard_public_retention:]:
+        try:
+            old_path.unlink()
+        except OSError:
+            logging.exception("Failed to prune old public dashboard: %s", old_path)
+
+
+def publish_dashboard_file(source_path: Path, latest_name: str | None = None) -> tuple[Path, str]:
+    source_path = Path(source_path)
+    public_dir = dashboard_public_dir()
+    public_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", source_path.name)
+    if not public_name.endswith(".html"):
+        public_name = f"{public_name}.html"
+    public_path = public_dir / public_name
+    shutil.copy2(source_path, public_path)
+
+    if latest_name:
+        latest_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", latest_name)
+        if not latest_name.endswith(".html"):
+            latest_name = f"{latest_name}.html"
+        latest_path = public_dir / latest_name
+        shutil.copy2(source_path, latest_path)
+
+    prune_dashboard_public_files()
+    return public_path, build_dashboard_public_url(public_name)
+
+
+def public_dashboard_url_from_report_path(report_path: Path) -> str:
+    public_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", Path(report_path).name)
+    return build_dashboard_public_url(public_name)
+
+
+def ensure_dashboard_public_url(report_path: Path, latest_name: str | None = None) -> str:
+    public_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", Path(report_path).name)
+    public_path = dashboard_public_dir() / public_name
+    if not public_path.exists() and Path(report_path).exists():
+        publish_dashboard_file(Path(report_path), latest_name=latest_name)
+    elif latest_name and Path(report_path).exists():
+        latest_path = dashboard_public_dir() / re.sub(r"[^A-Za-z0-9_.-]+", "-", latest_name)
+        if not latest_path.exists():
+            shutil.copy2(report_path, latest_path)
+    return build_dashboard_public_url(public_name)
+
+
+class DashboardRequestHandler(BaseHTTPRequestHandler):
+    server_version = "VPNKBRDashboard/1.0"
+
+    def log_message(self, format: str, *args) -> None:
+        logging.info("Dashboard HTTP: " + format, *args)
+
+    def do_GET(self) -> None:
+        self.serve_dashboard(send_body=True)
+
+    def do_HEAD(self) -> None:
+        self.serve_dashboard(send_body=False)
+
+    def serve_dashboard(self, *, send_body: bool) -> None:
+        path = unquote(urlsplit(self.path).path)
+        parts = [part for part in path.split("/") if part]
+        prefix = settings.dashboard_public_path_prefix.strip("/")
+        if not parts or parts[0] != prefix:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+
+        parts = parts[1:]
+        if settings.dashboard_public_token:
+            if not parts or parts[0] != settings.dashboard_public_token:
+                self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+                return
+            parts = parts[1:]
+
+        if len(parts) != 1:
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+
+        file_name = parts[0]
+        if "/" in file_name or "\\" in file_name or not file_name.endswith(".html"):
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+
+        public_dir = dashboard_public_dir().resolve()
+        file_path = (public_dir / file_name).resolve()
+        if public_dir not in file_path.parents or not file_path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+
+        content = file_path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if send_body:
+            self.wfile.write(content)
+
+
+def start_dashboard_http_server() -> None:
+    global dashboard_http_server, dashboard_http_thread
+    if not settings.dashboard_http_enabled:
+        logging.info("Dashboard HTTP server disabled")
+        return
+    if dashboard_http_server is not None:
+        return
+
+    dashboard_public_dir()
+    try:
+        server = ThreadingHTTPServer(
+            (settings.dashboard_http_host, settings.dashboard_http_port),
+            DashboardRequestHandler,
+        )
+    except OSError:
+        logging.exception(
+            "Failed to start Dashboard HTTP server on %s:%s",
+            settings.dashboard_http_host,
+            settings.dashboard_http_port,
+        )
+        return
+    thread = threading.Thread(target=server.serve_forever, name="dashboard-http", daemon=True)
+    thread.start()
+    dashboard_http_server = server
+    dashboard_http_thread = thread
+    logging.info(
+        "Dashboard HTTP server started on %s:%s public_url=%s/%s",
+        settings.dashboard_http_host,
+        settings.dashboard_http_port,
+        settings.dashboard_public_base_url.rstrip("/"),
+        settings.dashboard_public_path_prefix.strip("/"),
+    )
+
+
 def connect_database() -> sqlite3.Connection:
     conn = sqlite3.connect(database_path())
     conn.row_factory = sqlite3.Row
@@ -2646,17 +2826,21 @@ def build_status_dashboard_from_database() -> tuple[Path, dict] | None:
     analysis = analyze_business_status(stats)
     stats["business_analysis"] = analysis
     atomic_write_text(dashboard_path, build_business_status_dashboard_html(stats, analysis))
+    public_path, public_url = publish_dashboard_file(dashboard_path, latest_name="latest-status-dashboard.html")
+    stats["dashboard_public_path"] = str(public_path)
+    stats["dashboard_public_url"] = public_url
     return dashboard_path, stats
 
 
 def build_status_summary_from_stats(stats: dict, dashboard_path: Path) -> str:
     analysis = dict(stats.get("business_analysis") or analyze_business_status(stats))
     projections = list(analysis.get("projections") or [])
+    dashboard_url = str(stats.get("dashboard_public_url") or ensure_dashboard_public_url(dashboard_path, "latest-status-dashboard.html"))
     lines = [
         "Business status из SQL базы",
         f"Админ-бот: {format_admin_bot_health()}",
         f"SQLite: {database_path()}",
-        f"Dashboard: {dashboard_path}",
+        f"Dashboard: {dashboard_url or dashboard_path}",
         "",
         f"Сформирован scan: {str(stats.get('generated_at') or '-').replace('T', ' ')}",
         f"Пользователей: {int(analysis.get('total_users') or 0)}",
@@ -4103,6 +4287,12 @@ def save_scan_report(summary_text: str, detailed_text: str, stats: dict) -> tupl
     atomic_write_text(txt_path, summary_text)
     atomic_write_text(detailed_txt_path, detailed_text)
     atomic_write_text(dashboard_path, dashboard_html)
+    public_path, public_url = publish_dashboard_file(dashboard_path, latest_name="latest-scan-dashboard.html")
+    stats["dashboard_public_path"] = str(public_path)
+    stats["dashboard_public_url"] = public_url
+    dashboard_stats["dashboard_public_path"] = str(public_path)
+    dashboard_stats["dashboard_public_url"] = public_url
+    atomic_write_text(json_path, json.dumps(stats, ensure_ascii=False, indent=2))
     return txt_path, json_path, detailed_txt_path, dashboard_path
 
 
@@ -4366,7 +4556,8 @@ def build_scan_results_text() -> str:
         if json_path:
             lines.append(f"JSON: {json_path}")
         if dashboard_path:
-            lines.append(f"DASHBOARD: {dashboard_path}")
+            dashboard_url = ensure_dashboard_public_url(dashboard_path, "latest-scan-dashboard.html")
+            lines.append(f"DASHBOARD: {dashboard_url or dashboard_path}")
         if json_path:
             try:
                 stats_data = json.loads(json_path.read_text(encoding="utf-8"))
@@ -4426,11 +4617,10 @@ async def send_latest_dashboard_to_chat(event) -> bool:
     _, _, _, dashboard_path = latest_scan_report_paths()
     if not dashboard_path:
         return False
-    sent = await safe_event_reply(
-        event,
-        "Dashboard scan (HTML). Открой файл в Telegram.",
-        file=str(dashboard_path),
-    )
+    dashboard_url = ensure_dashboard_public_url(dashboard_path, "latest-scan-dashboard.html")
+    if not dashboard_url:
+        _, dashboard_url = publish_dashboard_file(dashboard_path, latest_name="latest-scan-dashboard.html")
+    sent = await safe_event_reply(event, f"Dashboard scan:\n{dashboard_url or dashboard_path}")
     return sent is not None
 
 
@@ -4439,11 +4629,10 @@ async def send_latest_dashboard_to_chat_id(chat_id: int) -> bool:
     if not dashboard_path:
         return False
     try:
-        await client.send_file(
-            chat_id,
-            file=str(dashboard_path),
-            caption="Dashboard scan (HTML). Открой файл в Telegram.",
-        )
+        dashboard_url = ensure_dashboard_public_url(dashboard_path, "latest-scan-dashboard.html")
+        if not dashboard_url:
+            _, dashboard_url = publish_dashboard_file(dashboard_path, latest_name="latest-scan-dashboard.html")
+        await client.send_message(chat_id, f"Dashboard scan:\n{dashboard_url or dashboard_path}")
         note_success_action()
         return True
     except FloodWaitError as error:
@@ -4466,11 +4655,7 @@ async def send_status_dashboard_from_database(event) -> bool:
         return False
     dashboard_path, stats = built
     summary_text = build_status_summary_from_stats(stats, dashboard_path)
-    sent = await safe_event_reply(
-        event,
-        summary_text,
-        file=str(dashboard_path),
-    )
+    sent = await safe_event_reply(event, summary_text)
     return sent is not None
 
 
@@ -5242,6 +5427,7 @@ async def scan_all_users_in_admin_bot(
             checked_ids_total,
             total_users,
         )
+        dashboard_url = ensure_dashboard_public_url(dashboard_path, "latest-scan-dashboard.html")
         if paused:
             await emit_progress(
                 (
@@ -5265,7 +5451,7 @@ async def scan_all_users_in_admin_bot(
                 f"TXT: {txt_path}",
                 f"DETAILS: {detailed_txt_path}",
                 f"JSON: {json_path}",
-                f"DASHBOARD: {dashboard_path}",
+                f"DASHBOARD: {dashboard_url or dashboard_path}",
                 f"SQLITE: {database_path()}",
             )
         )
@@ -6238,6 +6424,7 @@ async def main() -> None:
 
     ensure_database_file()
     logging.info("SQLite database file: %s", database_path())
+    start_dashboard_http_server()
 
     me = await client.get_me()
     own_user_id = me.id
