@@ -486,6 +486,9 @@ BOT_POLL_INTERVAL_SECONDS = max(0.05, env_float("BOT_POLL_INTERVAL_SECONDS", 0.2
 POST_ACTION_SETTLE_SECONDS = max(0.0, env_float("POST_ACTION_SETTLE_SECONDS", 0.0))
 PROMO_CONFIRM_HISTORY_LIMIT = max(100, env_int("PROMO_CONFIRM_HISTORY_LIMIT", 1000))
 PROMO_AFTER_SUBMIT_SETTLE_SECONDS = max(0.3, env_float("PROMO_AFTER_SUBMIT_SETTLE_SECONDS", 2.0))
+PENDING_REQUEST_TTL_SECONDS = max(300, env_int("PENDING_REQUEST_TTL_SECONDS", 1800))
+LOG_TAIL_DEFAULT_LINES = max(10, env_int("LOG_TAIL_DEFAULT_LINES", 80))
+LOG_TAIL_MAX_LINES = max(LOG_TAIL_DEFAULT_LINES, env_int("LOG_TAIL_MAX_LINES", 250))
 FORECAST_PRICE_PER_SUBSCRIPTION_RUB = env_float("FORECAST_PRICE_PER_SUBSCRIPTION_RUB", 100.0)
 FORECAST_RENEWAL_RATE_7_DAYS = env_float("FORECAST_RENEWAL_RATE_7_DAYS", 0.70)
 FORECAST_RENEWAL_RATE_30_DAYS = env_float("FORECAST_RENEWAL_RATE_30_DAYS", 0.70)
@@ -1026,6 +1029,13 @@ def configure_logging() -> None:
     logging_is_configured = True
 
 
+def application_log_path() -> Path:
+    path = Path(settings.log_file)
+    if not path.is_absolute():
+        path = APP_ROOT / path
+    return path
+
+
 def run_git_metadata_command(args: list[str]) -> str:
     try:
         completed = subprocess.run(
@@ -1079,6 +1089,10 @@ def build_runtime_version_text() -> str:
     )
 
 
+def now_timestamp() -> float:
+    return datetime.now().timestamp()
+
+
 def format_bytes(size: int | float | None) -> str:
     value = float(size or 0)
     for unit in ("B", "KB", "MB", "GB"):
@@ -1088,7 +1102,88 @@ def format_bytes(size: int | float | None) -> str:
     return f"{value:.1f} GB"
 
 
+def pending_request_age_seconds(data: dict[str, object]) -> float | None:
+    created_at = data.get("created_at")
+    try:
+        return max(0.0, now_timestamp() - float(created_at))
+    except (TypeError, ValueError):
+        return None
+
+
+def format_duration(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "-"
+    seconds = max(0, int(seconds))
+    minutes, rest = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}ч {minutes}м"
+    if minutes:
+        return f"{minutes}м {rest}с"
+    return f"{rest}с"
+
+
+def prune_expired_pending_requests() -> dict[str, int]:
+    removed = {"wizard": 0, "mail2": 0}
+    for sender_id, data in list(pending_wizard_requests.items()):
+        age = pending_request_age_seconds(data)
+        if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
+            pending_wizard_requests.pop(sender_id, None)
+            removed["wizard"] += 1
+    for sender_id, data in list(pending_mail2_requests.items()):
+        age = pending_request_age_seconds(data)
+        if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
+            pending_mail2_requests.pop(sender_id, None)
+            removed["mail2"] += 1
+    if removed["wizard"] or removed["mail2"]:
+        logging.info(
+            "Pruned expired pending requests wizard=%s mail2=%s ttl=%ss",
+            removed["wizard"],
+            removed["mail2"],
+            PENDING_REQUEST_TTL_SECONDS,
+        )
+    return removed
+
+
+def read_text_tail(path: Path, lines: int) -> str:
+    lines = max(1, min(LOG_TAIL_MAX_LINES, int(lines)))
+    if not path.exists() or not path.is_file():
+        return f"Лог-файл не найден: {path}"
+
+    chunk_size = 8192
+    max_bytes = 512_000
+    data = b""
+    with path.open("rb") as file:
+        file.seek(0, os.SEEK_END)
+        position = file.tell()
+        while position > 0 and data.count(b"\n") <= lines and len(data) < max_bytes:
+            read_size = min(chunk_size, position)
+            position -= read_size
+            file.seek(position)
+            data = file.read(read_size) + data
+
+    text = data.decode("utf-8", errors="replace")
+    return "\n".join(text.splitlines()[-lines:]) or "[лог пуст]"
+
+
+def parse_logs_command(text: str) -> int | None:
+    match = re.match(r"^\s*/?(?:logs|log|логи|лог)(?:\s+(\d{1,3}))?\s*$", text or "", flags=re.IGNORECASE)
+    if not match:
+        return None
+    if not match.group(1):
+        return LOG_TAIL_DEFAULT_LINES
+    return max(1, min(LOG_TAIL_MAX_LINES, int(match.group(1))))
+
+
+def build_recent_logs_text(lines: int) -> str:
+    log_path = application_log_path()
+    content = read_text_tail(log_path, lines)
+    header = f"Последние {lines} строк лога: {log_path}"
+    return f"{header}\n\n{content}"
+
+
 def build_diagnostics_text() -> str:
+    prune_expired_pending_requests()
     version = collect_runtime_version_info()
     db_path = database_path()
     checkpoint = load_scan_checkpoint()
@@ -1168,11 +1263,13 @@ def describe_pending_processes(pending: dict[int, dict[str, object]], *, limit: 
             break
         stage = str(data.get("stage") or "ожидание")
         user_id = str(data.get("user_id") or "-")
-        lines.append(f"{sender_id}: {stage}, user {user_id}")
+        age = pending_request_age_seconds(data)
+        lines.append(f"{sender_id}: {stage}, user {user_id}, age {format_duration(age)}")
     return lines
 
 
 def build_poc_text() -> str:
+    prune_expired_pending_requests()
     scan_running = bool(active_scan_cancel_event and not active_scan_cancel_event.is_set())
     mail2_running = bool(active_mail2_cancel_event and not active_mail2_cancel_event.is_set())
     auto_resume_running = bool(active_scan_auto_resume_task and not active_scan_auto_resume_task.done())
@@ -1193,6 +1290,7 @@ def build_poc_text() -> str:
         f"Mail2 pending: {len(pending_mail2_requests)}",
         *[f"  - {line}" for line in describe_pending_processes(pending_mail2_requests)],
         "",
+        f"Pending TTL: {format_duration(PENDING_REQUEST_TTL_SECONDS)}",
         "Кнопки ниже выполняют мягкое управление: scan ставится на паузу, mail2 просит остановку, pending очищаются.",
     ]
     return "\n".join(lines)
@@ -1552,6 +1650,7 @@ def build_command_menu_text() -> str:
             "/version - показать версию, commit и дату запуска",
             "/diag - диагностика бота, базы, scan и dashboard",
             "/poc - процессы бота: посмотреть, поставить на паузу, остановить ожидания",
+            "/logs [строк] - последние строки userbot.log",
         )
     )
 
@@ -1560,7 +1659,7 @@ def build_command_menu_buttons():
     return [
         [Button.text("scan"), Button.text("scan results")],
         [Button.text("/status"), Button.text("/version"), Button.text("/diag")],
-        [Button.text("/poc")],
+        [Button.text("/poc"), Button.text("/logs")],
         [Button.text("menu")],
         [Button.text("scan new"), Button.text("scan continue")],
         [Button.text("stop скан"), Button.text("scan reset")],
@@ -7150,6 +7249,7 @@ async def ask_wizard_confirmation(
         "base_text": base_text,
         "final_text": base_text,
         "status_message": status_message,
+        "created_at": now_timestamp(),
     }
     await update_status(
         build_process_status(
@@ -7323,6 +7423,8 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     admin_bot = await get_admin_bot_entity()
     if event.chat_id == getattr(admin_bot, "id", None):
         return
+
+    prune_expired_pending_requests()
 
     sender = await event.get_sender()
     if not event.out and getattr(sender, "bot", False):
@@ -7658,6 +7760,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         await safe_event_reply(event, build_poc_text(), buttons=build_poc_buttons())
         return
 
+    logs_lines = parse_logs_command(event.raw_text or "")
+    if logs_lines is not None:
+        await safe_event_reply(event, build_recent_logs_text(logs_lines))
+        return
+
     if is_status_command(event.raw_text or ""):
         await safe_event_reply(event, "[STATUS] Собираю dashboard из SQL базы...")
         await send_status_dashboard_from_database(event)
@@ -7727,7 +7834,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     ],
                 ),
             )
-            pending_mail2_requests[sender_id] = {"status_message": status_message}
+            pending_mail2_requests[sender_id] = {
+                "status_message": status_message,
+                "created_at": now_timestamp(),
+            }
             await safe_event_reply(
                 event,
                 "Пришли текст, который нужно отправить всем пользователям без подписки из базы.\n\nОтмена: `0 отмена`",
