@@ -1073,6 +1073,85 @@ def build_runtime_version_text() -> str:
     )
 
 
+def format_bytes(size: int | float | None) -> str:
+    value = float(size or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+def build_diagnostics_text() -> str:
+    version = collect_runtime_version_info()
+    db_path = database_path()
+    checkpoint = load_scan_checkpoint()
+    try:
+        latest_stats = load_latest_scan_stats_from_database()
+    except Exception:
+        logging.exception("Diagnostics failed to load latest scan stats")
+        latest_stats = None
+    try:
+        requesters_total = requester_count()
+    except Exception:
+        logging.exception("Diagnostics failed to count requesters")
+        requesters_total = -1
+    public_dir = dashboard_public_dir()
+    scan_running = bool(active_scan_cancel_event and not active_scan_cancel_event.is_set())
+    mail2_running = bool(active_mail2_cancel_event and not active_mail2_cancel_event.is_set())
+
+    db_status = "нет"
+    if db_path.exists():
+        db_status = f"есть, {format_bytes(db_path.stat().st_size)}"
+
+    checkpoint_text = "нет"
+    if checkpoint:
+        next_user_id = int(checkpoint.get("next_user_id") or checkpoint.get("page_number") or 1)
+        total_users_hint = int(checkpoint.get("total_users_hint") or 0)
+        range_text = f"{next_user_id}" if total_users_hint <= 0 else f"{next_user_id}/{total_users_hint}"
+        checkpoint_text = (
+            f"{checkpoint.get('status', 'saved')}, ID {range_text}, "
+            f"records {len(checkpoint.get('records') or [])}, saved {checkpoint.get('saved_at', '-')}"
+        )
+
+    stats_text = "нет"
+    if latest_stats:
+        stats_text = (
+            f"generated {str(latest_stats.get('generated_at') or '-').replace('T', ' ')}, "
+            f"users {int(latest_stats.get('total_users') or 0)}, "
+            f"paid {int(latest_stats.get('paid_users') or 0)}, "
+            f"subs {int(latest_stats.get('total_subscriptions') or 0)}"
+        )
+
+    return "\n".join(
+        (
+            "Диагностика Vpn_Bot_assist",
+            "",
+            f"Version: {version['version']}",
+            f"Commit: {version['commit_short']}",
+            f"Started: {version['started_at']}",
+            f"Admin bot: {format_admin_bot_health()}",
+            "",
+            f"SQLite: {db_status}",
+            f"SQLite path: {db_path}",
+            f"Requesters: {requesters_total if requesters_total >= 0 else 'ошибка'}",
+            "",
+            f"Scan active: {'да' if scan_running else 'нет'}",
+            f"Scan owner: {active_scan_owner_id or '-'}",
+            f"Scan checkpoint: {checkpoint_text}",
+            f"Scan delay: {active_scan_action_delay_seconds:.2f}s",
+            "",
+            f"Mail2 active: {'да' if mail2_running else 'нет'}",
+            f"Wizard pending: {len(pending_wizard_requests)}",
+            f"Mail2 pending: {len(pending_mail2_requests)}",
+            "",
+            f"Latest stats: {stats_text}",
+            f"Dashboard public: {settings.dashboard_public_base_url.rstrip('/')}/{settings.dashboard_public_path_prefix.strip('/')}",
+            f"Dashboard dir: {public_dir} ({len(list(public_dir.glob('*.html')))} html)",
+        )
+    )
+
+
 def log_runtime_version() -> None:
     global runtime_version_logged
     if runtime_version_logged:
@@ -1233,6 +1312,10 @@ def is_status_command(text: str) -> bool:
 
 def is_version_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
+
+
+def is_diagnostics_command(text: str) -> bool:
+    return bool(re.match(r"^\s*/?(?:diag|diagnostics|doctor|health|диагностика)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_roots_command(text: str) -> bool:
@@ -1401,6 +1484,7 @@ def build_command_menu_text() -> str:
             "scan reset - сброс сохраненного scan",
             "/status - собрать dashboard из SQL базы и отправить в чат",
             "/version - показать версию, commit и дату запуска",
+            "/diag - диагностика бота, базы, scan и dashboard",
         )
     )
 
@@ -1408,7 +1492,8 @@ def build_command_menu_text() -> str:
 def build_command_menu_buttons():
     return [
         [Button.text("scan"), Button.text("scan results")],
-        [Button.text("/status"), Button.text("/version"), Button.text("menu")],
+        [Button.text("/status"), Button.text("/version"), Button.text("/diag")],
+        [Button.text("menu")],
         [Button.text("scan new"), Button.text("scan continue")],
         [Button.text("stop скан"), Button.text("scan reset")],
         [Button.text("help 123456789"), Button.text("info 123456789")],
@@ -7442,6 +7527,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     if is_version_command(event.raw_text or ""):
         await safe_event_reply(event, build_runtime_version_text())
+        return
+
+    if is_diagnostics_command(event.raw_text or ""):
+        await safe_event_reply(event, build_diagnostics_text())
         return
 
     if is_status_command(event.raw_text or ""):

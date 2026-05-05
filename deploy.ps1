@@ -12,18 +12,30 @@ $KeyPath = Join-Path $env:USERPROFILE ".ssh\codex_kvm_ed25519"
 
 Set-Location -LiteralPath $Repo
 
+function Test-SensitivePath {
+    param([string]$Path)
+
+    $normalized = ($Path -replace '\\', '/')
+    if ($normalized -eq ".env.example") {
+        return $false
+    }
+
+    return (
+        $normalized -match '(^|/)\.env($|[._-].*)' -or
+        $normalized -match '\.session(-journal)?$' -or
+        $normalized -match '\.(sqlite3|sqlite3-.*|db|log|bak)$' -or
+        $normalized -match '(^|/)reports/' -or
+        $normalized -match '(^|/)(id_rsa|id_ed25519|.+\.pem|.+\.key)$'
+    )
+}
+
 git add --all
 
 @(git diff --cached --name-status) | ForEach-Object {
     $parts = $_ -split "`t", 2
     $status = $parts[0]
     $path = $parts[-1]
-    $isSensitive =
-        $path -match '(^|/)\.env$' -or
-        $path -match '\.session(-journal)?$' -or
-        $path -match '\.(sqlite3|sqlite3-.*|db|log|bak)$' -or
-        $path -match '(^|/)reports/'
-    if ($isSensitive -and $status -ne "D") {
+    if ((Test-SensitivePath $path) -and $status -ne "D") {
         git reset -q HEAD -- $path 2>$null
     }
 }
@@ -35,12 +47,7 @@ $blocked = @(
         $parts = $_ -split "`t", 2
         $status = $parts[0]
         $path = $parts[-1]
-        $isSensitive =
-            $path -match '(^|/)\.env$' -or
-            $path -match '\.session(-journal)?$' -or
-            $path -match '\.(sqlite3|db|log)$' -or
-            $path -match '(^|/)reports/'
-        $isSensitive -and $status -ne "D"
+        (Test-SensitivePath $path) -and $status -ne "D"
     }
 )
 
