@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import threading
 from collections import Counter
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -443,6 +444,7 @@ client = TelegramClient(
 )
 already_replied_chat_ids: set[int] = set()
 admin_flow_lock = asyncio.Lock()
+active_admin_flow: dict[str, object] | None = None
 scan_auto_resume_lock = asyncio.Lock()
 own_user_id: int | None = None
 admin_bot_entity_cache = None
@@ -489,6 +491,8 @@ PROMO_AFTER_SUBMIT_SETTLE_SECONDS = max(0.3, env_float("PROMO_AFTER_SUBMIT_SETTL
 PENDING_REQUEST_TTL_SECONDS = max(300, env_int("PENDING_REQUEST_TTL_SECONDS", 1800))
 LOG_TAIL_DEFAULT_LINES = max(10, env_int("LOG_TAIL_DEFAULT_LINES", 80))
 LOG_TAIL_MAX_LINES = max(LOG_TAIL_DEFAULT_LINES, env_int("LOG_TAIL_MAX_LINES", 250))
+ADMIN_FLOW_WAIT_NOTICE_SECONDS = max(1.0, env_float("ADMIN_FLOW_WAIT_NOTICE_SECONDS", 2.0))
+ADMIN_FLOW_MAX_WAIT_SECONDS = max(30.0, env_float("ADMIN_FLOW_MAX_WAIT_SECONDS", 180.0))
 FORECAST_PRICE_PER_SUBSCRIPTION_RUB = env_float("FORECAST_PRICE_PER_SUBSCRIPTION_RUB", 100.0)
 FORECAST_RENEWAL_RATE_7_DAYS = env_float("FORECAST_RENEWAL_RATE_7_DAYS", 0.70)
 FORECAST_RENEWAL_RATE_30_DAYS = env_float("FORECAST_RENEWAL_RATE_30_DAYS", 0.70)
@@ -726,6 +730,71 @@ async def emit_process_progress(
             failed=failed,
         )
     )
+
+
+def active_admin_flow_text() -> str:
+    if not active_admin_flow:
+        return "свободен"
+    name = str(active_admin_flow.get("name") or "admin")
+    user_id = str(active_admin_flow.get("user_id") or "").strip()
+    started_at = active_admin_flow.get("started_at")
+    try:
+        age = format_duration(now_timestamp() - float(started_at))
+    except (TypeError, ValueError):
+        age = "-"
+    suffix = f", user {user_id}" if user_id else ""
+    return f"{name}{suffix}, {age}"
+
+
+@asynccontextmanager
+async def admin_flow_context(
+    name: str,
+    *,
+    user_id: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+    progress_title: str | None = None,
+    progress_steps: list[str] | None = None,
+    progress_step: int = 1,
+):
+    global active_admin_flow
+    wait_started = loop.time()
+    last_notice_at = 0.0
+    while admin_flow_lock.locked():
+        now = loop.time()
+        waited = now - wait_started
+        if waited >= ADMIN_FLOW_MAX_WAIT_SECONDS:
+            raise RuntimeError(
+                f"Admin process is still busy after {ADMIN_FLOW_MAX_WAIT_SECONDS:.0f}s: {active_admin_flow_text()}"
+            )
+        if now - last_notice_at >= ADMIN_FLOW_WAIT_NOTICE_SECONDS:
+            await emit_process_progress(
+                progress_callback,
+                progress_title or name,
+                progress_steps or [name],
+                progress_step,
+                user_id=user_id,
+                extra_lines=[
+                    "Админ-процесс занят, освобождаю очередь.",
+                    f"Сейчас выполняется: {active_admin_flow_text()}",
+                    f"Жду: {format_duration(waited)} / максимум {format_duration(ADMIN_FLOW_MAX_WAIT_SECONDS)}",
+                ],
+            )
+            last_notice_at = now
+        await asyncio.sleep(0.25)
+
+    await admin_flow_lock.acquire()
+    active_admin_flow = {
+        "name": name,
+        "user_id": user_id or "",
+        "started_at": now_timestamp(),
+    }
+    logging.info("Admin flow acquired name=%s user_id=%s", name, user_id or "")
+    try:
+        yield
+    finally:
+        logging.info("Admin flow released name=%s user_id=%s", name, user_id or "")
+        active_admin_flow = None
+        admin_flow_lock.release()
 
 
 def is_final_status_text(text: str) -> bool:
@@ -1232,6 +1301,7 @@ def build_diagnostics_text() -> str:
             f"Commit: {version['commit_short']}",
             f"Started: {version['started_at']}",
             f"Admin bot: {format_admin_bot_health()}",
+            f"Admin flow: {active_admin_flow_text()}",
             "",
             f"SQLite: {db_status}",
             f"SQLite path: {db_path}",
@@ -1276,7 +1346,7 @@ def build_poc_text() -> str:
     lines = [
         "POC: процессы бота",
         "",
-        f"Admin flow: {'занят' if admin_flow_lock.locked() else 'свободен'}",
+        f"Admin flow: {active_admin_flow_text()}",
         f"Admin bot: {format_admin_bot_health()}",
         "",
         f"Scan: {'активен' if scan_running else 'не запущен'}",
@@ -4175,7 +4245,14 @@ async def find_user_in_admin_bot(
         user_id=user_id,
         extra_lines=["Ожидаю свободный админ-процесс"],
     )
-    async with admin_flow_lock:
+    async with admin_flow_context(
+        progress_title,
+        user_id=user_id,
+        progress_callback=progress_callback,
+        progress_title=progress_title,
+        progress_steps=steps,
+        progress_step=1,
+    ):
         await emit_process_progress(
             progress_callback,
             progress_title,
@@ -5752,7 +5829,14 @@ async def get_user_subscriptions_info_in_admin_bot(
         user_id=user_id,
         extra_lines=["Ожидаю свободный админ-процесс"],
     )
-    async with admin_flow_lock:
+    async with admin_flow_context(
+        "Info пользователя",
+        user_id=user_id,
+        progress_callback=progress_callback,
+        progress_title="Info пользователя",
+        progress_steps=INFO_STEPS,
+        progress_step=1,
+    ):
         await emit_process_progress(
             progress_callback,
             "Info пользователя",
@@ -6192,7 +6276,13 @@ async def scan_all_users_in_admin_bot(
 
     if progress_callback:
         await progress_callback("Ожидаю свободный админ-процесс для scan.")
-    async with admin_flow_lock:
+    async with admin_flow_context(
+        "Scan пользователей",
+        progress_callback=progress_callback,
+        progress_title="Scan пользователей",
+        progress_steps=["Ожидаю", "Сканирую"],
+        progress_step=1,
+    ):
         if cancel_event and cancel_event.is_set():
             if active_scan_reset_requested:
                 clear_scan_checkpoint()
@@ -6901,7 +6991,14 @@ async def create_promo_code_in_admin_bot(
         user_id=user_id,
         extra_lines=["Ожидаю свободный админ-процесс"],
     )
-    async with admin_flow_lock:
+    async with admin_flow_context(
+        "Promo",
+        user_id=user_id,
+        progress_callback=progress_callback,
+        progress_title="Promo",
+        progress_steps=PROMO_STEPS,
+        progress_step=1,
+    ):
         await emit_process_progress(
             progress_callback,
             "Promo",
@@ -7145,7 +7242,14 @@ async def send_mail_to_user_in_admin_bot(
         user_id=user_id,
         extra_lines=["Ожидаю свободный админ-процесс"],
     )
-    async with admin_flow_lock:
+    async with admin_flow_context(
+        "Mail пользователю",
+        user_id=user_id,
+        progress_callback=progress_callback,
+        progress_title="Mail пользователю",
+        progress_steps=MAIL_STEPS,
+        progress_step=1,
+    ):
         await emit_process_progress(
             progress_callback,
             "Mail пользователю",
@@ -8131,6 +8235,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             event.chat_id,
             event.sender_id,
         )
+        await request_mail2_stop_for_priority_command(event, f"scan {scan_action}")
         if active_scan_cancel_event and not active_scan_cancel_event.is_set():
             await safe_event_reply(event, "Scan уже выполняется. Можно поставить на паузу: `scan pause`.")
             return
