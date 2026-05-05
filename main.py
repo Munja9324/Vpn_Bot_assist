@@ -451,6 +451,12 @@ SCAN_ACTION_DELAY_SECONDS = settings.scan_action_delay_seconds
 active_scan_action_delay_seconds = SCAN_ACTION_DELAY_SECONDS
 active_scan_base_delay_seconds = SCAN_ACTION_DELAY_SECONDS
 SCAN_CANCEL_CALLBACK_DATA = b"scan_cancel"
+POC_REFRESH_CALLBACK_DATA = b"poc:refresh"
+POC_SCAN_PAUSE_CALLBACK_DATA = b"poc:scan_pause"
+POC_MAIL2_STOP_CALLBACK_DATA = b"poc:mail2_stop"
+POC_CLEAR_WIZARD_CALLBACK_DATA = b"poc:clear_wizard"
+POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA = b"poc:clear_mail2_pending"
+POC_CLEAR_ALL_PENDING_CALLBACK_DATA = b"poc:clear_all_pending"
 active_scan_cancel_event: asyncio.Event | None = None
 active_scan_owner_id: int | None = None
 active_scan_menu_owner_id: int | None = None
@@ -1152,6 +1158,62 @@ def build_diagnostics_text() -> str:
     )
 
 
+def describe_pending_processes(pending: dict[int, dict[str, object]], *, limit: int = 5) -> list[str]:
+    if not pending:
+        return ["нет"]
+    lines: list[str] = []
+    for index, (sender_id, data) in enumerate(pending.items(), start=1):
+        if index > limit:
+            lines.append(f"... еще {len(pending) - limit}")
+            break
+        stage = str(data.get("stage") or "ожидание")
+        user_id = str(data.get("user_id") or "-")
+        lines.append(f"{sender_id}: {stage}, user {user_id}")
+    return lines
+
+
+def build_poc_text() -> str:
+    scan_running = bool(active_scan_cancel_event and not active_scan_cancel_event.is_set())
+    mail2_running = bool(active_mail2_cancel_event and not active_mail2_cancel_event.is_set())
+    auto_resume_running = bool(active_scan_auto_resume_task and not active_scan_auto_resume_task.done())
+    lines = [
+        "POC: процессы бота",
+        "",
+        f"Admin flow: {'занят' if admin_flow_lock.locked() else 'свободен'}",
+        f"Admin bot: {format_admin_bot_health()}",
+        "",
+        f"Scan: {'активен' if scan_running else 'не запущен'}",
+        f"Scan owner: {active_scan_owner_id or '-'}",
+        f"Scan checkpoint: {format_scan_checkpoint_text()}",
+        f"Scan auto-resume: {'ожидает' if auto_resume_running else 'нет'}",
+        "",
+        f"Mail2: {'активна' if mail2_running else 'не запущена'}",
+        f"Wizard pending: {len(pending_wizard_requests)}",
+        *[f"  - {line}" for line in describe_pending_processes(pending_wizard_requests)],
+        f"Mail2 pending: {len(pending_mail2_requests)}",
+        *[f"  - {line}" for line in describe_pending_processes(pending_mail2_requests)],
+        "",
+        "Кнопки ниже выполняют мягкое управление: scan ставится на паузу, mail2 просит остановку, pending очищаются.",
+    ]
+    return "\n".join(lines)
+
+
+def build_poc_buttons():
+    rows = []
+    if active_scan_cancel_event and not active_scan_cancel_event.is_set():
+        rows.append([Button.inline("Пауза scan", data=POC_SCAN_PAUSE_CALLBACK_DATA)])
+    if active_mail2_cancel_event and not active_mail2_cancel_event.is_set():
+        rows.append([Button.inline("Остановить mail2", data=POC_MAIL2_STOP_CALLBACK_DATA)])
+    if pending_wizard_requests:
+        rows.append([Button.inline("Очистить wizard pending", data=POC_CLEAR_WIZARD_CALLBACK_DATA)])
+    if pending_mail2_requests:
+        rows.append([Button.inline("Очистить mail2 pending", data=POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA)])
+    if pending_wizard_requests or pending_mail2_requests:
+        rows.append([Button.inline("Очистить все pending", data=POC_CLEAR_ALL_PENDING_CALLBACK_DATA)])
+    rows.append([Button.inline("Обновить POC", data=POC_REFRESH_CALLBACK_DATA)])
+    return rows
+
+
 def log_runtime_version() -> None:
     global runtime_version_logged
     if runtime_version_logged:
@@ -1316,6 +1378,10 @@ def is_version_command(text: str) -> bool:
 
 def is_diagnostics_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:diag|diagnostics|doctor|health|диагностика)\s*$", text, flags=re.IGNORECASE))
+
+
+def is_poc_command(text: str) -> bool:
+    return bool(re.match(r"^\s*/?(?:poc|proc|process|processes|процессы|процес|пoc)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_roots_command(text: str) -> bool:
@@ -1485,6 +1551,7 @@ def build_command_menu_text() -> str:
             "/status - собрать dashboard из SQL базы и отправить в чат",
             "/version - показать версию, commit и дату запуска",
             "/diag - диагностика бота, базы, scan и dashboard",
+            "/poc - процессы бота: посмотреть, поставить на паузу, остановить ожидания",
         )
     )
 
@@ -1493,6 +1560,7 @@ def build_command_menu_buttons():
     return [
         [Button.text("scan"), Button.text("scan results")],
         [Button.text("/status"), Button.text("/version"), Button.text("/diag")],
+        [Button.text("/poc")],
         [Button.text("menu")],
         [Button.text("scan new"), Button.text("scan continue")],
         [Button.text("stop скан"), Button.text("scan reset")],
@@ -7188,6 +7256,59 @@ async def handle_scan_cancel(event: events.CallbackQuery.Event) -> None:
     await event.answer("Пауза принята. Завершу текущего пользователя и сохраню прогресс.", alert=False)
 
 
+@client.on(events.CallbackQuery(pattern=b"^poc:"))
+async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
+    data = bytes(event.data or b"")
+    changed = False
+    if data == POC_SCAN_PAUSE_CALLBACK_DATA:
+        if active_scan_cancel_event and not active_scan_cancel_event.is_set():
+            active_scan_cancel_event.set()
+            changed = True
+            await event.answer("Scan поставлен на паузу.", alert=False)
+        else:
+            await event.answer("Scan сейчас не активен.", alert=False)
+    elif data == POC_MAIL2_STOP_CALLBACK_DATA:
+        if active_mail2_cancel_event and not active_mail2_cancel_event.is_set():
+            active_mail2_cancel_event.set()
+            changed = True
+            await event.answer("Mail2 получил команду остановки.", alert=False)
+        else:
+            await event.answer("Mail2 сейчас не активен.", alert=False)
+    elif data == POC_CLEAR_WIZARD_CALLBACK_DATA:
+        count = len(pending_wizard_requests)
+        pending_wizard_requests.clear()
+        changed = count > 0
+        await event.answer(f"Wizard pending очищено: {count}.", alert=False)
+    elif data == POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA:
+        count = len(pending_mail2_requests)
+        pending_mail2_requests.clear()
+        changed = count > 0
+        await event.answer(f"Mail2 pending очищено: {count}.", alert=False)
+    elif data == POC_CLEAR_ALL_PENDING_CALLBACK_DATA:
+        count = len(pending_wizard_requests) + len(pending_mail2_requests)
+        pending_wizard_requests.clear()
+        pending_mail2_requests.clear()
+        changed = count > 0
+        await event.answer(f"Pending очищено: {count}.", alert=False)
+    elif data == POC_REFRESH_CALLBACK_DATA:
+        await event.answer("Обновляю POC.", alert=False)
+    else:
+        await event.answer("Неизвестная команда POC.", alert=True)
+        return
+
+    logging.info("POC callback data=%r sender_id=%s changed=%s", data, event.sender_id, changed)
+    try:
+        await event.edit(build_poc_text(), buttons=build_poc_buttons())
+    except MessageNotModifiedError:
+        pass
+    except FloodWaitError as error:
+        wait_seconds = int(getattr(error, "seconds", 1) or 1)
+        note_floodwait(wait_seconds)
+        logging.warning("FloodWait on POC callback edit: %ss", wait_seconds)
+    except Exception:
+        logging.exception("Failed to edit POC message")
+
+
 @client.on(events.NewMessage)
 async def handle_private_message(event: events.NewMessage.Event) -> None:
     global active_scan_cancel_event, active_scan_owner_id, active_scan_menu_owner_id, active_scan_action_delay_seconds, active_scan_base_delay_seconds, active_scan_reset_requested
@@ -7531,6 +7652,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     if is_diagnostics_command(event.raw_text or ""):
         await safe_event_reply(event, build_diagnostics_text())
+        return
+
+    if is_poc_command(event.raw_text or ""):
+        await safe_event_reply(event, build_poc_text(), buttons=build_poc_buttons())
         return
 
     if is_status_command(event.raw_text or ""):
