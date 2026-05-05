@@ -479,6 +479,7 @@ BOT_HEALTH_POLL_INTERVAL_SECONDS = max(10.0, env_float("BOT_HEALTH_POLL_INTERVAL
 BOT_POLL_INTERVAL_SECONDS = max(0.05, env_float("BOT_POLL_INTERVAL_SECONDS", 0.2))
 POST_ACTION_SETTLE_SECONDS = max(0.0, env_float("POST_ACTION_SETTLE_SECONDS", 0.0))
 PROMO_CONFIRM_HISTORY_LIMIT = max(100, env_int("PROMO_CONFIRM_HISTORY_LIMIT", 1000))
+PROMO_AFTER_SUBMIT_SETTLE_SECONDS = max(0.3, env_float("PROMO_AFTER_SUBMIT_SETTLE_SECONDS", 2.0))
 FORECAST_PRICE_PER_SUBSCRIPTION_RUB = env_float("FORECAST_PRICE_PER_SUBSCRIPTION_RUB", 100.0)
 FORECAST_RENEWAL_RATE_7_DAYS = env_float("FORECAST_RENEWAL_RATE_7_DAYS", 0.70)
 FORECAST_RENEWAL_RATE_30_DAYS = env_float("FORECAST_RENEWAL_RATE_30_DAYS", 0.70)
@@ -3650,6 +3651,58 @@ async def click_keyword_button_and_wait_ready(
     return next_message
 
 
+async def click_keyword_button_and_settle(
+    bot,
+    message,
+    required_groups: tuple[tuple[str, ...], ...],
+    *,
+    label: str,
+    settle_seconds: float,
+    optional_keywords: tuple[str, ...] = (),
+    exclude_keywords: tuple[str, ...] = (),
+):
+    button = find_button_by_keywords(
+        message,
+        required_groups,
+        optional_keywords=optional_keywords,
+        exclude_keywords=exclude_keywords,
+    )
+    if not button:
+        available = [str(item["text"]) for item in extract_all_buttons(message)]
+        raise RuntimeError(f"Button for {label!r} not found. Available buttons: {available}")
+
+    logging.info(
+        "Clicking settle button %r at row=%s column=%s for %s",
+        button["text"],
+        button["row"],
+        button["column"],
+        label,
+    )
+    try:
+        await message.click(int(button["row"]), int(button["column"]))
+        note_success_action()
+    except FloodWaitError as error:
+        wait_seconds = int(getattr(error, "seconds", 1) or 1)
+        note_floodwait(wait_seconds)
+        logging.warning(
+            "FloodWait on click_keyword_button_and_settle: waiting %ss and retrying button %r",
+            wait_seconds,
+            button["text"],
+        )
+        await asyncio.sleep(wait_seconds + 1)
+        await message.click(int(button["row"]), int(button["column"]))
+        note_success_action()
+
+    await asyncio.sleep(settle_seconds)
+    try:
+        next_message = await latest_bot_message(bot)
+    except Exception:
+        logging.exception("Failed to read latest message after clicking %s; using previous message", label)
+        return message
+    log_message(f"After clicking {label!r} and settling", next_message)
+    return next_message
+
+
 async def ensure_message_with_keyword_button(
     conv,
     bot,
@@ -6497,25 +6550,38 @@ async def click_optional_promo_back(bot, message):
 
 
 async def click_optional_all_promocodes(bot, message):
-    button = find_button_by_keywords(
-        message,
-        (("все", "all", "спис", "list"), ("промокод", "promo", "coupon", "код")),
-        exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+    candidates = (
+        (("все", "all"), ("промокод", "promo", "coupon", "код")),
+        (("спис", "list"), ("промокод", "promo", "coupon", "код")),
+        (("промокод", "promo", "coupon"),),
     )
-    if not button:
-        logging.warning("Promo fallback: all promocodes button not found")
-        return message
-    try:
-        return await click_keyword_button_and_read(
-            bot,
-            message,
-            (("все", "all", "спис", "list"), ("промокод", "promo", "coupon", "код")),
-            label="promo fallback all promocodes",
-            exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
-        )
-    except Exception:
-        logging.exception("Promo fallback: failed to open all promocodes")
-        return await latest_bot_message(bot)
+    exclude_keywords = (
+        settings.cancel_button_text,
+        settings.back_button_text,
+        "созд",
+        "добав",
+        "new",
+        "create",
+    )
+    for required_groups in candidates:
+        if not find_button_by_keywords(message, required_groups, exclude_keywords=exclude_keywords):
+            continue
+        try:
+            return await click_keyword_button_and_read(
+                bot,
+                message,
+                required_groups,
+                label="promo fallback all promocodes",
+                exclude_keywords=exclude_keywords,
+            )
+        except Exception:
+            logging.exception("Promo fallback: failed to open all promocodes with groups=%s", required_groups)
+            try:
+                message = await latest_bot_message(bot)
+            except Exception:
+                return message
+    logging.warning("Promo fallback: all promocodes button not found")
+    return message
 
 
 async def confirm_promo_created_after_submit(
@@ -6547,8 +6613,6 @@ async def confirm_promo_created_after_submit(
         ],
     )
     latest_message = current_message or await latest_bot_message(bot)
-    if message_contains_promo_code(latest_message, promo_code):
-        return latest_message
 
     menu_message = await click_optional_promo_back(bot, latest_message)
     if message_contains_promo_code(menu_message, promo_code):
@@ -6682,26 +6746,18 @@ async def create_promo_code_in_admin_bot(
                 user_id=user_id,
                 extra_lines=[
                     f"Кнопка: {settings.promo_submit_button_text}",
-                    f"Жду ответ/историю: {settings.promo_success_text}",
+                    "После клика проверю список промокодов.",
                 ],
             )
-            final_message = None
-            try:
-                final_message = await click_keyword_button_and_wait_ready(
-                    bot,
-                    submit_message,
-                    ((settings.promo_submit_button_text, "созд", "сохран", "готов", "create", "save"),),
-                    label="submit promo",
-                    ready=lambda message: is_promo_created_message(message, promo_code),
-                    timeout_seconds=max(settings.bot_response_timeout_seconds, 90.0),
-                    optional_keywords=("промокод", "promo", "coupon"),
-                    exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
-                )
-            except TimeoutError:
-                logging.warning(
-                    "Promo submit ready wait timed out; checking dialog history and promocodes list promo_code=%s",
-                    promo_code,
-                )
+            final_message = await click_keyword_button_and_settle(
+                bot,
+                submit_message,
+                ((settings.promo_submit_button_text, "созд", "сохран", "готов", "create", "save"),),
+                label="submit promo",
+                settle_seconds=PROMO_AFTER_SUBMIT_SETTLE_SECONDS,
+                optional_keywords=("промокод", "promo", "coupon"),
+                exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+            )
             final_message = await confirm_promo_created_after_submit(
                 bot,
                 final_message,
