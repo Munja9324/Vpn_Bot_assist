@@ -478,6 +478,7 @@ SCAN_MAX_SESSION_RESTARTS = max(1, env_int("SCAN_MAX_SESSION_RESTARTS", 1000))
 BOT_HEALTH_POLL_INTERVAL_SECONDS = max(10.0, env_float("BOT_HEALTH_POLL_INTERVAL_SECONDS", 60.0))
 BOT_POLL_INTERVAL_SECONDS = max(0.05, env_float("BOT_POLL_INTERVAL_SECONDS", 0.2))
 POST_ACTION_SETTLE_SECONDS = max(0.0, env_float("POST_ACTION_SETTLE_SECONDS", 0.0))
+PROMO_CONFIRM_HISTORY_LIMIT = max(100, env_int("PROMO_CONFIRM_HISTORY_LIMIT", 1000))
 FORECAST_PRICE_PER_SUBSCRIPTION_RUB = env_float("FORECAST_PRICE_PER_SUBSCRIPTION_RUB", 100.0)
 FORECAST_RENEWAL_RATE_7_DAYS = env_float("FORECAST_RENEWAL_RATE_7_DAYS", 0.70)
 FORECAST_RENEWAL_RATE_30_DAYS = env_float("FORECAST_RENEWAL_RATE_30_DAYS", 0.70)
@@ -2328,7 +2329,7 @@ def build_dashboard_loader_html(target_url: str) -> str:
     </script>
 """
     note_html = """
-    <div style="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);font:600 12px 'IBM Plex Mono',Consolas,monospace;letter-spacing:0;text-transform:uppercase;opacity:.48;color:#151515;white-space:nowrap;">
+    <div style="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);font:600 12px 'IBM Plex Mono',Consolas,monospace;letter-spacing:0;text-transform:uppercase;opacity:.58;color:#f7f5ee;white-space:nowrap;">
       dashboard откроется автоматически
     </div>
 """
@@ -6431,6 +6432,146 @@ def is_promo_created_message(message, promo_code: str) -> bool:
     return False
 
 
+def message_contains_promo_code(message, promo_code: str) -> bool:
+    promo_code_lowered = promo_code.casefold()
+    variants = collect_message_text_variants(message)
+    button_texts = [str(button["text"]) for button in extract_all_buttons(message)]
+    haystack = "\n".join([*variants, *button_texts]).casefold()
+    return promo_code_lowered in haystack
+
+
+async def find_promo_message_in_dialog(bot, promo_code: str, *, min_id: int = 0, success_only: bool = False):
+    checked = 0
+    async for message in client.iter_messages(bot, min_id=max(0, min_id), limit=PROMO_CONFIRM_HISTORY_LIMIT):
+        checked += 1
+        if not is_incoming_bot_message(message):
+            continue
+        if success_only:
+            if is_promo_created_message(message, promo_code):
+                logging.info(
+                    "Promo success found in dialog history promo_code=%s message_id=%s checked=%s",
+                    promo_code,
+                    getattr(message, "id", None),
+                    checked,
+                )
+                return message
+        elif message_contains_promo_code(message, promo_code):
+            logging.info(
+                "Promo code found in dialog history promo_code=%s message_id=%s checked=%s",
+                promo_code,
+                getattr(message, "id", None),
+                checked,
+            )
+            return message
+    logging.info(
+        "Promo history scan finished promo_code=%s success_only=%s checked=%s limit=%s min_id=%s",
+        promo_code,
+        success_only,
+        checked,
+        PROMO_CONFIRM_HISTORY_LIMIT,
+        min_id,
+    )
+    return None
+
+
+async def click_optional_promo_back(bot, message):
+    button = find_button_by_keywords(
+        message,
+        ((settings.back_button_text, "назад", "back", "return"),),
+        exclude_keywords=(settings.cancel_button_text,),
+    )
+    if not button:
+        logging.warning("Promo fallback: back button not found")
+        return message
+    try:
+        return await click_keyword_button_and_read(
+            bot,
+            message,
+            ((settings.back_button_text, "назад", "back", "return"),),
+            label="promo fallback back",
+            exclude_keywords=(settings.cancel_button_text,),
+        )
+    except Exception:
+        logging.exception("Promo fallback: failed to click back")
+        return await latest_bot_message(bot)
+
+
+async def click_optional_all_promocodes(bot, message):
+    button = find_button_by_keywords(
+        message,
+        (("все", "all", "спис", "list"), ("промокод", "promo", "coupon", "код")),
+        exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+    )
+    if not button:
+        logging.warning("Promo fallback: all promocodes button not found")
+        return message
+    try:
+        return await click_keyword_button_and_read(
+            bot,
+            message,
+            (("все", "all", "спис", "list"), ("промокод", "promo", "coupon", "код")),
+            label="promo fallback all promocodes",
+            exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+        )
+    except Exception:
+        logging.exception("Promo fallback: failed to open all promocodes")
+        return await latest_bot_message(bot)
+
+
+async def confirm_promo_created_after_submit(
+    bot,
+    current_message,
+    promo_code: str,
+    flow_start_message_id: int,
+    progress_callback: ProgressCallback | None,
+    user_id: str,
+):
+    success_message = await find_promo_message_in_dialog(
+        bot,
+        promo_code,
+        min_id=flow_start_message_id,
+        success_only=True,
+    )
+    if success_message:
+        return success_message
+
+    await emit_process_progress(
+        progress_callback,
+        "Promo",
+        PROMO_STEPS,
+        7,
+        user_id=user_id,
+        extra_lines=[
+            "Текст успеха не найден в истории.",
+            "Проверяю список промокодов.",
+        ],
+    )
+    latest_message = current_message or await latest_bot_message(bot)
+    if message_contains_promo_code(latest_message, promo_code):
+        return latest_message
+
+    menu_message = await click_optional_promo_back(bot, latest_message)
+    if message_contains_promo_code(menu_message, promo_code):
+        return menu_message
+
+    list_message = await click_optional_all_promocodes(bot, menu_message)
+    if message_contains_promo_code(list_message, promo_code):
+        return list_message
+
+    history_message = await find_promo_message_in_dialog(
+        bot,
+        promo_code,
+        min_id=flow_start_message_id,
+        success_only=False,
+    )
+    if history_message:
+        return history_message
+
+    raise RuntimeError(
+        f"Promo {promo_code} was not confirmed: success text was not found and code is absent in promocodes list."
+    )
+
+
 async def create_promo_code_in_admin_bot(
     user_id: str,
     promo_code: str,
@@ -6458,6 +6599,7 @@ async def create_promo_code_in_admin_bot(
 
         async with admin_conversation(bot) as conv:
             admin_message = await send_admin_and_get_menu(conv, bot)
+            promo_flow_start_message_id = int(getattr(admin_message, "id", 0) or 0)
 
             await emit_process_progress(
                 progress_callback,
@@ -6540,18 +6682,33 @@ async def create_promo_code_in_admin_bot(
                 user_id=user_id,
                 extra_lines=[
                     f"Кнопка: {settings.promo_submit_button_text}",
-                    f"Жду финальный ответ: {settings.promo_success_text}",
+                    f"Жду ответ/историю: {settings.promo_success_text}",
                 ],
             )
-            final_message = await click_keyword_button_and_wait_ready(
+            final_message = None
+            try:
+                final_message = await click_keyword_button_and_wait_ready(
+                    bot,
+                    submit_message,
+                    ((settings.promo_submit_button_text, "созд", "сохран", "готов", "create", "save"),),
+                    label="submit promo",
+                    ready=lambda message: is_promo_created_message(message, promo_code),
+                    timeout_seconds=max(settings.bot_response_timeout_seconds, 90.0),
+                    optional_keywords=("промокод", "promo", "coupon"),
+                    exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+                )
+            except TimeoutError:
+                logging.warning(
+                    "Promo submit ready wait timed out; checking dialog history and promocodes list promo_code=%s",
+                    promo_code,
+                )
+            final_message = await confirm_promo_created_after_submit(
                 bot,
-                submit_message,
-                ((settings.promo_submit_button_text, "созд", "сохран", "готов", "create", "save"),),
-                label="submit promo",
-                ready=lambda message: is_promo_created_message(message, promo_code),
-                timeout_seconds=max(settings.bot_response_timeout_seconds, 90.0),
-                optional_keywords=("промокод", "promo", "coupon"),
-                exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
+                final_message,
+                promo_code,
+                promo_flow_start_message_id,
+                progress_callback,
+                user_id,
             )
             log_message("Promo final response", final_message)
 
