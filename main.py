@@ -11,7 +11,9 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 import threading
+import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -54,6 +56,10 @@ class Settings:
     openai_max_output_tokens: int
     openai_reasoning_effort: str
     openai_system_prompt: str
+    openai_transcribe_model: str
+    openai_voice_language: str
+    openai_voice_max_bytes: int
+    smart_controller_enabled: bool
     admin_bot_username: str
     admin_command: str
     users_button_text: str
@@ -352,6 +358,11 @@ def load_settings() -> Settings:
             "OPENAI_SYSTEM_PROMPT",
             "Ты встроенный помощник Vpn_Bot_assist. Отвечай кратко, понятно и по-русски, если пользователь не попросил иначе.",
         ),
+        openai_transcribe_model=os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe").strip()
+        or "gpt-4o-mini-transcribe",
+        openai_voice_language=os.getenv("OPENAI_VOICE_LANGUAGE", "ru").strip() or "ru",
+        openai_voice_max_bytes=max(512_000, env_int("OPENAI_VOICE_MAX_BYTES", 25_000_000)),
+        smart_controller_enabled=env_bool("SMART_CONTROLLER_ENABLED", True),
         admin_bot_username=os.getenv("ADMIN_BOT_USERNAME", "vpn_kbr_bot"),
         admin_command=os.getenv("ADMIN_COMMAND", "/admin"),
         users_button_text=env_text("USERS_BUTTON_TEXT", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438"),
@@ -500,6 +511,7 @@ active_mail2_cancel_event: asyncio.Event | None = None
 pending_wizard_requests: dict[int, dict[str, object]] = {}
 pending_mail2_requests: dict[int, dict[str, object]] = {}
 pending_gpt_requests: dict[int, dict[str, object]] = {}
+pending_smart_actions: dict[int, dict[str, object]] = {}
 active_gpt_requests: dict[int, dict[str, object]] = {}
 gpt_chat_sessions: dict[int, str] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
@@ -685,6 +697,12 @@ GPT_STEPS = [
     "Отправляю вопрос в ChatGPT",
     "Читаю ответ модели",
     "Отправляю ответ в чат",
+]
+SMART_STEPS = [
+    "Принимаю запрос",
+    "Распознаю голос",
+    "Понимаю намерение через ChatGPT",
+    "Запускаю нужное действие",
 ]
 
 REQUESTER_DENY_MESSAGE = (
@@ -1234,7 +1252,7 @@ def format_duration(seconds: float | int | None) -> str:
 
 
 def prune_expired_pending_requests() -> dict[str, int]:
-    removed = {"wizard": 0, "mail2": 0, "gpt": 0}
+    removed = {"wizard": 0, "mail2": 0, "gpt": 0, "smart": 0}
     for sender_id, data in list(pending_wizard_requests.items()):
         age = pending_request_age_seconds(data)
         if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
@@ -1250,12 +1268,18 @@ def prune_expired_pending_requests() -> dict[str, int]:
         if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
             pending_gpt_requests.pop(sender_id, None)
             removed["gpt"] += 1
-    if removed["wizard"] or removed["mail2"] or removed["gpt"]:
+    for sender_id, data in list(pending_smart_actions.items()):
+        age = pending_request_age_seconds(data)
+        if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
+            pending_smart_actions.pop(sender_id, None)
+            removed["smart"] += 1
+    if removed["wizard"] or removed["mail2"] or removed["gpt"] or removed["smart"]:
         logging.info(
-            "Pruned expired pending requests wizard=%s mail2=%s gpt=%s ttl=%ss",
+            "Pruned expired pending requests wizard=%s mail2=%s gpt=%s smart=%s ttl=%ss",
             removed["wizard"],
             removed["mail2"],
             removed["gpt"],
+            removed["smart"],
             PENDING_REQUEST_TTL_SECONDS,
         )
     return removed
@@ -1373,6 +1397,7 @@ def build_diagnostics_text() -> str:
             f"Mail2 pending: {len(pending_mail2_requests)}",
             f"GPT active: {len(active_gpt_requests)}",
             f"GPT pending: {len(pending_gpt_requests)}",
+            f"Smart pending: {len(pending_smart_actions)}",
             "",
             f"Latest stats: {stats_text}",
             f"Dashboard public: {settings.dashboard_public_base_url.rstrip('/')}/{settings.dashboard_public_path_prefix.strip('/')}",
@@ -1421,6 +1446,8 @@ def build_poc_text() -> str:
         *[f"  - {line}" for line in describe_pending_processes(active_gpt_requests)],
         f"GPT pending: {len(pending_gpt_requests)}",
         *[f"  - {line}" for line in describe_pending_processes(pending_gpt_requests)],
+        f"Smart pending: {len(pending_smart_actions)}",
+        *[f"  - {line}" for line in describe_pending_processes(pending_smart_actions)],
         "",
         f"Pending TTL: {format_duration(PENDING_REQUEST_TTL_SECONDS)}",
         "Кнопки ниже выполняют мягкое управление: scan ставится на паузу, mail2 просит остановку, ожидания очищаются.",
@@ -1440,7 +1467,9 @@ def build_poc_buttons():
         rows.append([Button.inline("Очистить mail2 pending", data=POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA)])
     if pending_gpt_requests:
         rows.append([Button.inline("Очистить GPT pending", data=POC_CLEAR_GPT_PENDING_CALLBACK_DATA)])
-    if pending_wizard_requests or pending_mail2_requests or pending_gpt_requests:
+    if pending_smart_actions:
+        rows.append([Button.inline("Очистить smart pending", data=b"poc:clear_smart_pending")])
+    if pending_wizard_requests or pending_mail2_requests or pending_gpt_requests or pending_smart_actions:
         rows.append([Button.inline("Очистить все pending", data=POC_CLEAR_ALL_PENDING_CALLBACK_DATA)])
     rows.append([Button.inline("Обновить процессы", data=POC_REFRESH_CALLBACK_DATA)])
     return rows
@@ -1606,20 +1635,9 @@ def extract_openai_response_text(response_data: dict) -> str:
     return "\n\n".join(chunks).strip()
 
 
-def call_openai_response(prompt: str, previous_response_id: str | None = None) -> tuple[str, str]:
+def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
-
-    payload: dict[str, object] = {
-        "model": settings.openai_model,
-        "input": prompt,
-        "instructions": settings.openai_system_prompt,
-        "max_output_tokens": settings.openai_max_output_tokens,
-    }
-    if previous_response_id:
-        payload["previous_response_id"] = previous_response_id
-    if settings.openai_reasoning_effort and settings.openai_reasoning_effort not in {"none", "off", "false", "0"}:
-        payload["reasoning"] = {"effort": settings.openai_reasoning_effort}
 
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(
@@ -1652,8 +1670,396 @@ def call_openai_response(prompt: str, previous_response_id: str | None = None) -
     return response_text, response_id
 
 
+def call_openai_response(prompt: str, previous_response_id: str | None = None) -> tuple[str, str]:
+    payload: dict[str, object] = {
+        "model": settings.openai_model,
+        "input": prompt,
+        "instructions": settings.openai_system_prompt,
+        "max_output_tokens": settings.openai_max_output_tokens,
+    }
+    if previous_response_id:
+        payload["previous_response_id"] = previous_response_id
+    if settings.openai_reasoning_effort and settings.openai_reasoning_effort not in {"none", "off", "false", "0"}:
+        payload["reasoning"] = {"effort": settings.openai_reasoning_effort}
+    return call_openai_response_payload(payload)
+
+
 async def ask_chatgpt(prompt: str, previous_response_id: str | None = None) -> tuple[str, str]:
     return await asyncio.to_thread(call_openai_response, prompt, previous_response_id)
+
+
+def multipart_form_data(fields: dict[str, str], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
+    boundary = f"----VpnBotAssist{uuid.uuid4().hex}"
+    body = bytearray()
+    for name, value in fields.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(str(value).encode("utf-8"))
+        body.extend(b"\r\n")
+    for name, (filename, content, content_type) in files.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(
+            f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode("utf-8")
+        )
+        body.extend(f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"))
+        body.extend(content)
+        body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+    return bytes(body), f"multipart/form-data; boundary={boundary}"
+
+
+def call_openai_transcription(audio_path: Path) -> str:
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    content = audio_path.read_bytes()
+    if len(content) > settings.openai_voice_max_bytes:
+        raise RuntimeError(f"Voice file is too large: {format_bytes(len(content))}")
+
+    content_type = mimetypes.guess_type(str(audio_path))[0] or "audio/ogg"
+    fields = {
+        "model": settings.openai_transcribe_model,
+        "response_format": "json",
+    }
+    if settings.openai_voice_language:
+        fields["language"] = settings.openai_voice_language
+    body, content_type_header = multipart_form_data(
+        fields,
+        {"file": (audio_path.name, content, content_type)},
+    )
+    request = Request(
+        f"{settings.openai_base_url}/audio/transcriptions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {settings.openai_api_key}",
+            "Content-Type": content_type_header,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=settings.openai_timeout_seconds) as response:
+            response_data = json.loads(response.read().decode("utf-8", errors="replace"))
+    except HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        try:
+            error_data = json.loads(error_body)
+            error_message = str((error_data.get("error") or {}).get("message") or error_body)
+        except Exception:
+            error_message = error_body or str(error)
+        raise RuntimeError(f"OpenAI transcription error {error.code}: {error_message[:500]}") from error
+    except URLError as error:
+        raise RuntimeError(f"OpenAI transcription connection error: {error.reason}") from error
+
+    transcript = str(response_data.get("text") or "").strip()
+    if not transcript:
+        raise RuntimeError("OpenAI returned an empty transcription")
+    return transcript
+
+
+async def transcribe_telegram_voice(event: events.NewMessage.Event) -> str:
+    with tempfile.TemporaryDirectory(prefix="vpn-bot-voice-") as temp_dir:
+        audio_path = Path(temp_dir) / "voice.ogg"
+        downloaded = await event.download_media(file=str(audio_path))
+        path = Path(downloaded) if downloaded else audio_path
+        if not path.exists():
+            raise RuntimeError("Не удалось скачать голосовое сообщение")
+        return await asyncio.to_thread(call_openai_transcription, path)
+
+
+def is_voice_or_audio_message(event: events.NewMessage.Event) -> bool:
+    message = getattr(event, "message", None)
+    if not message:
+        return False
+    if getattr(message, "voice", None) or getattr(message, "audio", None):
+        return True
+    document = getattr(message, "document", None)
+    mime_type = str(getattr(document, "mime_type", "") or "")
+    return mime_type.startswith("audio/")
+
+
+SMART_ACTION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": [
+                "chat",
+                "menu",
+                "dashboard",
+                "processes",
+                "diag",
+                "logs",
+                "version",
+                "user_summary",
+                "user_subs",
+                "wizard",
+                "mail",
+                "broadcast",
+                "promo",
+                "scan_menu",
+                "scan_new",
+                "scan_continue",
+                "scan_results",
+                "scan_pause",
+                "scan_reset",
+                "gpt_reset",
+            ],
+        },
+        "query": {"type": "string"},
+        "user_id": {"type": "string"},
+        "text": {"type": "string"},
+        "use_database": {"type": "boolean"},
+        "lines": {"type": "integer"},
+        "confidence": {"type": "number"},
+        "explanation": {"type": "string"},
+    },
+    "required": ["action", "query", "user_id", "text", "use_database", "lines", "confidence", "explanation"],
+}
+
+
+SMART_CONTROLLER_INSTRUCTIONS = """
+Ты голосовой и текстовый диспетчер Telegram-бота Vpn_Bot_assist.
+Нужно понять свободный русский запрос владельца и вернуть только JSON по схеме.
+Если это обычный вопрос или просьба подумать/объяснить/написать текст, выбери action=chat и помести исходную просьбу в text.
+Если пользователь просит открыть меню, отчет, процессы, диагностику, логи или версию, выбери соответствующее действие.
+Если просит найти/показать пользователя кратко: user_summary. Если просит подписки/подробности: user_subs.
+Если сказано база, из базы, быстро, без админ-бота: use_database=true.
+Если просит визард/wizard/отправить в визард: action=wizard, user_id обязателен, просьбу/дополнение помести в text.
+Если просит написать конкретному пользователю: action=mail, user_id и text обязательны.
+Если просит рассылку всем без подписки: action=broadcast, text обязателен.
+Если просит промокод/купон: action=promo, user_id обязателен, text опционален.
+Для scan выбирай scan_menu/new/continue/results/pause/reset.
+Не выдумывай user_id. Если ID неясен, выбери chat и объясни, что нужно уточнить ID.
+"""
+
+
+def parse_json_object(text: str) -> dict:
+    cleaned = text.strip()
+    try:
+        value = json.loads(cleaned)
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        match = re.search(r"\{[\s\S]*\}", cleaned)
+        if not match:
+            return {}
+        try:
+            value = json.loads(match.group(0))
+            return value if isinstance(value, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
+def classify_smart_request_text(text: str) -> dict:
+    payload: dict[str, object] = {
+        "model": settings.openai_model,
+        "instructions": SMART_CONTROLLER_INSTRUCTIONS,
+        "input": text,
+        "max_output_tokens": 700,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "vpn_bot_smart_action",
+                "strict": True,
+                "schema": SMART_ACTION_SCHEMA,
+            }
+        },
+    }
+    response_text, _ = call_openai_response_payload(payload)
+    action = parse_json_object(response_text)
+    if not action:
+        raise RuntimeError("Smart controller returned invalid JSON")
+    return action
+
+
+async def classify_smart_request(text: str) -> dict:
+    return await asyncio.to_thread(classify_smart_request_text, text)
+
+
+class TextCommandEvent:
+    def __init__(self, base_event, raw_text: str):
+        self._base_event = base_event
+        self.raw_text = raw_text
+        self.text = raw_text
+        self.message = None
+
+    def __getattr__(self, name: str):
+        return getattr(self._base_event, name)
+
+
+async def execute_text_command(event, command_text: str) -> None:
+    await handle_private_message(TextCommandEvent(event, command_text))
+
+
+def command_from_smart_action(action: dict) -> tuple[str, bool, str]:
+    name = str(action.get("action") or "chat").strip()
+    query = str(action.get("query") or "").strip()
+    user_id = str(action.get("user_id") or "").strip()
+    text = str(action.get("text") or "").strip()
+    use_database = bool(action.get("use_database"))
+    suffix = " -b" if use_database else ""
+    if name == "menu":
+        return "menu", False, "Открыть меню"
+    if name == "dashboard":
+        return "/dashboard", False, "Собрать dashboard"
+    if name == "processes":
+        return "/processes", False, "Показать процессы"
+    if name == "diag":
+        return "/diag", False, "Показать диагностику"
+    if name == "version":
+        return "/version", False, "Показать версию"
+    if name == "logs":
+        lines = max(1, min(LOG_TAIL_MAX_LINES, int(action.get("lines") or LOG_TAIL_DEFAULT_LINES)))
+        return f"/tail {lines}", False, f"Показать последние {lines} строк лога"
+    if name == "user_summary":
+        lookup = query or user_id
+        if not lookup:
+            return "", False, ""
+        return f"/user {lookup}{suffix}", False, f"Краткая карточка пользователя {lookup}"
+    if name == "user_subs":
+        lookup = query or user_id
+        if not lookup:
+            return "", False, ""
+        return f"/subs {lookup}{suffix}", False, f"Подписки пользователя {lookup}"
+    if name == "wizard":
+        if not user_id:
+            return "", False, ""
+        return f"/wizard {user_id}", True, f"Подготовить wizard пользователя {user_id}"
+    if name == "mail":
+        if not user_id or not text:
+            return "", False, ""
+        return f"/send {user_id} {text}".strip(), True, f"Отправить сообщение пользователю {user_id}"
+    if name == "broadcast":
+        if not text:
+            return "", False, ""
+        return f"/broadcast {text}".strip(), True, "Запустить рассылку пользователям без подписки"
+    if name == "promo":
+        if not user_id:
+            return "", False, ""
+        return f"/coupon {user_id} {text}".strip(), True, f"Создать промокод пользователю {user_id}"
+    if name == "scan_menu":
+        return "scan", False, "Открыть scan"
+    if name == "scan_new":
+        return "scan new", True, "Запустить новый scan"
+    if name == "scan_continue":
+        return "scan continue", False, "Продолжить scan"
+    if name == "scan_results":
+        return "scan results", False, "Показать результаты scan"
+    if name == "scan_pause":
+        return "stop скан", False, "Поставить scan на паузу"
+    if name == "scan_reset":
+        return "scan reset", True, "Сбросить scan"
+    if name == "gpt_reset":
+        return "/gpt reset", False, "Очистить контекст ChatGPT"
+    return "", False, ""
+
+
+async def apply_wizard_note_after_command(event, sender_id: int, note: str) -> None:
+    if not note.strip():
+        return
+    pending = pending_wizard_requests.get(sender_id)
+    if not pending:
+        return
+    base_text = str(pending.get("base_text") or "")
+    final_text = "\n\n".join((base_text, f"Дополнение по голосовой/умной команде:\n{note.strip()}"))
+    pending["extra_text"] = note.strip()
+    pending["final_text"] = final_text
+    pending["stage"] = "await_final_choice"
+    await safe_event_reply(event, f"Обновленный предпросмотр wizard:\n\n{final_text}")
+    await safe_event_reply(
+        event,
+        "Отправлять этот вариант?",
+        buttons=[
+            [Button.text("1 отправить"), Button.text("2 изменить дописку")],
+            [Button.text("0 отмена")],
+        ],
+    )
+
+
+async def execute_smart_action(event, sender_id: int, action: dict, *, confirmed: bool = False) -> None:
+    action_name = str(action.get("action") or "chat").strip()
+    original_text = str(action.get("text") or "").strip()
+    if action_name == "chat":
+        await handle_gpt_prompt(event, sender_id, original_text or str(action.get("query") or ""))
+        return
+
+    command_text, requires_confirmation, title = command_from_smart_action(action)
+    if not command_text:
+        await handle_gpt_prompt(event, sender_id, original_text or str(action.get("query") or ""))
+        return
+
+    if requires_confirmation and not confirmed:
+        pending_smart_actions[sender_id] = {
+            "stage": "await_confirm",
+            "action": action,
+            "command_text": command_text,
+            "created_at": now_timestamp(),
+        }
+        details = [
+            "Я понял так:",
+            title,
+            f"Команда: {command_text}",
+        ]
+        if original_text:
+            details.append(f"Текст: {original_text}")
+        details.append("")
+        details.append("1 выполнить")
+        details.append("0 отмена")
+        await safe_event_reply(
+            event,
+            "\n".join(details),
+            buttons=[[Button.text("1 выполнить"), Button.text("0 отмена")]],
+        )
+        return
+
+    await execute_text_command(event, command_text)
+    if action_name == "wizard":
+        await apply_wizard_note_after_command(event, sender_id, original_text)
+
+
+async def handle_smart_request(event, sender_id: int, request_text: str, *, source: str) -> None:
+    if not settings.smart_controller_enabled:
+        await handle_gpt_prompt(event, sender_id, request_text)
+        return
+    status_message = await safe_event_reply(
+        event,
+        build_process_status(
+            "Умный помощник",
+            SMART_STEPS,
+            3,
+            extra_lines=[f"Источник: {source}", f"Текст: {len(request_text)} символов"],
+        ),
+    )
+    try:
+        action = await classify_smart_request(request_text)
+        await edit_status_message(
+            status_message,
+            build_process_status(
+                "Умный помощник",
+                SMART_STEPS,
+                4,
+                extra_lines=[
+                    f"Распознано действие: {action.get('action', 'chat')}",
+                    str(action.get("explanation") or "").strip()[:200],
+                ],
+                done=True,
+            ),
+            force=True,
+        )
+        await execute_smart_action(event, sender_id, action)
+    except Exception:
+        logging.exception("Smart request failed sender_id=%s source=%s", sender_id, source)
+        await edit_status_message(
+            status_message,
+            build_process_status(
+                "Умный помощник",
+                SMART_STEPS,
+                len(SMART_STEPS),
+                extra_lines=["Не удалось разобрать как команду", "Отвечаю как обычный ChatGPT"],
+                failed=True,
+            ),
+            force=True,
+        )
+        await handle_gpt_prompt(event, sender_id, request_text)
 
 
 def format_promo_mail_text(user_id: str, promo_code: str) -> str:
@@ -1879,6 +2285,8 @@ def build_command_menu_text() -> str:
             "/gpt <вопрос> - спросить ChatGPT и сохранить контекст диалога",
             "/gpt - написать вопрос следующим сообщением",
             "/gpt reset - очистить контекст ChatGPT",
+            "Голосовое без команды - распознать, понять и выполнить безопасное действие",
+            "Свободный текст без команды - обычный ChatGPT или умная команда",
             "",
             "Пользователи:",
             "/user <id|username> - краткая карточка через админ-бот",
@@ -7766,11 +8174,22 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
         pending_gpt_requests.clear()
         changed = count > 0
         await event.answer(f"GPT pending очищено: {count}.", alert=False)
+    elif data == b"poc:clear_smart_pending":
+        count = len(pending_smart_actions)
+        pending_smart_actions.clear()
+        changed = count > 0
+        await event.answer(f"Smart pending очищено: {count}.", alert=False)
     elif data == POC_CLEAR_ALL_PENDING_CALLBACK_DATA:
-        count = len(pending_wizard_requests) + len(pending_mail2_requests) + len(pending_gpt_requests)
+        count = (
+            len(pending_wizard_requests)
+            + len(pending_mail2_requests)
+            + len(pending_gpt_requests)
+            + len(pending_smart_actions)
+        )
         pending_wizard_requests.clear()
         pending_mail2_requests.clear()
         pending_gpt_requests.clear()
+        pending_smart_actions.clear()
         changed = count > 0
         await event.answer(f"Pending очищено: {count}.", alert=False)
     elif data == POC_REFRESH_CALLBACK_DATA:
@@ -7828,6 +8247,24 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             sender_username(sender),
             incoming_text,
         )
+        return
+
+    pending_smart = pending_smart_actions.get(sender_id)
+    if pending_smart:
+        cleaned = incoming_text.strip().casefold()
+        if cleaned in {"1", "да", "yes", "y", "выполнить", "отправить", "send"}:
+            pending_smart_actions.pop(sender_id, None)
+            await execute_smart_action(event, sender_id, dict(pending_smart.get("action") or {}), confirmed=True)
+            return
+        if cleaned in {"0", "нет", "no", "n", "отмена", "cancel", "/cancel"}:
+            pending_smart_actions.pop(sender_id, None)
+            await safe_event_reply(event, "Умное действие отменено.")
+            return
+        if incoming_text:
+            pending_smart_actions.pop(sender_id, None)
+            await handle_smart_request(event, sender_id, incoming_text, source="text correction")
+            return
+        await safe_event_reply(event, "Подтверди действие: `1 выполнить` или `0 отмена`.")
         return
 
     pending_wizard = pending_wizard_requests.get(sender_id)
@@ -8152,6 +8589,50 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
         pending_gpt_requests.pop(sender_id, None)
         await handle_gpt_prompt(event, sender_id, prompt, pending_gpt.get("status_message"))
+        return
+
+    if is_voice_or_audio_message(event):
+        status_message = await safe_event_reply(
+            event,
+            build_process_status(
+                "Голосовой помощник",
+                SMART_STEPS,
+                2,
+                extra_lines=[
+                    f"Модель распознавания: {settings.openai_transcribe_model}",
+                    "Скачиваю и распознаю голосовое",
+                ],
+            ),
+        )
+        try:
+            transcript = await transcribe_telegram_voice(event)
+            await edit_status_message(
+                status_message,
+                build_process_status(
+                    "Голосовой помощник",
+                    SMART_STEPS,
+                    3,
+                    extra_lines=[f"Распознано: {transcript[:500]}"],
+                    done=True,
+                ),
+                force=True,
+            )
+            await safe_event_reply(event, f"Распознал голос:\n\n{transcript}")
+            await handle_smart_request(event, sender_id, transcript, source="voice")
+        except Exception:
+            logging.exception("Voice smart request failed sender_id=%s", sender_id)
+            await edit_status_message(
+                status_message,
+                build_process_status(
+                    "Голосовой помощник",
+                    SMART_STEPS,
+                    2,
+                    extra_lines=["Не удалось распознать голосовое", "Подробности записаны в лог"],
+                    failed=True,
+                ),
+                force=True,
+            )
+            await safe_event_reply(event, "Не удалось распознать голосовое. Попробуй еще раз или отправь текстом.")
         return
 
     if is_command_menu_command(event.raw_text or ""):
@@ -8789,11 +9270,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             active_scan_menu_owner_id = event.sender_id
             await safe_event_reply(event, build_scan_menu_text_fast(), buttons=build_scan_menu_buttons())
             return
-        await safe_event_reply(
-            event,
-            "Такой команды нет в списке поддерживаемых. Напиши `menu` или `/help`, чтобы открыть кнопки команд.",
-            buttons=build_command_menu_buttons(),
-        )
+        await handle_smart_request(event, sender_id, event.raw_text or "", source="text")
 
 
 async def main() -> None:
