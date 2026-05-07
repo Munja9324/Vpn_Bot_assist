@@ -18,7 +18,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlsplit
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from telethon.errors import FloodWaitError, MediaCaptionTooLongError, MessageNotModifiedError, MessageTooLongError
@@ -45,6 +47,13 @@ class Settings:
     cleanup_on_start_enabled: bool
     cleanup_logs_on_start: bool
     cleanup_temp_on_start: bool
+    openai_api_key: str
+    openai_model: str
+    openai_base_url: str
+    openai_timeout_seconds: float
+    openai_max_output_tokens: int
+    openai_reasoning_effort: str
+    openai_system_prompt: str
     admin_bot_username: str
     admin_command: str
     users_button_text: str
@@ -118,6 +127,12 @@ class UserLookupCommand:
     @property
     def is_username(self) -> bool:
         return bool(normalize_username(self.query))
+
+
+@dataclass(frozen=True)
+class GPTCommand:
+    action: str
+    prompt: str
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -321,6 +336,22 @@ def load_settings() -> Settings:
         cleanup_on_start_enabled=env_bool("CLEANUP_ON_START_ENABLED", True),
         cleanup_logs_on_start=env_bool("CLEANUP_LOGS_ON_START", True),
         cleanup_temp_on_start=env_bool("CLEANUP_TEMP_ON_START", True),
+        openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini",
+        openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+        or "https://api.openai.com/v1",
+        openai_timeout_seconds=normalized_positive_float(
+            "OPENAI_TIMEOUT_SECONDS",
+            60.0,
+            minimum=5.0,
+            maximum=300.0,
+        ),
+        openai_max_output_tokens=max(128, min(32768, env_int("OPENAI_MAX_OUTPUT_TOKENS", 2048))),
+        openai_reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "none").strip().casefold(),
+        openai_system_prompt=env_text(
+            "OPENAI_SYSTEM_PROMPT",
+            "Ты встроенный помощник Vpn_Bot_assist. Отвечай кратко, понятно и по-русски, если пользователь не попросил иначе.",
+        ),
         admin_bot_username=os.getenv("ADMIN_BOT_USERNAME", "vpn_kbr_bot"),
         admin_command=os.getenv("ADMIN_COMMAND", "/admin"),
         users_button_text=env_text("USERS_BUTTON_TEXT", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438"),
@@ -458,6 +489,7 @@ POC_SCAN_PAUSE_CALLBACK_DATA = b"poc:scan_pause"
 POC_MAIL2_STOP_CALLBACK_DATA = b"poc:mail2_stop"
 POC_CLEAR_WIZARD_CALLBACK_DATA = b"poc:clear_wizard"
 POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA = b"poc:clear_mail2_pending"
+POC_CLEAR_GPT_PENDING_CALLBACK_DATA = b"poc:clear_gpt_pending"
 POC_CLEAR_ALL_PENDING_CALLBACK_DATA = b"poc:clear_all_pending"
 active_scan_cancel_event: asyncio.Event | None = None
 active_scan_owner_id: int | None = None
@@ -467,6 +499,9 @@ active_scan_auto_resume_task: asyncio.Task | None = None
 active_mail2_cancel_event: asyncio.Event | None = None
 pending_wizard_requests: dict[int, dict[str, object]] = {}
 pending_mail2_requests: dict[int, dict[str, object]] = {}
+pending_gpt_requests: dict[int, dict[str, object]] = {}
+active_gpt_requests: dict[int, dict[str, object]] = {}
+gpt_chat_sessions: dict[int, str] = {}
 ProgressCallback = Callable[[str], Awaitable[None]]
 logging_is_configured = False
 runtime_version_logged = False
@@ -644,6 +679,12 @@ WIZARD_STEPS = [
     "Готовлю карточку",
     "Жду ответ: 1 отправить, 2 добавить, 0 отмена",
     "Отправляю в wizard",
+]
+GPT_STEPS = [
+    "Проверяю настройки OpenAI",
+    "Отправляю вопрос в ChatGPT",
+    "Читаю ответ модели",
+    "Отправляю ответ в чат",
 ]
 
 REQUESTER_DENY_MESSAGE = (
@@ -1193,7 +1234,7 @@ def format_duration(seconds: float | int | None) -> str:
 
 
 def prune_expired_pending_requests() -> dict[str, int]:
-    removed = {"wizard": 0, "mail2": 0}
+    removed = {"wizard": 0, "mail2": 0, "gpt": 0}
     for sender_id, data in list(pending_wizard_requests.items()):
         age = pending_request_age_seconds(data)
         if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
@@ -1204,11 +1245,17 @@ def prune_expired_pending_requests() -> dict[str, int]:
         if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
             pending_mail2_requests.pop(sender_id, None)
             removed["mail2"] += 1
-    if removed["wizard"] or removed["mail2"]:
+    for sender_id, data in list(pending_gpt_requests.items()):
+        age = pending_request_age_seconds(data)
+        if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
+            pending_gpt_requests.pop(sender_id, None)
+            removed["gpt"] += 1
+    if removed["wizard"] or removed["mail2"] or removed["gpt"]:
         logging.info(
-            "Pruned expired pending requests wizard=%s mail2=%s ttl=%ss",
+            "Pruned expired pending requests wizard=%s mail2=%s gpt=%s ttl=%ss",
             removed["wizard"],
             removed["mail2"],
+            removed["gpt"],
             PENDING_REQUEST_TTL_SECONDS,
         )
     return removed
@@ -1314,6 +1361,7 @@ def build_diagnostics_text() -> str:
             f"SQLite: {db_status}",
             f"SQLite path: {db_path}",
             f"Requesters: {requesters_total if requesters_total >= 0 else 'ошибка'}",
+            f"OpenAI: {'настроен' if settings.openai_api_key else 'нет ключа'} ({settings.openai_model})",
             "",
             f"Scan active: {'да' if scan_running else 'нет'}",
             f"Scan owner: {active_scan_owner_id or '-'}",
@@ -1323,6 +1371,8 @@ def build_diagnostics_text() -> str:
             f"Mail2 active: {'да' if mail2_running else 'нет'}",
             f"Wizard pending: {len(pending_wizard_requests)}",
             f"Mail2 pending: {len(pending_mail2_requests)}",
+            f"GPT active: {len(active_gpt_requests)}",
+            f"GPT pending: {len(pending_gpt_requests)}",
             "",
             f"Latest stats: {stats_text}",
             f"Dashboard public: {settings.dashboard_public_base_url.rstrip('/')}/{settings.dashboard_public_path_prefix.strip('/')}",
@@ -1367,6 +1417,10 @@ def build_poc_text() -> str:
         *[f"  - {line}" for line in describe_pending_processes(pending_wizard_requests)],
         f"Mail2 pending: {len(pending_mail2_requests)}",
         *[f"  - {line}" for line in describe_pending_processes(pending_mail2_requests)],
+        f"GPT active: {len(active_gpt_requests)}",
+        *[f"  - {line}" for line in describe_pending_processes(active_gpt_requests)],
+        f"GPT pending: {len(pending_gpt_requests)}",
+        *[f"  - {line}" for line in describe_pending_processes(pending_gpt_requests)],
         "",
         f"Pending TTL: {format_duration(PENDING_REQUEST_TTL_SECONDS)}",
         "Кнопки ниже выполняют мягкое управление: scan ставится на паузу, mail2 просит остановку, ожидания очищаются.",
@@ -1384,7 +1438,9 @@ def build_poc_buttons():
         rows.append([Button.inline("Очистить wizard pending", data=POC_CLEAR_WIZARD_CALLBACK_DATA)])
     if pending_mail2_requests:
         rows.append([Button.inline("Очистить mail2 pending", data=POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA)])
-    if pending_wizard_requests or pending_mail2_requests:
+    if pending_gpt_requests:
+        rows.append([Button.inline("Очистить GPT pending", data=POC_CLEAR_GPT_PENDING_CALLBACK_DATA)])
+    if pending_wizard_requests or pending_mail2_requests or pending_gpt_requests:
         rows.append([Button.inline("Очистить все pending", data=POC_CLEAR_ALL_PENDING_CALLBACK_DATA)])
     rows.append([Button.inline("Обновить процессы", data=POC_REFRESH_CALLBACK_DATA)])
     return rows
@@ -1515,6 +1571,89 @@ def parse_mail2_command(text: str) -> str | None:
     if not match:
         return None
     return (match.group(1) or "").strip()
+
+
+def parse_gpt_command(text: str) -> GPTCommand | None:
+    match = re.match(
+        rf"^\s*/?(?:{command_alias_pattern('gpt', 'chatgpt', 'ai', 'openai', 'ии', 'чгпт')})(?:\s+([\s\S]+))?\s*$",
+        text or "",
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    prompt = (match.group(1) or "").strip()
+    if prompt.casefold() in {"reset", "clear", "new", "сброс", "очистить", "новый"}:
+        return GPTCommand(action="reset", prompt="")
+    return GPTCommand(action="ask", prompt=prompt)
+
+
+def extract_openai_response_text(response_data: dict) -> str:
+    direct_text = str(response_data.get("output_text") or "").strip()
+    if direct_text:
+        return direct_text
+
+    chunks: list[str] = []
+    for item in response_data.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content") or []:
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") in {"output_text", "text"}:
+                text = str(content.get("text") or "").strip()
+                if text:
+                    chunks.append(text)
+    return "\n\n".join(chunks).strip()
+
+
+def call_openai_response(prompt: str, previous_response_id: str | None = None) -> tuple[str, str]:
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    payload: dict[str, object] = {
+        "model": settings.openai_model,
+        "input": prompt,
+        "instructions": settings.openai_system_prompt,
+        "max_output_tokens": settings.openai_max_output_tokens,
+    }
+    if previous_response_id:
+        payload["previous_response_id"] = previous_response_id
+    if settings.openai_reasoning_effort:
+        payload["reasoning"] = {"effort": settings.openai_reasoning_effort}
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        f"{settings.openai_base_url}/responses",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {settings.openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=settings.openai_timeout_seconds) as response:
+            response_data = json.loads(response.read().decode("utf-8", errors="replace"))
+    except HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        try:
+            error_data = json.loads(error_body)
+            error_message = str((error_data.get("error") or {}).get("message") or error_body)
+        except Exception:
+            error_message = error_body or str(error)
+        raise RuntimeError(f"OpenAI API error {error.code}: {error_message[:500]}") from error
+    except URLError as error:
+        raise RuntimeError(f"OpenAI connection error: {error.reason}") from error
+
+    response_text = extract_openai_response_text(response_data)
+    response_id = str(response_data.get("id") or "").strip()
+    if not response_text:
+        raise RuntimeError("OpenAI returned an empty response")
+    return response_text, response_id
+
+
+async def ask_chatgpt(prompt: str, previous_response_id: str | None = None) -> tuple[str, str]:
+    return await asyncio.to_thread(call_openai_response, prompt, previous_response_id)
 
 
 def format_promo_mail_text(user_id: str, promo_code: str) -> str:
@@ -1736,6 +1875,11 @@ def build_command_menu_text() -> str:
             "/tail [строк] - последние строки userbot.log",
             "/version - версия, commit и дата запуска",
             "",
+            "ChatGPT:",
+            "/gpt <вопрос> - спросить ChatGPT и сохранить контекст диалога",
+            "/gpt - написать вопрос следующим сообщением",
+            "/gpt reset - очистить контекст ChatGPT",
+            "",
             "Пользователи:",
             "/user <id|username> - краткая карточка через админ-бот",
             "/user <id|username> -b - краткая карточка из SQLite базы",
@@ -1773,6 +1917,7 @@ def build_command_menu_buttons():
         [Button.text("scan"), Button.text("scan results")],
         [Button.text("/dashboard"), Button.text("/version"), Button.text("/diag")],
         [Button.text("/processes"), Button.text("/tail")],
+        [Button.text("/gpt"), Button.text("/gpt reset")],
         [Button.text("menu")],
         [Button.text("scan new"), Button.text("scan continue")],
         [Button.text("stop скан"), Button.text("scan reset")],
@@ -7489,6 +7634,91 @@ async def handle_roots_command(event, sender) -> None:
     await safe_event_reply(event, "Не понял команду /roots. Отправь /roots, чтобы посмотреть список и подсказки.")
 
 
+async def handle_gpt_prompt(event: events.NewMessage.Event, sender_id: int, prompt: str, status_message=None) -> None:
+    if not prompt.strip():
+        await safe_event_reply(event, "Пришли вопрос для `/gpt` или отправь `0 отмена`.")
+        return
+
+    if status_message is None:
+        status_message = await safe_event_reply(
+            event,
+            build_process_status(
+                "ChatGPT",
+                GPT_STEPS,
+                1,
+                extra_lines=[f"Модель: {settings.openai_model}", f"Вопрос: {len(prompt)} символов"],
+            ),
+        )
+
+    async def update_gpt_status(text: str, *, force: bool = False) -> None:
+        if status_message:
+            await edit_status_message(status_message, text, force=force)
+        else:
+            await safe_event_reply(event, text)
+
+    if not settings.openai_api_key:
+        await update_gpt_status(
+            build_process_status(
+                "ChatGPT",
+                GPT_STEPS,
+                1,
+                extra_lines=["OPENAI_API_KEY не задан в .env на сервере"],
+                failed=True,
+            ),
+            force=True,
+        )
+        await safe_event_reply(event, "ChatGPT не настроен: добавь `OPENAI_API_KEY` в `.env` на сервере и перезапусти бота.")
+        return
+
+    previous_response_id = gpt_chat_sessions.get(sender_id)
+    active_gpt_requests[sender_id] = {
+        "stage": "request",
+        "user_id": "-",
+        "created_at": now_timestamp(),
+    }
+    try:
+        await update_gpt_status(
+            build_process_status(
+                "ChatGPT",
+                GPT_STEPS,
+                2,
+                extra_lines=[
+                    f"Модель: {settings.openai_model}",
+                    "Контекст: " + ("продолжаю прошлый диалог" if previous_response_id else "новый диалог"),
+                ],
+            )
+        )
+        answer_text, response_id = await ask_chatgpt(prompt, previous_response_id)
+        if response_id:
+            gpt_chat_sessions[sender_id] = response_id
+        await update_gpt_status(
+            build_process_status(
+                "ChatGPT",
+                GPT_STEPS,
+                len(GPT_STEPS),
+                extra_lines=[f"Ответ: {len(answer_text)} символов"],
+                done=True,
+            ),
+            force=True,
+        )
+        await safe_event_reply(event, answer_text)
+    except Exception as error:
+        logging.exception("ChatGPT request failed sender_id=%s", sender_id)
+        await update_gpt_status(
+            build_process_status(
+                "ChatGPT",
+                GPT_STEPS,
+                len(GPT_STEPS),
+                extra_lines=["Запрос завершился ошибкой", str(error)[:300]],
+                failed=True,
+            ),
+            force=True,
+        )
+        await safe_event_reply(event, "ChatGPT сейчас не ответил. Подробности записаны в лог.")
+    finally:
+        active_gpt_requests.pop(sender_id, None)
+
+
 @client.on(events.CallbackQuery(data=SCAN_CANCEL_CALLBACK_DATA))
 async def handle_scan_cancel(event: events.CallbackQuery.Event) -> None:
     if not active_scan_cancel_event:
@@ -7531,10 +7761,16 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
         pending_mail2_requests.clear()
         changed = count > 0
         await event.answer(f"Mail2 pending очищено: {count}.", alert=False)
+    elif data == POC_CLEAR_GPT_PENDING_CALLBACK_DATA:
+        count = len(pending_gpt_requests)
+        pending_gpt_requests.clear()
+        changed = count > 0
+        await event.answer(f"GPT pending очищено: {count}.", alert=False)
     elif data == POC_CLEAR_ALL_PENDING_CALLBACK_DATA:
-        count = len(pending_wizard_requests) + len(pending_mail2_requests)
+        count = len(pending_wizard_requests) + len(pending_mail2_requests) + len(pending_gpt_requests)
         pending_wizard_requests.clear()
         pending_mail2_requests.clear()
+        pending_gpt_requests.clear()
         changed = count > 0
         await event.answer(f"Pending очищено: {count}.", alert=False)
     elif data == POC_REFRESH_CALLBACK_DATA:
@@ -7891,6 +8127,33 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             schedule_scan_auto_resume(scan_interruption)
         return
 
+    pending_gpt = pending_gpt_requests.get(sender_id)
+    if pending_gpt:
+        if incoming_text.strip().casefold() in {"0", "отмена", "cancel", "/cancel"}:
+            pending_gpt_requests.pop(sender_id, None)
+            status_message = pending_gpt.get("status_message")
+            cancel_text = build_process_status(
+                "ChatGPT",
+                GPT_STEPS,
+                1,
+                extra_lines=["Запрос отменен пользователем"],
+                done=True,
+            )
+            if status_message:
+                await edit_status_message(status_message, cancel_text, force=True)
+            else:
+                await safe_event_reply(event, cancel_text)
+            return
+
+        prompt = incoming_text.strip()
+        if not prompt:
+            await safe_event_reply(event, "Пришли вопрос для `/gpt` или `0 отмена`.")
+            return
+
+        pending_gpt_requests.pop(sender_id, None)
+        await handle_gpt_prompt(event, sender_id, prompt, pending_gpt.get("status_message"))
+        return
+
     if is_command_menu_command(event.raw_text or ""):
         await safe_event_reply(event, build_command_menu_text(), buttons=build_command_menu_buttons())
         return
@@ -7915,6 +8178,36 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     if is_status_command(event.raw_text or ""):
         await safe_event_reply(event, "[STATUS] Собираю dashboard из SQL базы...")
         await send_status_dashboard_from_database(event)
+        return
+
+    gpt_command = parse_gpt_command(event.raw_text or "")
+    if gpt_command:
+        if gpt_command.action == "reset":
+            gpt_chat_sessions.pop(sender_id, None)
+            await safe_event_reply(event, "Контекст ChatGPT очищен. Следующий `/gpt` начнет новый диалог.")
+            return
+        if not gpt_command.prompt:
+            status_message = await safe_event_reply(
+                event,
+                build_process_status(
+                    "ChatGPT",
+                    GPT_STEPS,
+                    1,
+                    extra_lines=[
+                        f"Модель: {settings.openai_model}",
+                        "Жду вопрос следующим сообщением",
+                        "Для отмены отправь 0",
+                    ],
+                ),
+            )
+            pending_gpt_requests[sender_id] = {
+                "stage": "await_prompt",
+                "status_message": status_message,
+                "created_at": now_timestamp(),
+            }
+            await safe_event_reply(event, "Напиши вопрос для ChatGPT следующим сообщением.")
+            return
+        await handle_gpt_prompt(event, sender_id, gpt_command.prompt)
         return
 
     scan_menu_action = parse_scan_menu_action(
