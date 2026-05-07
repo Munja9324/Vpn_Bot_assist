@@ -1618,7 +1618,7 @@ def call_openai_response(prompt: str, previous_response_id: str | None = None) -
     }
     if previous_response_id:
         payload["previous_response_id"] = previous_response_id
-    if settings.openai_reasoning_effort:
+    if settings.openai_reasoning_effort and settings.openai_reasoning_effort not in {"none", "off", "false", "0"}:
         payload["reasoning"] = {"effort": settings.openai_reasoning_effort}
 
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
