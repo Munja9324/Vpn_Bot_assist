@@ -4390,7 +4390,7 @@ def build_status_dashboard_from_database() -> tuple[Path, dict] | None:
     dashboard_path = report_dir / f"status-dashboard-{stamp}.html"
     analysis = analyze_business_status(stats)
     stats["business_analysis"] = analysis
-    atomic_write_text(dashboard_path, build_business_status_dashboard_html(stats, analysis))
+    atomic_write_text(dashboard_path, build_scan_dashboard_html(stats))
     public_path, public_url = publish_dashboard_file(dashboard_path, latest_name="latest-status-dashboard.html")
     stats["dashboard_public_path"] = str(public_path)
     stats["dashboard_public_url"] = public_url
@@ -5601,6 +5601,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
     expiring_7 = list(stats.get("expiring_within_7_days") or [])
     expiring_30 = list(stats.get("expiring_within_30_days") or [])
     expired = list(stats.get("expired_subscriptions") or [])
+    records = list(stats.get("records") or [])
 
     location_rows = "".join(
         f"<tr><td>{esc(location)}</td><td>{fmt_int(count)}</td></tr>"
@@ -5629,6 +5630,74 @@ def build_scan_dashboard_html(stats: dict) -> str:
         )
         colspan = "5" if with_days else "4"
         return rows or f"<tr><td colspan='{colspan}'>Нет данных</td></tr>"
+
+    def admin_user_rows_json(records: list[dict]) -> str:
+        today = datetime.now().date()
+        rows: list[dict[str, object]] = []
+        for record in records:
+            user_id = str(record.get("user_id") or "").strip()
+            username = extract_username_from_record(record)
+            user_text = str(record.get("user_text") or "")
+            registration_date = str(record.get("registration_date") or "").strip()
+            if not registration_date:
+                parsed_registration_date = extract_registration_date(user_text)
+                registration_date = parsed_registration_date.strftime("%Y-%m-%d") if parsed_registration_date else ""
+            subscriptions = list(record.get("subscriptions") or [])
+            locations_for_user = sorted(
+                {
+                    str(subscription.get("location") or "").strip()
+                    for subscription in subscriptions
+                    if str(subscription.get("location") or "").strip()
+                }
+            )
+            expiration_dates: list[date] = []
+            for subscription in subscriptions:
+                expires_at = extract_expiration_date(str(subscription.get("detail_text") or ""))
+                if expires_at:
+                    expiration_dates.append(expires_at.date() if isinstance(expires_at, datetime) else expires_at)
+            nearest_expiration = min(expiration_dates).strftime("%Y-%m-%d") if expiration_dates else ""
+            nearest_days = min((expires_at - today).days for expires_at in expiration_dates) if expiration_dates else None
+            if not subscriptions:
+                status = "no_subs"
+                status_label = "Без подписки"
+            elif nearest_days is None:
+                status = "unknown_date"
+                status_label = "Есть подписка, дата неизвестна"
+            elif nearest_days < 0:
+                status = "expired"
+                status_label = "Истекла"
+            elif nearest_days <= 7:
+                status = "expiring_7"
+                status_label = "Истекает за 7 дней"
+            elif nearest_days <= 30:
+                status = "expiring_30"
+                status_label = "Истекает за 30 дней"
+            else:
+                status = "active"
+                status_label = "Активна"
+            rows.append(
+                {
+                    "user_id": user_id,
+                    "username": username,
+                    "registration_date": registration_date,
+                    "subscriptions": len(subscriptions),
+                    "locations": ", ".join(locations_for_user),
+                    "nearest_expiration": nearest_expiration,
+                    "days_left": nearest_days if nearest_days is not None else "",
+                    "status": status,
+                    "status_label": status_label,
+                    "search": " ".join(
+                        (
+                            user_id,
+                            username,
+                            registration_date,
+                            " ".join(locations_for_user),
+                            user_text,
+                        )
+                    ).casefold(),
+                }
+            )
+        return json.dumps(rows, ensure_ascii=False).replace("</", "<\\/")
 
     def build_history_forecast_chart_svg(
         labels: list[str],
@@ -5809,6 +5878,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
     renew_7_rate = f"{float(assumptions.get('renewal_rate_7_days', 0.0)) * 100:.0f}%"
     renew_30_rate = f"{float(assumptions.get('renewal_rate_30_days', 0.0)) * 100:.0f}%"
     winback_rate = f"{float(assumptions.get('winback_rate_expired', 0.0)) * 100:.0f}%"
+    admin_users_json = admin_user_rows_json(records)
 
     return f"""<!doctype html>
 <html lang="ru">
@@ -5893,6 +5963,48 @@ def build_scan_dashboard_html(stats: dict) -> str:
       background: rgba(11,16,32,.35);
     }}
     .legend {{ color: var(--muted); font-size: 12px; margin-top: 4px; }}
+    .admin-shell {{ display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: start; }}
+    .side-nav {{ position: sticky; top: 12px; display: grid; gap: 8px; }}
+    .nav-btn, .filter-btn {{
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }}
+    .nav-btn.active, .filter-btn.active {{
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(86,212,255,.10);
+    }}
+    .tab-panel {{ display: none; }}
+    .tab-panel.active {{ display: block; }}
+    .toolbar {{ display: grid; grid-template-columns: minmax(180px, 1fr) 170px 170px; gap: 10px; margin: 10px 0 12px; }}
+    .toolbar input, .toolbar select {{
+      width: 100%;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+    }}
+    .filter-row {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }}
+    .status-pill {{ display: inline-flex; border-radius: 999px; padding: 3px 8px; border: 1px solid var(--border); font-size: 12px; color: var(--muted); }}
+    .status-pill.expired {{ color: var(--bad); border-color: rgba(248,113,113,.45); }}
+    .status-pill.expiring_7, .status-pill.expiring_30 {{ color: var(--warn); border-color: rgba(245,158,11,.45); }}
+    .status-pill.active {{ color: var(--good); border-color: rgba(52,211,153,.45); }}
+    .table-scroll {{ overflow: auto; border: 1px solid var(--border); border-radius: 8px; }}
+    .table-scroll table {{ min-width: 860px; }}
+    .muted {{ color: var(--muted); }}
+    @media (max-width: 980px) {{
+      .admin-shell {{ grid-template-columns: 1fr; }}
+      .side-nav {{ position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .toolbar {{ grid-template-columns: 1fr; }}
+    }}
     code {{
       background: #101735;
       border: 1px solid var(--border);
@@ -6043,6 +6155,208 @@ def build_scan_dashboard_html(stats: dict) -> str:
         <tbody>{build_expiration_rows(expired, limit=5)}</tbody>
       </table>
     </div>
+
+    <div class="panel" id="admin">
+      <h2>Админ-сайт: пользователи, фильтры и быстрый разбор базы</h2>
+      <div class="admin-shell">
+        <div class="side-nav">
+          <button class="nav-btn active" data-tab="users">Пользователи</button>
+          <button class="nav-btn" data-tab="attention">Нужно внимание</button>
+          <button class="nav-btn" data-tab="segments">Сегменты</button>
+          <button class="nav-btn" data-tab="forecast">Прогноз</button>
+        </div>
+        <div>
+          <section class="tab-panel active" data-panel="users">
+            <div class="toolbar">
+              <input id="adminSearch" placeholder="Поиск: ID, username, локация, текст карточки">
+              <select id="adminStatus">
+                <option value="all">Все статусы</option>
+                <option value="active">Активные</option>
+                <option value="expiring_7">Истекают за 7 дней</option>
+                <option value="expiring_30">Истекают за 30 дней</option>
+                <option value="expired">Истекшие</option>
+                <option value="no_subs">Без подписки</option>
+                <option value="unknown_date">Дата неизвестна</option>
+              </select>
+              <select id="adminSort">
+                <option value="risk">Сначала риск</option>
+                <option value="subs">Больше подписок</option>
+                <option value="new">Новые регистрации</option>
+                <option value="id">ID по возрастанию</option>
+              </select>
+            </div>
+            <div class="filter-row">
+              <button class="filter-btn active" data-status="all">Все</button>
+              <button class="filter-btn" data-status="no_subs">Без подписки</button>
+              <button class="filter-btn" data-status="expired">Истекшие</button>
+              <button class="filter-btn" data-status="expiring_7">7 дней</button>
+              <button class="filter-btn" data-status="expiring_30">30 дней</button>
+              <button class="filter-btn" data-status="active">Активные</button>
+            </div>
+            <div class="muted" id="adminCount"></div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th><th>Username</th><th>Регистрация</th><th>Подписок</th><th>Локации</th><th>Ближайшее окончание</th><th>Статус</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUsersBody"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="tab-panel" data-panel="attention">
+            <div class="cols">
+              <div class="panel">
+                <h2>Первые на связь</h2>
+                <p class="muted">Пользователи с истекшими или почти истекшими подписками. Их выгоднее обработать первыми.</p>
+                <div class="table-scroll"><table><thead><tr><th>ID</th><th>Username</th><th>Дата</th><th>Статус</th></tr></thead><tbody id="attentionBody"></tbody></table></div>
+              </div>
+              <div class="panel">
+                <h2>Без подписки</h2>
+                <p class="muted">Готовая аудитория для аккуратной рассылки `/broadcast`.</p>
+                <div class="table-scroll"><table><thead><tr><th>ID</th><th>Username</th><th>Регистрация</th></tr></thead><tbody id="noSubsBody"></tbody></table></div>
+              </div>
+            </div>
+          </section>
+          <section class="tab-panel" data-panel="segments">
+            <div class="cols">
+              <div class="panel">
+                <h2>Статусы пользователей</h2>
+                <table><tbody id="statusSegmentsBody"></tbody></table>
+              </div>
+              <div class="panel">
+                <h2>Что делать дальше</h2>
+                <table>
+                  <tbody>
+                    <tr><td>Истекшие</td><td>Предложить промокод или замену ключа через wizard.</td></tr>
+                    <tr><td>0..7 дней</td><td>Напомнить о продлении до окончания срока.</td></tr>
+                    <tr><td>Без подписки</td><td>Запустить мягкую рассылку через `/broadcast`.</td></tr>
+                    <tr><td>Дата неизвестна</td><td>Пересканировать или проверить точечно через `/subs &lt;id&gt;`.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+          <section class="tab-panel" data-panel="forecast">
+            <div class="grid">
+              <div class="card"><div class="k">Через месяц</div><div class="v good">{profit_m1} ₽</div></div>
+              <div class="card"><div class="k">Через полгода</div><div class="v good">{profit_m6} ₽</div></div>
+              <div class="card"><div class="k">Через год</div><div class="v good">{profit_y1} ₽</div></div>
+              <div class="card"><div class="k">Подписок через 6м</div><div class="v">{proj_subs_6m}</div></div>
+            </div>
+            <p class="muted">Прогноз строится из истории регистрации, текущих подписок, сроков окончания и статистики прибыли из админ-бота.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+    <script>
+      const adminUsers = {admin_users_json};
+      const riskRank = {{expired: 0, expiring_7: 1, expiring_30: 2, unknown_date: 3, no_subs: 4, active: 5}};
+      const body = document.getElementById("adminUsersBody");
+      const count = document.getElementById("adminCount");
+      const search = document.getElementById("adminSearch");
+      const status = document.getElementById("adminStatus");
+      const sort = document.getElementById("adminSort");
+      const statusLabels = {{
+        active: "Активные",
+        expiring_7: "Истекают за 7 дней",
+        expiring_30: "Истекают за 30 дней",
+        expired: "Истекшие",
+        no_subs: "Без подписки",
+        unknown_date: "Дата неизвестна"
+      }};
+
+      function escapeText(value) {{
+        return String(value ?? "").replace(/[&<>"']/g, ch => ({{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}}[ch]));
+      }}
+
+      function numericId(value) {{
+        const parsed = Number.parseInt(String(value || "0"), 10);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }}
+
+      function sortedRows(rows) {{
+        const mode = sort.value;
+        return [...rows].sort((a, b) => {{
+          if (mode === "subs") return Number(b.subscriptions || 0) - Number(a.subscriptions || 0);
+          if (mode === "new") return String(b.registration_date || "").localeCompare(String(a.registration_date || ""));
+          if (mode === "id") return numericId(a.user_id) - numericId(b.user_id);
+          return (riskRank[a.status] ?? 99) - (riskRank[b.status] ?? 99)
+            || Number(a.days_left || 999999) - Number(b.days_left || 999999);
+        }});
+      }}
+
+      function filteredRows() {{
+        const q = search.value.trim().toLowerCase();
+        const selectedStatus = status.value;
+        return sortedRows(adminUsers.filter(row => {{
+          const statusOk = selectedStatus === "all" || row.status === selectedStatus;
+          const searchOk = !q || String(row.search || "").toLowerCase().includes(q);
+          return statusOk && searchOk;
+        }}));
+      }}
+
+      function renderUsers() {{
+        const rows = filteredRows();
+        count.textContent = `Показано ${{rows.length}} из ${{adminUsers.length}} пользователей`;
+        body.innerHTML = rows.slice(0, 300).map(row => `
+          <tr>
+            <td>${{escapeText(row.user_id)}}</td>
+            <td>${{row.username ? "@" + escapeText(row.username) : "<span class='muted'>нет</span>"}}</td>
+            <td>${{escapeText(row.registration_date || "-")}}</td>
+            <td>${{escapeText(row.subscriptions)}}</td>
+            <td>${{escapeText(row.locations || "-")}}</td>
+            <td>${{escapeText(row.nearest_expiration || "-")}} ${{row.days_left !== "" ? "(" + escapeText(row.days_left) + " дн.)" : ""}}</td>
+            <td><span class="status-pill ${{escapeText(row.status)}}">${{escapeText(row.status_label)}}</span></td>
+          </tr>
+        `).join("") || "<tr><td colspan='7'>Нет данных</td></tr>";
+      }}
+
+      function renderAttention() {{
+        const attention = sortedRows(adminUsers.filter(row => ["expired", "expiring_7", "expiring_30"].includes(row.status))).slice(0, 25);
+        document.getElementById("attentionBody").innerHTML = attention.map(row => `
+          <tr><td>${{escapeText(row.user_id)}}</td><td>${{row.username ? "@" + escapeText(row.username) : "-"}}</td><td>${{escapeText(row.nearest_expiration || "-")}}</td><td>${{escapeText(row.status_label)}}</td></tr>
+        `).join("") || "<tr><td colspan='4'>Нет срочных пользователей</td></tr>";
+        const noSubs = adminUsers.filter(row => row.status === "no_subs").slice(0, 25);
+        document.getElementById("noSubsBody").innerHTML = noSubs.map(row => `
+          <tr><td>${{escapeText(row.user_id)}}</td><td>${{row.username ? "@" + escapeText(row.username) : "-"}}</td><td>${{escapeText(row.registration_date || "-")}}</td></tr>
+        `).join("") || "<tr><td colspan='3'>Нет пользователей без подписки</td></tr>";
+      }}
+
+      function renderSegments() {{
+        const counts = adminUsers.reduce((acc, row) => {{
+          acc[row.status] = (acc[row.status] || 0) + 1;
+          return acc;
+        }}, {{}});
+        document.getElementById("statusSegmentsBody").innerHTML = Object.keys(statusLabels).map(key => `
+          <tr><td>${{escapeText(statusLabels[key])}}</td><td>${{escapeText(counts[key] || 0)}}</td></tr>
+        `).join("");
+      }}
+
+      document.querySelectorAll(".nav-btn").forEach(button => {{
+        button.addEventListener("click", () => {{
+          document.querySelectorAll(".nav-btn").forEach(item => item.classList.remove("active"));
+          document.querySelectorAll(".tab-panel").forEach(item => item.classList.remove("active"));
+          button.classList.add("active");
+          document.querySelector(`[data-panel="${{button.dataset.tab}}"]`).classList.add("active");
+        }});
+      }});
+      document.querySelectorAll(".filter-btn").forEach(button => {{
+        button.addEventListener("click", () => {{
+          document.querySelectorAll(".filter-btn").forEach(item => item.classList.remove("active"));
+          button.classList.add("active");
+          status.value = button.dataset.status;
+          renderUsers();
+        }});
+      }});
+      search.addEventListener("input", renderUsers);
+      status.addEventListener("change", renderUsers);
+      sort.addEventListener("change", renderUsers);
+      renderUsers();
+      renderAttention();
+      renderSegments();
+    </script>
 
     <div class="panel">
       <h2>Допущения прогноза</h2>
