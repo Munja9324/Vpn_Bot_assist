@@ -3,8 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>intrawb 10 GIF loader</title>
+    <title>VPN_KBR loader</title>
     <style>
+      :root {
+        --bg: #f7f8f8;
+        --ink: #111111;
+        --red: #e11919;
+      }
+
       * {
         box-sizing: border-box;
       }
@@ -15,24 +21,251 @@
         height: 100%;
         margin: 0;
         overflow: hidden;
-        background: transparent;
       }
 
       body {
         display: grid;
         place-items: center;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, Arial, Helvetica, system-ui, sans-serif;
       }
 
-      .loader {
-        width: min(860px, 94vw, 90vh);
-        aspect-ratio: 1877 / 1221;
+      .stage {
+        position: relative;
+        width: min(100vw, 100vh);
+        height: min(100vw, 100vh);
+        min-width: 320px;
+        min-height: 320px;
+        display: grid;
+        place-items: center;
+      }
+
+      .frame {
+        position: absolute;
+        inset: 42px;
+        border: 1px solid var(--ink);
+        opacity: 0.08;
+      }
+
+      .logo-wrap {
+        position: relative;
+        width: min(620px, 68vw);
+        height: min(620px, 68vw);
+        display: grid;
+        place-items: center;
+        animation: intro 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+
+      .card {
+        position: relative;
+        width: min(500px, 55vw);
+        height: min(500px, 55vw);
+        min-width: 230px;
+        min-height: 230px;
+        border-radius: 34px;
+        background: #fff;
+        overflow: hidden;
+        box-shadow: 0 28px 80px rgb(0 0 0 / 8%);
+      }
+
+      .logo {
+        width: 100%;
+        height: 100%;
         object-fit: contain;
-        display: block;
-        filter: drop-shadow(0 28px 32px rgb(0 0 0 / 38%));
+        filter: grayscale(1) contrast(1.24) brightness(0.98);
+        opacity: 0.98;
+        animation: breathe 5s ease-in-out infinite;
+      }
+
+      .trace {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
+        width: 100%;
+        height: 100%;
+        mix-blend-mode: normal;
+        opacity: 0.96;
+        pointer-events: none;
+      }
+
+      .mountain-trace {
+        stroke-dasharray: 1320;
+        stroke-dashoffset: 1320;
+        animation: traceMountains 5s linear infinite;
+      }
+
+      .river-trace {
+        stroke-dasharray: 420;
+        stroke-dashoffset: 420;
+        animation: traceRiver 5s linear infinite;
+      }
+
+      .caption {
+        position: absolute;
+        left: 50%;
+        bottom: 11%;
+        width: min(520px, 64vw);
+        transform: translateX(-50%);
+        animation: caption 1.1s ease both;
+      }
+
+      .row {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 24px;
+      }
+
+      .percent {
+        color: var(--ink);
+        opacity: 0.72;
+        font-size: clamp(16px, 2.2vw, 22px);
+        line-height: 1;
+        font-weight: 700;
+      }
+
+      .bar {
+        height: 4px;
+        margin-top: 22px;
+        background: rgb(0 0 0 / 12%);
+        overflow: hidden;
+      }
+
+      .fill {
+        height: 100%;
+        width: 0;
+        background: var(--ink);
+        animation: load 5s linear infinite;
+      }
+
+      @keyframes intro {
+        from {
+          opacity: 0;
+          transform: translateY(20px) scale(0.96);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      @keyframes caption {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 10px);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, 0);
+        }
+      }
+
+      @keyframes breathe {
+        0%,
+        100% {
+          transform: scale(0.985);
+        }
+        50% {
+          transform: scale(1.015);
+        }
+      }
+
+      @keyframes load {
+        to {
+          width: 100%;
+        }
+      }
+
+      @keyframes traceMountains {
+        0% {
+          stroke-dashoffset: 1320;
+        }
+        92%,
+        100% {
+          stroke-dashoffset: 0;
+        }
+      }
+
+      @keyframes traceRiver {
+        0%,
+        55% {
+          stroke-dashoffset: 420;
+        }
+        100% {
+          stroke-dashoffset: 0;
+        }
       }
     </style>
   </head>
   <body>
-    <img class="loader" src="public/rf-crest-loader.gif" alt="Герб РФ" />
+    <main class="stage">
+      <div class="frame"></div>
+      <section class="logo-wrap" aria-label="VPN_KBR loading">
+        <div class="card">
+          <img class="logo" src="public/vpn-kbr-logo.jpg" alt="VPN_KBR logo" />
+          <svg class="trace" viewBox="0 0 500 500" aria-hidden="true">
+            <defs>
+              <filter id="neonGlow" x="-25%" y="-25%" width="150%" height="150%">
+                <feGaussianBlur stdDeviation="2.2" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <path
+              class="mountain-trace"
+              d="M123 183 C155 167 190 143 224 116 C239 132 257 153 276 174 C288 153 302 137 318 122 C338 144 364 165 397 183"
+              fill="none"
+              stroke="#e11919"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              filter="url(#neonGlow)"
+            />
+            <path
+              class="mountain-trace"
+              d="M224 116 C220 136 203 158 184 174 M318 122 C323 145 344 163 372 176"
+              fill="none"
+              stroke="#e11919"
+              stroke-width="2"
+              stroke-linecap="round"
+              opacity="0.75"
+            />
+            <path
+              class="river-trace"
+              d="M248 224 C226 224 201 229 181 240 C169 247 168 258 181 266 C198 277 224 283 224 303 C224 328 190 340 154 354"
+              fill="none"
+              stroke="#e11919"
+              stroke-width="3.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              filter="url(#neonGlow)"
+              opacity="0.82"
+            />
+          </svg>
+        </div>
+      </section>
+      <section class="caption">
+        <div class="row">
+          <div class="percent" id="percent">000%</div>
+        </div>
+        <div class="bar"><div class="fill"></div></div>
+      </section>
+    </main>
+    <script>
+      const percent = document.getElementById("percent");
+      const startedAt = performance.now();
+
+      const tick = () => {
+        const elapsed = ((performance.now() - startedAt) / 1000) % 5;
+        const value = Math.round((elapsed / 5) * 100);
+        percent.textContent = `${value.toString().padStart(3, "0")}%`;
+        requestAnimationFrame(tick);
+      };
+
+      tick();
+    </script>
   </body>
 </html>
