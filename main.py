@@ -1235,8 +1235,16 @@ def read_text_tail(path: Path, lines: int) -> str:
     return "\n".join(text.splitlines()[-lines:]) or "[лог пуст]"
 
 
+def command_alias_pattern(*aliases: str) -> str:
+    return "|".join(re.escape(alias) for alias in aliases)
+
+
 def parse_logs_command(text: str) -> int | None:
-    match = re.match(r"^\s*/?(?:logs|log|логи|лог)(?:\s+(\d{1,3}))?\s*$", text or "", flags=re.IGNORECASE)
+    match = re.match(
+        rf"^\s*/?(?:{command_alias_pattern('logs', 'log', 'tail', 'логи', 'лог')})(?:\s+(\d{{1,3}}))?\s*$",
+        text or "",
+        flags=re.IGNORECASE,
+    )
     if not match:
         return None
     if not match.group(1):
@@ -1344,7 +1352,7 @@ def build_poc_text() -> str:
     mail2_running = bool(active_mail2_cancel_event and not active_mail2_cancel_event.is_set())
     auto_resume_running = bool(active_scan_auto_resume_task and not active_scan_auto_resume_task.done())
     lines = [
-        "POC: процессы бота",
+        "Процессы Vpn_Bot_assist",
         "",
         f"Admin flow: {active_admin_flow_text()}",
         f"Admin bot: {format_admin_bot_health()}",
@@ -1361,7 +1369,7 @@ def build_poc_text() -> str:
         *[f"  - {line}" for line in describe_pending_processes(pending_mail2_requests)],
         "",
         f"Pending TTL: {format_duration(PENDING_REQUEST_TTL_SECONDS)}",
-        "Кнопки ниже выполняют мягкое управление: scan ставится на паузу, mail2 просит остановку, pending очищаются.",
+        "Кнопки ниже выполняют мягкое управление: scan ставится на паузу, mail2 просит остановку, ожидания очищаются.",
     ]
     return "\n".join(lines)
 
@@ -1378,7 +1386,7 @@ def build_poc_buttons():
         rows.append([Button.inline("Очистить mail2 pending", data=POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA)])
     if pending_wizard_requests or pending_mail2_requests:
         rows.append([Button.inline("Очистить все pending", data=POC_CLEAR_ALL_PENDING_CALLBACK_DATA)])
-    rows.append([Button.inline("Обновить POC", data=POC_REFRESH_CALLBACK_DATA)])
+    rows.append([Button.inline("Обновить процессы", data=POC_REFRESH_CALLBACK_DATA)])
     return rows
 
 
@@ -1456,8 +1464,9 @@ def extract_username_from_record(record: dict) -> str:
     return extract_username_from_text(str(record.get("user_text") or ""))
 
 
-def parse_user_lookup_command(command: str, text: str) -> UserLookupCommand | None:
-    match = re.match(rf"^\s*/?{re.escape(command)}\s+(.+?)\s*$", text or "", flags=re.IGNORECASE)
+def parse_user_lookup_command(command: str | tuple[str, ...], text: str) -> UserLookupCommand | None:
+    aliases = (command,) if isinstance(command, str) else command
+    match = re.match(rf"^\s*/?(?:{command_alias_pattern(*aliases)})\s+(.+?)\s*$", text or "", flags=re.IGNORECASE)
     if not match:
         return None
 
@@ -1484,7 +1493,11 @@ def parse_user_lookup_command(command: str, text: str) -> UserLookupCommand | No
 
 
 def parse_mail_command(text: str) -> tuple[str, str] | None:
-    match = re.match(r"^\s*mail\s+(\d{1,20})(?:\s+([\s\S]+))?\s*$", text, flags=re.IGNORECASE)
+    match = re.match(
+        rf"^\s*/?(?:{command_alias_pattern('mail', 'send', 'message', 'msg', 'письмо')})\s+(\d{{1,20}})(?:\s+([\s\S]+))?\s*$",
+        text or "",
+        flags=re.IGNORECASE,
+    )
     if not match:
         return None
 
@@ -1494,7 +1507,11 @@ def parse_mail_command(text: str) -> tuple[str, str] | None:
 
 
 def parse_mail2_command(text: str) -> str | None:
-    match = re.match(r"^\s*/?mail2(?:\s+([\s\S]+))?\s*$", text or "", flags=re.IGNORECASE)
+    match = re.match(
+        rf"^\s*/?(?:{command_alias_pattern('mail2', 'broadcast', 'massmail', 'рассылка')})(?:\s+([\s\S]+))?\s*$",
+        text or "",
+        flags=re.IGNORECASE,
+    )
     if not match:
         return None
     return (match.group(1) or "").strip()
@@ -1514,7 +1531,11 @@ def format_promo_mail_text(user_id: str, promo_code: str) -> str:
 
 
 def parse_promo_command(text: str) -> tuple[str, str, str] | None:
-    match = re.match(r"^\s*/?promo\s+(\d{1,20})(?:\s+([\s\S]+))?\s*$", text, flags=re.IGNORECASE)
+    match = re.match(
+        rf"^\s*/?(?:{command_alias_pattern('promo', 'coupon', 'promocode', 'промо', 'промокод')})\s+(\d{{1,20}})(?:\s+([\s\S]+))?\s*$",
+        text or "",
+        flags=re.IGNORECASE,
+    )
     if not match:
         return None
 
@@ -1525,7 +1546,7 @@ def parse_promo_command(text: str) -> tuple[str, str, str] | None:
 
 
 def parse_help_command(text: str) -> UserLookupCommand | None:
-    return parse_user_lookup_command("help", text)
+    return parse_user_lookup_command(("help", "user", "find", "пользователь", "найти"), text)
 
 
 def is_help_overview_command(text: str) -> bool:
@@ -1533,11 +1554,11 @@ def is_help_overview_command(text: str) -> bool:
 
 
 def is_command_menu_command(text: str) -> bool:
-    return bool(re.match(r"^\s*/?(?:menu|commands|команды|меню)\s*$", text, flags=re.IGNORECASE))
+    return bool(re.match(r"^\s*/?(?:menu|commands|cmd|команды|меню)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_status_command(text: str) -> bool:
-    return bool(re.match(r"^\s*/?(?:status|статус)\s*$", text, flags=re.IGNORECASE))
+    return bool(re.match(r"^\s*/?(?:dashboard|dash|status|report|дашборд|отчет|отчёт|статус)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_version_command(text: str) -> bool:
@@ -1549,7 +1570,13 @@ def is_diagnostics_command(text: str) -> bool:
 
 
 def is_poc_command(text: str) -> bool:
-    return bool(re.match(r"^\s*/?(?:poc|proc|process|processes|процессы|процес|пoc)\s*$", text, flags=re.IGNORECASE))
+    return bool(
+        re.match(
+            r"^\s*/?(?:poc|proc|process|processes|tasks|jobs|ps|процессы|процесс|процес|задачи|пoc)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def is_roots_command(text: str) -> bool:
@@ -1661,11 +1688,15 @@ def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None
 
 
 def parse_info_command(text: str) -> UserLookupCommand | None:
-    return parse_user_lookup_command("info", text)
+    return parse_user_lookup_command(("info", "subs", "subscriptions", "подписки"), text)
 
 
 def parse_wizard_command(text: str) -> str | None:
-    match = re.match(r"^\s*wizard\s+(\d{1,20})\s*$", text, flags=re.IGNORECASE)
+    match = re.match(
+        rf"^\s*/?(?:{command_alias_pattern('wizard', 'card', 'карточка')})\s+(\d{{1,20}})\s*$",
+        text or "",
+        flags=re.IGNORECASE,
+    )
     if not match:
         return None
     return match.group(1)
@@ -1696,31 +1727,43 @@ def parse_scan_command(text: str) -> str | None:
 def build_command_menu_text() -> str:
     return "\n".join(
         (
-            "Меню команд",
+            "Меню Vpn_Bot_assist",
             "",
-            "Выбери кнопку или отправь команду вручную:",
-            "help <user_id|username> - найти пользователя через админ-бот",
-            "help <user_id|username> -b - взять пользователя из SQLite базы",
-            "info <user_id|username> - подробная информация и подписки",
-            "info <user_id|username> -b - подробная информация из SQLite базы",
-            "wizard <user_id> - подготовить карточку и отправить в wizard",
-            "promo <user_id> - создать промокод <user_id>nPromo и отправить пользователю",
-            "mail <user_id> <текст> - отправить сообщение пользователю",
-            "/mail2 <текст> - отправить текст всем пользователям без подписки из SQLite базы",
+            "Главные команды:",
+            "/dashboard - красивый отчет из SQLite базы по ссылке",
+            "/processes - активные задачи: scan, mail2, wizard и ожидания",
+            "/diag - диагностика бота, базы, scan и dashboard",
+            "/tail [строк] - последние строки userbot.log",
+            "/version - версия, commit и дата запуска",
+            "",
+            "Пользователи:",
+            "/user <id|username> - краткая карточка через админ-бот",
+            "/user <id|username> -b - краткая карточка из SQLite базы",
+            "/subs <id|username> - подробная информация и подписки через админ-бот",
+            "/subs <id|username> -b - подробная информация и подписки из SQLite базы",
+            "/wizard <id> - подготовить карточку, дать проверить и отправить в wizard",
+            "",
+            "Сообщения и промо:",
+            "/send <id> <текст> - отправить сообщение пользователю",
+            "/send <id> - отправить текст по умолчанию из MAIL_TEXT",
+            "/broadcast <текст> - рассылка всем пользователям без подписки из SQLite базы",
+            "/broadcast - попросить текст следующим сообщением",
+            "/coupon <id> - создать промокод <id>nPromo и отправить пользователю",
+            "",
+            "Scan:",
+            "scan - меню скана",
+            "scan new - новый скан с первого ID",
+            "scan continue - продолжить сохраненный скан",
+            "stop скан - пауза и просмотр результатов",
+            "scan results - результаты scan и dashboard",
+            "scan reset - сброс сохраненного scan",
+            "",
+            "Доступ:",
             "/roots - список запросников",
             "/roots add <user_id|@username|me> - добавить запросника",
             "/roots del <user_id|@username> - удалить запросника",
-            "scan - меню скана",
-            "scan new - новый скан с первой страницы",
-            "scan continue - продолжить сохраненный скан",
-            "stop скан - пауза и просмотр результатов",
-            "scan results - результаты scan",
-            "scan reset - сброс сохраненного scan",
-            "/status - собрать dashboard из SQL базы и отправить в чат",
-            "/version - показать версию, commit и дату запуска",
-            "/diag - диагностика бота, базы, scan и dashboard",
-            "/poc - процессы бота: посмотреть, поставить на паузу, остановить ожидания",
-            "/logs [строк] - последние строки userbot.log",
+            "",
+            "Старые названия тоже работают: status, help, info, mail, mail2, promo, poc, logs.",
         )
     )
 
@@ -1728,15 +1771,15 @@ def build_command_menu_text() -> str:
 def build_command_menu_buttons():
     return [
         [Button.text("scan"), Button.text("scan results")],
-        [Button.text("/status"), Button.text("/version"), Button.text("/diag")],
-        [Button.text("/poc"), Button.text("/logs")],
+        [Button.text("/dashboard"), Button.text("/version"), Button.text("/diag")],
+        [Button.text("/processes"), Button.text("/tail")],
         [Button.text("menu")],
         [Button.text("scan new"), Button.text("scan continue")],
         [Button.text("stop скан"), Button.text("scan reset")],
-        [Button.text("help 123456789"), Button.text("info 123456789")],
-        [Button.text("help username -b"), Button.text("info username -b")],
-        [Button.text("wizard 123456789"), Button.text("promo 123456789")],
-        [Button.text("mail 123456789"), Button.text("/mail2")],
+        [Button.text("/user 123456789"), Button.text("/subs 123456789")],
+        [Button.text("/user username -b"), Button.text("/subs username -b")],
+        [Button.text("/wizard 123456789"), Button.text("/coupon 123456789")],
+        [Button.text("/send 123456789"), Button.text("/broadcast")],
         [Button.text("/roots"), Button.text("/roots add me")],
     ]
 
@@ -7495,12 +7538,12 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
         changed = count > 0
         await event.answer(f"Pending очищено: {count}.", alert=False)
     elif data == POC_REFRESH_CALLBACK_DATA:
-        await event.answer("Обновляю POC.", alert=False)
+        await event.answer("Обновляю процессы.", alert=False)
     else:
-        await event.answer("Неизвестная команда POC.", alert=True)
+        await event.answer("Неизвестная команда процессов.", alert=True)
         return
 
-    logging.info("POC callback data=%r sender_id=%s changed=%s", data, event.sender_id, changed)
+    logging.info("Process callback data=%r sender_id=%s changed=%s", data, event.sender_id, changed)
     try:
         await event.edit(build_poc_text(), buttons=build_poc_buttons())
     except MessageNotModifiedError:
@@ -8124,34 +8167,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         return
 
     if is_help_overview_command(event.raw_text or ""):
-        await safe_event_reply(
-            event,
-            "\n".join(
-                (
-                    "Доступные команды:",
-                    "/help — показать список всех команд",
-                    "/version — показать версию, commit и дату запуска",
-                    "help <user_id|username> — найти пользователя в админ-боте",
-                    "help <user_id|username> -b — взять пользователя из SQLite базы",
-                    "wizard <user_id> — найти и отправить карточку в @wizardvpn_manager (с подтверждением)",
-                    "info <user_id|username> — получить подробную информацию и подписки",
-                    "info <user_id|username> -b — получить подробную информацию из SQLite базы",
-                    "promo <user_id> — создать промокод <user_id>nPromo и отправить пользователю через mail",
-                    "mail <user_id> <текст> — отправить сообщение пользователю",
-                    "mail <user_id> — отправить сообщение по умолчанию (MAIL_TEXT)",
-                    "/mail2 <текст> — отправить текст всем пользователям без подписки из SQLite базы",
-                    "/mail2 — попросить текст следующим сообщением и потом запустить рассылку",
-                    "/roots — список запросников",
-                    "/roots add <user_id|@username|me> — добавить запросника",
-                    "/roots del <user_id|@username> — удалить запросника",
-                    "scan или scan start — старт / продолжение scan",
-                    "scan pause или /stopscan — поставить scan на паузу",
-                    "scan reset — сбросить сохраненный прогресс scan",
-                    "scan results — показать результаты scan",
-                    "/scanmenu — открыть меню scan",
-                )
-            )
-        )
+        await safe_event_reply(event, build_command_menu_text(), buttons=build_command_menu_buttons())
         return
 
     wizard_user_id = parse_wizard_command(event.raw_text or "")
@@ -8480,7 +8496,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             active_scan_menu_owner_id = event.sender_id
             await safe_event_reply(event, build_scan_menu_text_fast(), buttons=build_scan_menu_buttons())
             return
-        await safe_event_reply(event, "\u0422\u0430\u043a\u043e\u0439 \u043a\u043e\u043c\u0430\u043d\u0434\u044b \u043d\u0435\u0442 \u0432 \u0441\u043f\u0438\u0441\u043a\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043c\u044b\u0445.")
+        await safe_event_reply(
+            event,
+            "Такой команды нет в списке поддерживаемых. Напиши `menu` или `/help`, чтобы открыть кнопки команд.",
+            buttons=build_command_menu_buttons(),
+        )
 
 
 async def main() -> None:
@@ -8507,7 +8527,7 @@ async def main() -> None:
     admin_bot_entity_cache = await get_admin_bot_entity()
     health_task = asyncio.create_task(monitor_admin_bot_health())
     logging.info("Userbot started as %s", me.username or me.first_name or me.id)
-    logging.info("Send help <user_id> in private chat to run admin search.")
+    logging.info("Send /user <user_id|username> or /help in private chat to run commands.")
     logging.info("Full log file: %s", Path(settings.log_file).resolve())
     logging.info("Press Ctrl+C to stop.")
     try:
