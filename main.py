@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import html
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -157,7 +157,7 @@ def env_text(name: str, default: str) -> str:
         return default
 
     # Windows consoles sometimes save Cyrillic .env values as mojibake.
-    if any(marker in value for marker in ("Р ", "РЎРЉ", "РЎРЏ", "РЎв‚¬", "РЎвЂ№")):
+    if any(marker in value for marker in ("\u0420\u00a0", "\u0420\u040e", "\u0420\u040f", "\u0421\u20ac", "\u0421\u2039")):
         return default
 
     return value
@@ -348,7 +348,7 @@ def load_settings() -> Settings:
         openai_reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "none").strip().casefold(),
         openai_system_prompt=env_text(
             "OPENAI_SYSTEM_PROMPT",
-            "РўС‹ РІСЃС‚СЂРѕРµРЅРЅС‹Р№ РїРѕРјРѕС‰РЅРёРє Vpn_Bot_assist. РћС‚РІРµС‡Р°Р№ РєСЂР°С‚РєРѕ, РїРѕРЅСЏС‚РЅРѕ Рё РїРѕ-СЂСѓСЃСЃРєРё, РµСЃР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РїРѕРїСЂРѕСЃРёР» РёРЅР°С‡Рµ.",
+            "Ты встроенный помощник Vpn_Bot_assist. Отвечай кратко, понятно и по-русски, если пользователь не попросил иначе.",
         ),
         openai_transcribe_model=os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe").strip()
         or "gpt-4o-mini-transcribe",
@@ -414,22 +414,22 @@ def load_settings() -> Settings:
         telegram_proxy_password=os.getenv("TELEGRAM_PROXY_PASSWORD", "").strip(),
         wizard_target_username=os.getenv("WIZARD_TARGET_USERNAME", "wizardvpn_manager"),
         dashboard_brand_name=env_text("DASHBOARD_BRAND_NAME", env_text("APP_NAME", "Vpn_Bot_assist")),
-        dashboard_title=env_text("DASHBOARD_TITLE", "РџРѕРЅСЏС‚РЅС‹Р№ РѕС‚С‡С‘С‚ РїРѕ РїРѕРґРїРёСЃРєР°Рј"),
+        dashboard_title=env_text("DASHBOARD_TITLE", "Понятный отчёт по подпискам"),
         dashboard_subtitle=env_text(
             "DASHBOARD_SUBTITLE",
-            "РџСЂРѕСЃС‚Рѕ СЃРјРѕС‚СЂРё РЅР° С†РёС„СЂС‹: СЃРєРѕР»СЊРєРѕ Р»СЋРґРµР№, СЃРєРѕР»СЊРєРѕ РїРѕРґРїРёСЃРѕРє Рё СЃРєРѕР»СЊРєРѕ РґРµРЅРµРі Р¶РґС‘Рј.",
+            "Просто смотри на цифры: сколько людей, сколько подписок и сколько денег ждём.",
         ),
         dashboard_hint_primary=env_text(
             "DASHBOARD_HINT_PRIMARY",
-            "1) РЎРјРѕС‚СЂРё РєР°СЂС‚РѕС‡РєСѓ В«Р”РѕС…РѕРґ РІ СЃР»РµРґСѓСЋС‰РµРј РјРµСЃСЏС†РµВ» вЂ” СЌС‚Рѕ РіР»Р°РІРЅР°СЏ СЃСѓРјРјР°.",
+            "1) Смотри карточку «Доход в следующем месяце» — это главная сумма.",
         ),
         dashboard_hint_secondary=env_text(
             "DASHBOARD_HINT_SECONDARY",
-            "2) Р‘Р»РѕРє В«Р—Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ СЃРєРѕСЂРѕВ» РїРѕРєР°Р·С‹РІР°РµС‚, СЃ РєРµРј СЃРІСЏР·Р°С‚СЊСЃСЏ РІ РїРµСЂРІСѓСЋ РѕС‡РµСЂРµРґСЊ.",
+            "2) Блок «Заканчивается скоро» показывает, с кем связаться в первую очередь.",
         ),
         dashboard_hint_tertiary=env_text(
             "DASHBOARD_HINT_TERTIARY",
-            "3) Р“СЂР°С„РёРєРё РЅРёР¶Рµ РїРѕРєР°Р·С‹РІР°СЋС‚ СЂРѕСЃС‚: СЃРїР»РѕС€РЅР°СЏ Р»РёРЅРёСЏ вЂ” РїСЂРѕС€Р»РѕРµ, РїСѓРЅРєС‚РёСЂ вЂ” РїСЂРѕРіРЅРѕР·.",
+            "3) Графики ниже показывают рост: сплошная линия — прошлое, пунктир — прогноз.",
         ),
         dashboard_logo_path=os.getenv("DASHBOARD_LOGO_PATH", "").strip(),
         dashboard_theme_bg=env_text("DASHBOARD_THEME_BG", "#0b1020"),
@@ -555,8 +555,8 @@ class ScanCancelledError(Exception):
 
 admin_bot_health = {
     "emoji": "[WAIT]",
-    "status": "РїСЂРѕРІРµСЂРєР°",
-    "detail": "РµС‰С‘ РЅРµ РїСЂРѕРІРµСЂСЏР»",
+    "status": "проверка",
+    "detail": "ещё не проверял",
     "updated_at": "-",
 }
 
@@ -576,7 +576,7 @@ def format_admin_bot_health() -> str:
     detail = str(admin_bot_health.get("detail") or "")
     suffix = f" - {detail}" if detail else ""
     marker = str(admin_bot_health.get("emoji", "[WAIT]"))
-    status = str(admin_bot_health.get("status", "РїСЂРѕРІРµСЂРєР°"))
+    status = str(admin_bot_health.get("status", "проверка"))
     if marker in {"[WAIT]", "[WAIT]"}:
         marker = animated_symbol("waiting")
     elif marker in {"[OK]", "[OK]"}:
@@ -679,49 +679,49 @@ def note_success_action() -> None:
 
 
 SEARCH_STEPS = [
-    "РџРѕРґРєР»СЋС‡Р°СЋСЃСЊ Рє Р°РґРјРёРЅ-Р±РѕС‚Сѓ",
-    "РћС‚РєСЂС‹РІР°СЋ СЂР°Р·РґРµР» РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
-    "РС‰Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РїРѕ ID",
-    "РћС‚РєСЂС‹РІР°СЋ РїРѕРґРїРёСЃРєРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
-    "Р¤РѕСЂРјРёСЂСѓСЋ РѕС‚РІРµС‚",
+    "Подключаюсь к админ-боту",
+    "Открываю раздел пользователей",
+    "щу пользователя по ID",
+    "Открываю подписки пользователя",
+    "Формирую ответ",
 ]
 INFO_STEPS = [
-    "РџРѕРґРєР»СЋС‡Р°СЋСЃСЊ Рє Р°РґРјРёРЅ-Р±РѕС‚Сѓ",
-    "РћС‚РєСЂС‹РІР°СЋ СЂР°Р·РґРµР» РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
-    "РС‰Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РїРѕ ID",
-    "РћС‚РєСЂС‹РІР°СЋ СЃРїРёСЃРѕРє РїРѕРґРїРёСЃРѕРє",
-    "Р§РёС‚Р°СЋ РїРѕРґСЂРѕР±РЅРѕСЃС‚Рё РєР°Р¶РґРѕР№ РїРѕРґРїРёСЃРєРё",
-    "Р¤РѕСЂРјРёСЂСѓСЋ РїРѕР»РЅС‹Р№ РѕС‚С‡РµС‚",
+    "Подключаюсь к админ-боту",
+    "Открываю раздел пользователей",
+    "щу пользователя по ID",
+    "Открываю список подписок",
+    "Читаю подробности каждой подписки",
+    "Формирую полный отчет",
 ]
 MAIL_STEPS = [
-    "РџРѕРґРєР»СЋС‡Р°СЋСЃСЊ Рє Р°РґРјРёРЅ-Р±РѕС‚Сѓ",
-    "РћС‚РєСЂС‹РІР°СЋ СЂР°Р·РґРµР» РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
-    "РС‰Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РїРѕ ID",
-    "РћС‚РєСЂС‹РІР°СЋ С„РѕСЂРјСѓ СЃРѕРѕР±С‰РµРЅРёСЏ",
-    "РџРµСЂРµРґР°СЋ С‚РµРєСЃС‚ РїРёСЃСЊРјР°",
-    "РџРѕРґС‚РІРµСЂР¶РґР°СЋ РѕС‚РїСЂР°РІРєСѓ",
+    "Подключаюсь к админ-боту",
+    "Открываю раздел пользователей",
+    "щу пользователя по ID",
+    "Открываю форму сообщения",
+    "Передаю текст письма",
+    "Подтверждаю отправку",
 ]
 MAIL2_STEPS = [
-    "Р§РёС‚Р°СЋ SQLite Р±Р°Р·Сѓ",
-    "РС‰Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ Р±РµР· РїРѕРґРїРёСЃРєРё",
-    "Р“РѕС‚РѕРІР»СЋ С‚РµРєСЃС‚ СЂР°СЃСЃС‹Р»РєРё",
-    "РћС‚РїСЂР°РІР»СЏСЋ СЃРѕРѕР±С‰РµРЅРёСЏ С‡РµСЂРµР· mail",
-    "Р¤РѕСЂРјРёСЂСѓСЋ РёС‚РѕРіРѕРІС‹Р№ РѕС‚С‡РµС‚",
+    "Читаю SQLite базу",
+    "щу пользователей без подписки",
+    "Готовлю текст рассылки",
+    "Отправляю сообщения через mail",
+    "Формирую итоговый отчет",
 ]
 PROMO_STEPS = [
-    "РџРѕРґРєР»СЋС‡Р°СЋСЃСЊ Рє Р°РґРјРёРЅ-Р±РѕС‚Сѓ",
-    "РћС‚РєСЂС‹РІР°СЋ СЂР°Р·РґРµР» РїСЂРѕРјРѕРєРѕРґРѕРІ",
-    "РћС‚РєСЂС‹РІР°СЋ СЃРѕР·РґР°РЅРёРµ РїСЂРѕРјРѕРєРѕРґР°",
-    "Р’РІРѕР¶Сѓ РЅР°Р·РІР°РЅРёРµ РїСЂРѕРјРѕРєРѕРґР°",
-    "Р’РІРѕР¶Сѓ Р±СЋРґР¶РµС‚",
-    "Р’РІРѕР¶Сѓ СЃСѓРјРјСѓ РїСЂРѕРјРѕРєРѕРґР°",
-    "РџРѕРґС‚РІРµСЂР¶РґР°СЋ СЃРѕР·РґР°РЅРёРµ",
-    "РћС‚РїСЂР°РІР»СЏСЋ РїСЂРѕРјРѕРєРѕРґ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+    "Подключаюсь к админ-боту",
+    "Открываю раздел промокодов",
+    "Открываю создание промокода",
+    "Ввожу название промокода",
+    "Ввожу бюджет",
+    "Ввожу сумму промокода",
+    "Подтверждаю создание",
+    "Отправляю промокод пользователю",
 ]
 WIZARD_STEPS = [
     "Подключаюсь к админ-боту",
     "Открываю раздел пользователей",
-    "Ищу пользователя по ID",
+    "щу пользователя по ID",
     "Открываю подписки пользователя",
     "Готовлю карточку",
     "Жду ответ: 1 отправить, 2 добавить, 0 отмена",
@@ -744,19 +744,42 @@ SUPPORT_OPERATOR_USERNAME = (os.getenv("SUPPORT_OPERATOR_USERNAME", "Aloneinthep
 VIRTUAL_ASSISTANT_NAME = "VPN_KBR"
 VIRTUAL_ASSISTANT_INTRO = f"Я виртуальный помощник {VIRTUAL_ASSISTANT_NAME}."
 MOJIBAKE_MARKERS = (
-    "Рџ",
-    "РЎ",
-    "Рў",
-    "РЏ",
-    "Р§",
-    "Рќ",
-    "Рђ",
-    "РЇ",
-    "СЂ",
-    "СЃ",
-    "С‚",
-    "СЏ",
-    "вЂ",
+    "\u0420\u045f",
+    "\u0420\u00a0",
+    "\u0420\u045a",
+    "\u0420\u040c",
+    "\u0420\u0403",
+    "\u0420\u2014",
+    "\u0420\u201c",
+    "\u0420\u201d",
+    "\u0420\u045b",
+    "\u0420\u02dc",
+    "\u0420\u0408",
+    "\u0420\u0459",
+    "\u0420\u2018",
+    "\u0420\u2019",
+    "\u0420\u00a4",
+    "\u0420\u00a7",
+    "\u0420\u0401",
+    "\u0420\u0407",
+    "\u0420\u00b0",
+    "\u0420\u00b5",
+    "\u0420\u0451",
+    "\u0420\u0455",
+    "\u0420\u0405",
+    "\u0420\u0457",
+    "\u0421\u0402",
+    "\u0421\u0453",
+    "\u0421\u201a",
+    "\u0421\u040a",
+    "\u0421\u2039",
+    "\u0421\u040f",
+    "\u0421\u045a",
+    "\u0421\u20ac",
+    "\u0421\u2030",
+    "\u0432\u0402",
+    "\u0432\u201e",
+    "\u0432\u201a",
 )
 
 
@@ -770,7 +793,7 @@ def mojibake_score(text: str) -> int:
 
 def looks_like_mojibake_text(text: str) -> bool:
     sample = str(text or "")
-    return mojibake_score(sample) >= 2 or "Р§РµРј" in sample or "вЂ”" in sample
+    return mojibake_score(sample) >= 2 or "\u0420\u00a7\u0420\u00b5\u0420\u0458" in sample or "\u0432\u0402\u201d" in sample
 
 
 def repair_mojibake_text(text: str) -> str:
@@ -778,23 +801,30 @@ def repair_mojibake_text(text: str) -> str:
     if not original or not looks_like_mojibake_text(original):
         return original
 
-    candidates = [original]
-    for encoding in ("cp1251", "latin1"):
-        try:
-            candidate = original.encode(encoding, errors="ignore").decode("utf-8", errors="ignore")
-        except Exception:
-            continue
-        if candidate:
-            candidates.append(candidate)
+    def repair_piece(piece: str) -> str:
+        candidates = [piece]
+        for encoding in ("cp1251", "latin1"):
+            try:
+                candidate = piece.encode(encoding, errors="ignore").decode("utf-8", errors="ignore")
+            except Exception:
+                continue
+            if candidate:
+                candidates.append(candidate)
 
-    best = original
-    best_value = (cyrillic_letters_count(original) * 2) - (mojibake_score(original) * 5)
-    for candidate in candidates[1:]:
-        value = (cyrillic_letters_count(candidate) * 2) - (mojibake_score(candidate) * 5)
-        if value > best_value:
-            best = candidate
-            best_value = value
-    return best
+        best = piece
+        best_value = (cyrillic_letters_count(piece) * 2) - (mojibake_score(piece) * 8)
+        for candidate in candidates[1:]:
+            value = (cyrillic_letters_count(candidate) * 2) - (mojibake_score(candidate) * 8)
+            if value > best_value:
+                best = candidate
+                best_value = value
+        return best
+
+    repaired_lines = []
+    for line in original.splitlines(keepends=True):
+        repaired_lines.append(repair_piece(line) if looks_like_mojibake_text(line) else line)
+    repaired = "".join(repaired_lines)
+    return repair_piece(repaired) if looks_like_mojibake_text(repaired) else repaired
 
 
 def sanitize_outgoing_text(text: str) -> str:
@@ -855,6 +885,31 @@ def gpt_retry_message(wait_seconds: float) -> str:
     )
 
 
+def format_retry_after_text(seconds: float) -> str:
+    seconds_int = max(1, int(round(seconds)))
+    minutes, rest = divmod(seconds_int, 60)
+    hours, minutes = divmod(minutes, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} ч")
+    if minutes:
+        parts.append(f"{minutes} мин")
+    if rest and not hours:
+        parts.append(f"{rest} сек")
+    return " ".join(parts) or f"{seconds_int} сек"
+
+
+def gpt_daily_limit_message(error_text: str = "") -> str:
+    retry_after = parse_retry_seconds_from_error_text(error_text, default_seconds=0)
+    detail = "Дневной лимит запросов OpenAI для текущего ключа исчерпан."
+    if retry_after > 0:
+        detail += f" Новый запрос можно пробовать примерно через {format_retry_after_text(retry_after)}."
+    return assistant_compact_reply(
+        "KBR_GPT временно недоступен.",
+        detail,
+    )
+
+
 def gpt_timeout_wait_message(wait_seconds: float) -> str:
     seconds = max(1, int(round(wait_seconds)))
     return assistant_compact_reply(
@@ -878,6 +933,8 @@ def classify_gpt_failure_reason(error_text: str) -> str:
     lowered = str(error_text or "").casefold()
     if "openai_api_key is not configured" in lowered or "api key" in lowered and "not configured" in lowered:
         return "missing_key"
+    if "requests per day" in lowered or " rpd" in lowered or "(rpd)" in lowered:
+        return "daily_limit"
     if "rate limit" in lowered or "too many requests" in lowered or "api error 429" in lowered:
         return "rate_limit"
     if "only accessible over https" in lowered or ("http error 403" in lowered and "openai" in lowered):
@@ -899,6 +956,10 @@ def is_timeout_error_text(error_text: str) -> bool:
     return classify_gpt_failure_reason(error_text) == "timeout"
 
 
+def is_daily_limit_error_text(error_text: str) -> bool:
+    return classify_gpt_failure_reason(error_text) == "daily_limit"
+
+
 def gpt_failed_message(error_text: str = "") -> str:
     reason = classify_gpt_failure_reason(error_text)
     if reason == "missing_key":
@@ -906,6 +967,8 @@ def gpt_failed_message(error_text: str = "") -> str:
             "KBR_GPT не настроен.",
             "На сервере не задан OPENAI_API_KEY.",
         )
+    if reason == "daily_limit":
+        return gpt_daily_limit_message(error_text)
     if reason == "rate_limit":
         return assistant_compact_reply(
             "KBR_GPT временно перегружен.",
@@ -1023,7 +1086,7 @@ def build_process_status(
 ) -> str:
     title = sanitize_outgoing_text(title)
     steps = [sanitize_outgoing_text(step) for step in steps]
-    status = "ОШИБКА" if failed else "ГОТОВО" if done else "В РАБОТЕ"
+    status = "ОШБКА" if failed else "ГОТОВО" if done else "В РАБОТЕ"
     total_steps = max(len(steps), 1)
     current_step = max(1, min(active_step, total_steps))
     done_units = total_steps if done else max(current_step - 1 if failed else current_step, 0)
@@ -1050,7 +1113,7 @@ def build_process_status(
 
 def active_admin_flow_text() -> str:
     if not active_admin_flow:
-        return "СЃРІРѕР±РѕРґРµРЅ"
+        return "свободен"
     name = str(active_admin_flow.get("name") or "admin")
     user_id = str(active_admin_flow.get("user_id") or "").strip()
     started_at = active_admin_flow.get("started_at")
@@ -1090,9 +1153,9 @@ async def admin_flow_context(
                 progress_step,
                 user_id=user_id,
                 extra_lines=[
-                    "РђРґРјРёРЅ-РїСЂРѕС†РµСЃСЃ Р·Р°РЅСЏС‚, РѕСЃРІРѕР±РѕР¶РґР°СЋ РѕС‡РµСЂРµРґСЊ.",
-                    f"РЎРµР№С‡Р°СЃ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ: {active_admin_flow_text()}",
-                    f"Р–РґСѓ: {format_duration(waited)} / РјР°РєСЃРёРјСѓРј {format_duration(ADMIN_FLOW_MAX_WAIT_SECONDS)}",
+                    "Админ-процесс занят, освобождаю очередь.",
+                    f"Сейчас выполняется: {active_admin_flow_text()}",
+                    f"Жду: {format_duration(waited)} / максимум {format_duration(ADMIN_FLOW_MAX_WAIT_SECONDS)}",
                 ],
             )
             last_notice_at = now
@@ -1115,20 +1178,20 @@ async def admin_flow_context(
 
 def is_final_status_text(text: str) -> bool:
     markers = (
-        "РЎРўРђРўРЈРЎ: Р“РћРўРћР’Рћ",
-        "РЎРўРђРўРЈРЎ: РћРЁРР‘РљРђ",
-        "РЎРўРђРўРЈРЎ: РџРђРЈР—Рђ",
-        "Р—Р°СЏРІРєР° РїСЂРёРЅСЏС‚Р° Рё РїРµСЂРµРґР°РЅР° РІ РїРѕРґРґРµСЂР¶РєСѓ",
-        "Р—Р°СЏРІРєСѓ РїСЂРёРЅСЏР» Рё РїРµСЂРµРґР°Р» РІ РїРѕРґРґРµСЂР¶РєСѓ",
-        "РЎРїР°СЃРёР±Рѕ, РѕР±СЂР°С‰РµРЅРёРµ РїСЂРёРЅСЏС‚Рѕ",
-        "РЇ РїРµСЂРµРґР°Р» РµРіРѕ РІ РїРѕРґРґРµСЂР¶РєСѓ",
-        "Р“РѕС‚РѕРІРѕ. РћС‚РїСЂР°РІР»СЏСЋ РѕС‚РІРµС‚",
-        "РћС‚РІРµС‚ РіРѕС‚РѕРІ.",
-        "РќРµ СѓРґР°Р»РѕСЃСЊ Р±С‹СЃС‚СЂРѕ РїРѕР»СѓС‡РёС‚СЊ РѕС‚РІРµС‚.",
-        "РќРµ СѓРґР°Р»РѕСЃСЊ",
-        "Scan Р·Р°РІРµСЂС€РµРЅ",
-        "Scan РЅР° РїР°СѓР·Рµ",
-        "Scan СЃР±СЂРѕС€РµРЅ",
+        "СТАТУС: ГОТОВО",
+        "СТАТУС: ОШБКА",
+        "СТАТУС: ПАУЗА",
+        "Заявка принята и передана в поддержку",
+        "Заявку принял и передал в поддержку",
+        "Спасибо, обращение принято",
+        "Я передал его в поддержку",
+        "Готово. Отправляю ответ",
+        "Ответ готов.",
+        "Не удалось быстро получить ответ.",
+        "Не удалось",
+        "Scan завершен",
+        "Scan на паузе",
+        "Scan сброшен",
     )
     return any(marker in text for marker in markers)
 
@@ -1138,32 +1201,32 @@ def is_status_like_text(text: str) -> bool:
     if not cleaned.strip():
         return False
     markers = (
-        "РЎРўРђРўРЈРЎ:",
-        "РЎС‚Р°С‚СѓСЃ:",
-        "РЁРђР“ ",
+        "СТАТУС:",
+        "Статус:",
+        "ШАГ ",
         "STEP ",
-        "Scan РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
+        "Scan пользователей",
         "[STATUS]",
-        "РѕР¶РёРґР°Р№С‚Рµ",
-        "РїРѕРґРѕР¶РґРёС‚Рµ",
-        "РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РЅРµРјРЅРѕРіРѕ РїРѕРґРѕР¶РґРёС‚Рµ",
-        "РџСЂРёРЅСЏР» Р·Р°РїСЂРѕСЃ.",
-        "РџСЂРёРЅСЏР» РіРѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ.",
-        "РџСЂРёРЅСЏР» РІРѕРїСЂРѕСЃ.",
-        "РЎРµСЂРІРёСЃ СЃРµР№С‡Р°СЃ Р·Р°РЅСЏС‚.",
-        "РћС‚РІРµС‚ РіРѕС‚РѕРІ.",
-        "РЎРѕР±РёСЂР°СЋ dashboard",
-        "Р—Р°СЏРІРєР° РїСЂРёРЅСЏС‚Р° Рё РїРµСЂРµРґР°РЅР° РІ РїРѕРґРґРµСЂР¶РєСѓ",
-        "Р—Р°СЏРІРєСѓ РїСЂРёРЅСЏР» Рё РїРµСЂРµРґР°Р» РІ РїРѕРґРґРµСЂР¶РєСѓ",
-        "РЎРїР°СЃРёР±Рѕ, РѕР±СЂР°С‰РµРЅРёРµ РїСЂРёРЅСЏС‚Рѕ.",
-        "Р—Р°РїСЂРѕСЃ РїРѕРґРґРµСЂР¶РєРё РѕС‚РјРµРЅРµРЅ",
+        "ожидайте",
+        "подождите",
+        "Пожалуйста, немного подождите",
+        "Принял запрос.",
+        "Принял голосовое сообщение.",
+        "Принял вопрос.",
+        "Сервис сейчас занят.",
+        "Ответ готов.",
+        "Собираю dashboard",
+        "Заявка принята и передана в поддержку",
+        "Заявку принял и передал в поддержку",
+        "Спасибо, обращение принято.",
+        "Запрос поддержки отменен",
     )
     return any(marker in cleaned for marker in markers)
 
 
 def extract_scan_position(text: str) -> tuple[int, int] | None:
     patterns = (
-        r"РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РїРѕ ID:\s*(\d+)\s*/\s*(\d+)",
+        r"Сканирование по ID:\s*(\d+)\s*/\s*(\d+)",
         r"ID\s*(\d+)\s*/\s*(\d+)",
     )
     for pattern in patterns:
@@ -1428,8 +1491,8 @@ async def reply_with_text_file(event, text: str, **kwargs):
         preview = preview[:520].rstrip() + "..."
     short_text = "\n".join(
         (
-            "РџРѕР»РЅС‹Р№ С‚РµРєСЃС‚ СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ РґР»СЏ Telegram. РћС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р»РѕРј.",
-            f"Р¤Р°Р№Р»: {path.name}",
+            "Полный текст слишком большой для Telegram. Отправляю файлом.",
+            f"Файл: {path.name}",
             "",
             preview,
         )
@@ -1439,7 +1502,7 @@ async def reply_with_text_file(event, text: str, **kwargs):
     except MediaCaptionTooLongError:
         logging.warning("File caption is too long; retrying with minimal caption")
         try:
-            return await event.reply(f"РџРѕР»РЅС‹Р№ С‚РµРєСЃС‚ РІ С„Р°Р№Р»Рµ: {path.name}", file=str(path), **file_kwargs)
+            return await event.reply(f"Полный текст в файле: {path.name}", file=str(path), **file_kwargs)
         except MediaCaptionTooLongError:
             logging.warning("Minimal file caption is too long; retrying without caption")
             return await event.reply(file=str(path), **file_kwargs)
@@ -1456,19 +1519,19 @@ async def reply_with_text_file(event, text: str, **kwargs):
 def build_scan_status(
     text: str,
     *,
-    checkpoint_text: str = "РЅРµС‚",
+    checkpoint_text: str = "нет",
     done: bool = False,
     failed: bool = False,
     paused: bool = False,
 ) -> str:
     if failed:
-        status = "РѕС€РёР±РєР°"
+        status = "ошибка"
     elif paused:
-        status = "РїР°СѓР·Р°"
+        status = "пауза"
     elif done:
-        status = "Р·Р°РІРµСЂС€РµРЅРѕ"
+        status = "завершено"
     else:
-        status = "РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ"
+        status = "выполняется"
 
     short_text = " ".join(text.split())
     if len(short_text) > 120:
@@ -1484,7 +1547,7 @@ def build_scan_status(
     else:
         bar, percent = make_progress_bar(1, 2, width=0)
     title_text = decorate_status_title(
-        "Scan РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
+        "Scan пользователей",
         done=done,
         failed=failed,
         paused=paused,
@@ -1496,7 +1559,7 @@ def build_scan_status(
     lines = [
         title_text,
         f"{bar} {percent}%",
-        f"{status_icon} РЎС‚Р°С‚СѓСЃ: {status}",
+        f"{status_icon} Статус: {status}",
         f"BOT: {format_admin_bot_health()}",
         f"CHECKPOINT: {checkpoint_text}",
     ]
@@ -1638,10 +1701,11 @@ def format_duration(seconds: float | int | None) -> str:
     minutes, rest = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
-        return f"{hours}С‡ {minutes}Рј"
+        return f"{hours}ч {minutes}м"
     if minutes:
-        return f"{minutes}Рј {rest}СЃ"
-    return f"{rest}СЃ"
+        return f"{minutes}м {rest}с"
+    return f"{rest}с"
+
 
 
 def prune_expired_pending_requests() -> dict[str, int]:
@@ -1693,7 +1757,7 @@ def prune_expired_pending_requests() -> dict[str, int]:
 def read_text_tail(path: Path, lines: int) -> str:
     lines = max(1, min(LOG_TAIL_MAX_LINES, int(lines)))
     if not path.exists() or not path.is_file():
-        return f"Р›РѕРі-С„Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ: {path}"
+        return f"Лог-файл не найден: {path}"
 
     chunk_size = 8192
     max_bytes = 512_000
@@ -1708,7 +1772,7 @@ def read_text_tail(path: Path, lines: int) -> str:
             data = file.read(read_size) + data
 
     text = data.decode("utf-8", errors="replace")
-    return "\n".join(text.splitlines()[-lines:]) or "[Р»РѕРі РїСѓСЃС‚]"
+    return "\n".join(text.splitlines()[-lines:]) or "[лог пуст]"
 
 
 def command_alias_pattern(*aliases: str) -> str:
@@ -1717,7 +1781,7 @@ def command_alias_pattern(*aliases: str) -> str:
 
 def parse_logs_command(text: str) -> int | None:
     match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('logs', 'log', 'tail', 'Р»РѕРіРё', 'Р»РѕРі')})(?:\s+(\d{{1,3}}))?\s*$",
+        rf"^\s*/?(?:{command_alias_pattern('logs', 'log', 'tail', 'логи', 'лог')})(?:\s+(\d{{1,3}}))?\s*$",
         text or "",
         flags=re.IGNORECASE,
     )
@@ -1730,18 +1794,18 @@ def parse_logs_command(text: str) -> int | None:
 
 def parse_unresolved_command(text: str) -> tuple[str, int | None, str] | None:
     match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('unresolved', 'unsolved', 'unanswered', 'РЅРµСЂРµС€РµРЅРЅС‹Рµ', 'РЅРµРѕС‚РІРµС‡РµРЅРЅС‹Рµ')})(?:\s+([\s\S]+))?\s*$",
+        rf"^\s*/?(?:{command_alias_pattern('unresolved', 'unsolved', 'unanswered', 'нерешенные', 'неотвеченные')})(?:\s+([\s\S]+))?\s*$",
         text or "",
         flags=re.IGNORECASE,
     )
     if not match:
         return None
     tail = (match.group(1) or "").strip()
-    if not tail or tail.casefold() in {"list", "open", "СЃРїРёСЃРѕРє", "РЅРѕРІС‹Рµ"}:
+    if not tail or tail.casefold() in {"list", "open", "список", "новые"}:
         return ("list", None, "")
-    if tail.casefold() in {"all", "РІСЃРµ"}:
+    if tail.casefold() in {"all", "все"}:
         return ("all", None, "")
-    resolve_match = re.match(r"^(?:done|close|resolve|РіРѕС‚РѕРІРѕ|Р·Р°РєСЂС‹С‚СЊ)\s+(\d+)(?:\s+([\s\S]+))?$", tail, flags=re.IGNORECASE)
+    resolve_match = re.match(r"^(?:done|close|resolve|готово|закрыть)\s+(\d+)(?:\s+([\s\S]+))?$", tail, flags=re.IGNORECASE)
     if resolve_match:
         return ("resolve", int(resolve_match.group(1)), (resolve_match.group(2) or "").strip())
     if re.fullmatch(r"\d+", tail):
@@ -1752,7 +1816,7 @@ def parse_unresolved_command(text: str) -> tuple[str, int | None, str] | None:
 def build_recent_logs_text(lines: int) -> str:
     log_path = application_log_path()
     content = read_text_tail(log_path, lines)
-    header = f"РџРѕСЃР»РµРґРЅРёРµ {lines} СЃС‚СЂРѕРє Р»РѕРіР°: {log_path}"
+    header = f"Последние {lines} строк лога: {log_path}"
     return f"{header}\n\n{content}"
 
 
@@ -1780,11 +1844,11 @@ def build_diagnostics_text() -> str:
     scan_running = bool(active_scan_cancel_event and not active_scan_cancel_event.is_set())
     mail2_running = bool(active_mail2_cancel_event and not active_mail2_cancel_event.is_set())
 
-    db_status = "РЅРµС‚"
+    db_status = "нет"
     if db_path.exists():
-        db_status = f"РµСЃС‚СЊ, {format_bytes(db_path.stat().st_size)}"
+        db_status = f"есть, {format_bytes(db_path.stat().st_size)}"
 
-    checkpoint_text = "РЅРµС‚"
+    checkpoint_text = "нет"
     if checkpoint:
         next_user_id = int(checkpoint.get("next_user_id") or checkpoint.get("page_number") or 1)
         total_users_hint = int(checkpoint.get("total_users_hint") or 0)
@@ -1794,7 +1858,7 @@ def build_diagnostics_text() -> str:
             f"records {len(checkpoint.get('records') or [])}, saved {checkpoint.get('saved_at', '-')}"
         )
 
-    stats_text = "РЅРµС‚"
+    stats_text = "нет"
     if latest_stats:
         stats_text = (
             f"generated {str(latest_stats.get('generated_at') or '-').replace('T', ' ')}, "
@@ -1805,7 +1869,7 @@ def build_diagnostics_text() -> str:
 
     return "\n".join(
         (
-            "Р”РёР°РіРЅРѕСЃС‚РёРєР° Vpn_Bot_assist",
+            "Диагностика Vpn_Bot_assist",
             "",
             f"Version: {version['version']}",
             f"Commit: {version['commit_short']}",
@@ -1815,16 +1879,16 @@ def build_diagnostics_text() -> str:
             "",
             f"SQLite: {db_status}",
             f"SQLite path: {db_path}",
-            f"Requesters: {requesters_total if requesters_total >= 0 else 'РѕС€РёР±РєР°'}",
-            f"Unresolved: {unresolved_open if unresolved_open >= 0 else 'РѕС€РёР±РєР°'}",
-            f"OpenAI: {'РЅР°СЃС‚СЂРѕРµРЅ' if settings.openai_api_key else 'РЅРµС‚ РєР»СЋС‡Р°'} ({settings.openai_model})",
+            f"Requesters: {requesters_total if requesters_total >= 0 else 'ошибка'}",
+            f"Unresolved: {unresolved_open if unresolved_open >= 0 else 'ошибка'}",
+            f"OpenAI: {'настроен' if settings.openai_api_key else 'нет ключа'} ({settings.openai_model})",
             "",
-            f"Scan active: {'РґР°' if scan_running else 'РЅРµС‚'}",
+            f"Scan active: {'да' if scan_running else 'нет'}",
             f"Scan owner: {active_scan_owner_id or '-'}",
             f"Scan checkpoint: {checkpoint_text}",
             f"Scan delay: {active_scan_action_delay_seconds:.2f}s",
             "",
-            f"Mail2 active: {'РґР°' if mail2_running else 'РЅРµС‚'}",
+            f"Mail2 active: {'да' if mail2_running else 'нет'}",
             f"Wizard pending: {len(pending_wizard_requests)}",
             f"Mail2 pending: {len(pending_mail2_requests)}",
             f"Mail pending: {len(pending_direct_mail_requests)}",
@@ -1841,13 +1905,13 @@ def build_diagnostics_text() -> str:
 
 def describe_pending_processes(pending: dict[int, dict[str, object]], *, limit: int = 5) -> list[str]:
     if not pending:
-        return ["РЅРµС‚"]
+        return ["нет"]
     lines: list[str] = []
     for index, (sender_id, data) in enumerate(pending.items(), start=1):
         if index > limit:
-            lines.append(f"... РµС‰Рµ {len(pending) - limit}")
+            lines.append(f"... еще {len(pending) - limit}")
             break
-        stage = str(data.get("stage") or "РѕР¶РёРґР°РЅРёРµ")
+        stage = str(data.get("stage") or "ожидание")
         user_id = str(data.get("user_id") or "-")
         age = pending_request_age_seconds(data)
         lines.append(f"{sender_id}: {stage}, user {user_id}, age {format_duration(age)}")
@@ -1860,17 +1924,17 @@ def build_poc_text() -> str:
     mail2_running = bool(active_mail2_cancel_event and not active_mail2_cancel_event.is_set())
     auto_resume_running = bool(active_scan_auto_resume_task and not active_scan_auto_resume_task.done())
     lines = [
-        "РџСЂРѕС†РµСЃСЃС‹ Vpn_Bot_assist",
+        "Процессы Vpn_Bot_assist",
         "",
         f"Admin flow: {active_admin_flow_text()}",
         f"Admin bot: {format_admin_bot_health()}",
         "",
-        f"Scan: {'Р°РєС‚РёРІРµРЅ' if scan_running else 'РЅРµ Р·Р°РїСѓС‰РµРЅ'}",
+        f"Scan: {'активен' if scan_running else 'не запущен'}",
         f"Scan owner: {active_scan_owner_id or '-'}",
         f"Scan checkpoint: {format_scan_checkpoint_text()}",
-        f"Scan auto-resume: {'РѕР¶РёРґР°РµС‚' if auto_resume_running else 'РЅРµС‚'}",
+        f"Scan auto-resume: {'ожидает' if auto_resume_running else 'нет'}",
         "",
-        f"Mail2: {'Р°РєС‚РёРІРЅР°' if mail2_running else 'РЅРµ Р·Р°РїСѓС‰РµРЅР°'}",
+        f"Mail2: {'активна' if mail2_running else 'не запущена'}",
         f"Wizard pending: {len(pending_wizard_requests)}",
         *[f"  - {line}" for line in describe_pending_processes(pending_wizard_requests)],
         f"Mail2 pending: {len(pending_mail2_requests)}",
@@ -1885,7 +1949,7 @@ def build_poc_text() -> str:
         *[f"  - {line}" for line in describe_pending_processes(pending_smart_actions)],
         "",
         f"Pending TTL: {format_duration(PENDING_REQUEST_TTL_SECONDS)}",
-        "РљРЅРѕРїРєРё РЅРёР¶Рµ РІС‹РїРѕР»РЅСЏСЋС‚ РјСЏРіРєРѕРµ СѓРїСЂР°РІР»РµРЅРёРµ: scan СЃС‚Р°РІРёС‚СЃСЏ РЅР° РїР°СѓР·Сѓ, mail2 РїСЂРѕСЃРёС‚ РѕСЃС‚Р°РЅРѕРІРєСѓ, РѕР¶РёРґР°РЅРёСЏ РѕС‡РёС‰Р°СЋС‚СЃСЏ.",
+        "Кнопки ниже выполняют мягкое управление: scan ставится на паузу, mail2 просит остановку, ожидания очищаются.",
     ]
     return "\n".join(lines)
 
@@ -1893,22 +1957,22 @@ def build_poc_text() -> str:
 def build_poc_buttons():
     rows = []
     if active_scan_cancel_event and not active_scan_cancel_event.is_set():
-        rows.append([Button.inline("РџР°СѓР·Р° scan", data=POC_SCAN_PAUSE_CALLBACK_DATA)])
+        rows.append([Button.inline("Пауза scan", data=POC_SCAN_PAUSE_CALLBACK_DATA)])
     if active_mail2_cancel_event and not active_mail2_cancel_event.is_set():
-        rows.append([Button.inline("РћСЃС‚Р°РЅРѕРІРёС‚СЊ mail2", data=POC_MAIL2_STOP_CALLBACK_DATA)])
+        rows.append([Button.inline("Остановить mail2", data=POC_MAIL2_STOP_CALLBACK_DATA)])
     if pending_wizard_requests:
-        rows.append([Button.inline("РћС‡РёСЃС‚РёС‚СЊ wizard pending", data=POC_CLEAR_WIZARD_CALLBACK_DATA)])
+        rows.append([Button.inline("Очистить wizard pending", data=POC_CLEAR_WIZARD_CALLBACK_DATA)])
     if pending_mail2_requests:
-        rows.append([Button.inline("РћС‡РёСЃС‚РёС‚СЊ mail2 pending", data=POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA)])
+        rows.append([Button.inline("Очистить mail2 pending", data=POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA)])
     if pending_direct_mail_requests:
-        rows.append([Button.inline("РћС‡РёСЃС‚РёС‚СЊ mail pending", data=b"poc:clear_mail_pending")])
+        rows.append([Button.inline("Очистить mail pending", data=b"poc:clear_mail_pending")])
     if pending_gpt_requests:
-        rows.append([Button.inline("РћС‡РёСЃС‚РёС‚СЊ GPT pending", data=POC_CLEAR_GPT_PENDING_CALLBACK_DATA)])
+        rows.append([Button.inline("Очистить GPT pending", data=POC_CLEAR_GPT_PENDING_CALLBACK_DATA)])
     if pending_smart_actions:
-        rows.append([Button.inline("РћС‡РёСЃС‚РёС‚СЊ smart pending", data=b"poc:clear_smart_pending")])
+        rows.append([Button.inline("Очистить smart pending", data=b"poc:clear_smart_pending")])
     if pending_wizard_requests or pending_mail2_requests or pending_direct_mail_requests or pending_gpt_requests or pending_smart_actions:
-        rows.append([Button.inline("РћС‡РёСЃС‚РёС‚СЊ РІСЃРµ pending", data=POC_CLEAR_ALL_PENDING_CALLBACK_DATA)])
-    rows.append([Button.inline("РћР±РЅРѕРІРёС‚СЊ РїСЂРѕС†РµСЃСЃС‹", data=POC_REFRESH_CALLBACK_DATA)])
+        rows.append([Button.inline("Очистить все pending", data=POC_CLEAR_ALL_PENDING_CALLBACK_DATA)])
+    rows.append([Button.inline("Обновить процессы", data=POC_REFRESH_CALLBACK_DATA)])
     return rows
 
 
@@ -2008,7 +2072,7 @@ def parse_user_lookup_command(command: str | tuple[str, ...], text: str) -> User
 
 def parse_mail_command(text: str) -> tuple[str, str] | None:
     match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('mail', 'send', 'message', 'msg', 'РїРёСЃСЊРјРѕ')})\s+(\d{{1,20}})(?:\s+([\s\S]+))?\s*$",
+        rf"^\s*/?(?:{command_alias_pattern('mail', 'send', 'message', 'msg', 'письмо')})\s+(\d{{1,20}})(?:\s+([\s\S]+))?\s*$",
         text or "",
         flags=re.IGNORECASE,
     )
@@ -2038,7 +2102,7 @@ def parse_requester_mail_target_only(text: str) -> str | None:
 
 def parse_mail2_command(text: str) -> str | None:
     match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('mail2', 'broadcast', 'massmail', 'СЂР°СЃСЃС‹Р»РєР°')})(?:\s+([\s\S]+))?\s*$",
+        rf"^\s*/?(?:{command_alias_pattern('mail2', 'broadcast', 'massmail', 'рассылка')})(?:\s+([\s\S]+))?\s*$",
         text or "",
         flags=re.IGNORECASE,
     )
@@ -2049,14 +2113,14 @@ def parse_mail2_command(text: str) -> str | None:
 
 def parse_gpt_command(text: str) -> GPTCommand | None:
     match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('gpt', 'chatgpt', 'ai', 'openai', 'РёРё', 'С‡РіРїС‚')})(?:\s+([\s\S]+))?\s*$",
+        rf"^\s*/?(?:{command_alias_pattern('gpt', 'chatgpt', 'ai', 'openai', 'ии', 'чгпт')})(?:\s+([\s\S]+))?\s*$",
         text or "",
         flags=re.IGNORECASE,
     )
     if not match:
         return None
     prompt = (match.group(1) or "").strip()
-    if prompt.casefold() in {"reset", "clear", "new", "СЃР±СЂРѕСЃ", "РѕС‡РёСЃС‚РёС‚СЊ", "РЅРѕРІС‹Р№"}:
+    if prompt.casefold() in {"reset", "clear", "new", "сброс", "очистить", "новый"}:
         return GPTCommand(action="reset", prompt="")
     return GPTCommand(action="ask", prompt=prompt)
 
@@ -2149,6 +2213,24 @@ def parse_retry_seconds_from_error_text(error_text: str, default_seconds: float 
                 return max(OPENAI_MIN_RETRY_DELAY_SECONDS, min(parsed, OPENAI_MAX_RETRY_DELAY_SECONDS))
         except ValueError:
             pass
+    compact_match = re.search(r"try again in\s+(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", text)
+    if compact_match and any(compact_match.groups()):
+        hours = int(compact_match.group(1) or 0)
+        minutes = int(compact_match.group(2) or 0)
+        seconds = int(compact_match.group(3) or 0)
+        parsed = hours * 3600 + minutes * 60 + seconds
+        if parsed > 0:
+            return parsed
+    minute_match = re.search(r"in\s+(\d+(?:\.\d+)?)\s+minutes?", text)
+    if minute_match:
+        try:
+            parsed = float(minute_match.group(1)) * 60
+            if parsed > 0:
+                return parsed
+        except ValueError:
+            pass
+    if default_seconds <= 0:
+        return 0.0
     return max(OPENAI_MIN_RETRY_DELAY_SECONDS, min(default_seconds, OPENAI_MAX_RETRY_DELAY_SECONDS))
 
 
@@ -2222,6 +2304,9 @@ def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
             except Exception:
                 error_message = error_body or str(error)
             last_error_text = f"OpenAI API error {error.code}: {error_message[:500]}"
+
+            if is_daily_limit_error_text(last_error_text):
+                raise RuntimeError(last_error_text) from error
 
             if settings.openai_proxy_url.strip() and not direct_fallback_attempted and is_openai_https_proxy_error(error.code, error_message):
                 logging.warning("OpenAI proxy returned HTTPS 403, retrying direct without proxy")
@@ -2389,7 +2474,7 @@ async def transcribe_telegram_voice(event: events.NewMessage.Event) -> str:
         downloaded = await event.download_media(file=str(audio_path))
         path = Path(downloaded) if downloaded else audio_path
         if not path.exists():
-            raise RuntimeError("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ РіРѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ")
+            raise RuntimeError("Не удалось скачать голосовое сообщение")
         return await asyncio.to_thread(call_openai_transcription, path)
 
 
@@ -2416,13 +2501,13 @@ PROBLEM_REPORT_KEYWORDS = (
     "не приход",
     "завис",
     "сломан",
-    "ключ",
+    "РєР»СЋС‡",
     "подписк",
     "vpn",
 )
 
 SUPPORT_KEY_ISSUE_KEYWORDS = (
-    "ключ",
+    "РєР»СЋС‡",
     "key",
     "конфиг",
     "конфигурац",
@@ -2443,7 +2528,7 @@ SUPPORT_PAYMENT_ISSUE_KEYWORDS = (
 )
 
 SUPPORT_VAGUE_ISSUE_ROOTS = (
-    "ключ",
+    "РєР»СЋС‡",
     "проблем",
     "оплат",
     "платеж",
@@ -2741,7 +2826,7 @@ def is_support_issue_too_vague(text: str) -> bool:
     if not cleaned:
         return True
 
-    words = re.findall(r"[a-zР°-СЏС‘0-9_]+", cleaned, flags=re.IGNORECASE)
+    words = re.findall(r"[a-zа-яё0-9_]+", cleaned, flags=re.IGNORECASE)
     meaningful_words = [word for word in words if len(word) >= 2 and not word.isdigit()]
     if len(meaningful_words) <= 2:
         return True
@@ -2930,7 +3015,7 @@ def non_requester_self_info_not_found_message() -> str:
 
 def non_requester_self_info_message(record: dict) -> str:
     return assistant_user_message(
-        "Информация по вашему профилю:\n" + format_user_summary_from_record(record)
+        "нформация по вашему профилю:\n" + format_user_summary_from_record(record)
     )
 
 
@@ -2945,7 +3030,7 @@ def support_pick_subscriptions(record: dict, text: str) -> list[dict]:
     if not lowered:
         return []
 
-    if any(marker in lowered for marker in ("РІСЃРµ", "РѕР±Рµ", "РѕР±Р°", "all")):
+    if any(marker in lowered for marker in ("все", "обе", "оба", "all")):
         return subscriptions
 
     selected_indexes: set[int] = set()
@@ -3020,29 +3105,29 @@ def build_support_wizard_report(
     selected_text = ""
     selected_items = list(selected_subscriptions or [])
     if selected_items:
-        selected_lines = ["Р’С‹Р±СЂР°РЅРЅС‹Рµ РїРѕРґРїРёСЃРєРё:"]
+        selected_lines = ["Выбранные подписки:"]
         for item in selected_items:
             selected_lines.append(
                 f"- ID: {str(item.get('subscription_id') or '').strip() or '-'}"
-                f" | Р›РѕРєР°С†РёСЏ: {str(item.get('location') or '').strip() or '-'}"
-                f" | РљРЅРѕРїРєР°: {str(item.get('button_text') or '').strip() or '-'}"
+                f" | Локация: {str(item.get('location') or '').strip() or '-'}"
+                f" | Кнопка: {str(item.get('button_text') or '').strip() or '-'}"
             )
         selected_text = "\n".join(selected_lines)
     report_lines = [
-        "Р—Р°СЏРІРєР° РїРѕРґРґРµСЂР¶РєРё VPN_KBR",
-        f"Р’СЂРµРјСЏ: {datetime.now().isoformat(timespec='seconds')}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ Telegram ID: {sender_id}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ username: @{sender_username_value}" if sender_username_value else "РћС‚РїСЂР°РІРёС‚РµР»СЊ username: РЅРµС‚",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: {sender_full_name}" if sender_full_name else "РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: РЅРµС‚",
-        f"Lookup: {lookup_used or 'РЅРµ РѕРїСЂРµРґРµР»РµРЅ'}",
+        "Заявка поддержки VPN_KBR",
+        f"Время: {datetime.now().isoformat(timespec='seconds')}",
+        f"Отправитель Telegram ID: {sender_id}",
+        f"Отправитель username: @{sender_username_value}" if sender_username_value else "Отправитель username: нет",
+        f"Отправитель имя: {sender_full_name}" if sender_full_name else "Отправитель имя: нет",
+        f"Lookup: {lookup_used or 'не определен'}",
         "",
-        "РўРµРєСЃС‚ РѕР±СЂР°С‰РµРЅРёСЏ:",
-        issue_text.strip() or "[РїСѓСЃС‚Рѕ]",
+        "Текст обращения:",
+        issue_text.strip() or "[пусто]",
     ]
     if selected_text:
         report_lines.extend(("", selected_text))
     if card_text:
-        report_lines.extend(("", "РљР°СЂС‚РѕС‡РєР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ:", card_text))
+        report_lines.extend(("", "Карточка пользователя:", card_text))
     return "\n".join(report_lines)
 
 
@@ -3082,11 +3167,11 @@ async def handle_pending_support_request(event, sender, sender_id: int, incoming
         return False
 
     lowered_reply = incoming_text.casefold()
-    if lowered_reply in {"0", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
+    if lowered_reply in {"0", "отмена", "cancel", "/cancel"}:
         pending_support_requests.pop(sender_id, None)
         await safe_event_reply(
             event,
-            assistant_compact_reply("Р—Р°РїСЂРѕСЃ РѕС‚РјРµРЅРµРЅ.", "РџСЂРёС€Р»РёС‚Рµ РЅРѕРІРѕРµ РѕРїРёСЃР°РЅРёРµ, РєРѕРіРґР° Р±СѓРґРµС‚Рµ РіРѕС‚РѕРІС‹."),
+            assistant_compact_reply("Запрос отменен.", "Пришлите новое описание, когда будете готовы."),
         )
         return True
 
@@ -3287,8 +3372,8 @@ async def handle_non_requester_voice_message(event, sender, sender_id: int, inco
             event,
             status_message,
             assistant_compact_reply(
-                "Р СњР Вµ РЎС“Р Т‘Р В°Р В»Р С•РЎРѓРЎРЉ РЎР‚Р В°РЎРѓР С—Р С•Р В·Р Р…Р В°РЎвЂљРЎРЉ Р С–Р С•Р В»Р С•РЎРѓР С•Р Р†Р С•Р Вµ РЎРѓР С•Р С•Р В±РЎвЂ°Р ВµР Р…Р С‘Р Вµ.",
-                "Р СњР В°Р С—Р С‘РЎв‚¬Р С‘РЎвЂљР Вµ Р Р†Р С•Р С—РЎР‚Р С•РЎРѓ РЎвЂљР ВµР С”РЎРѓРЎвЂљР С•Р С. Р вЂўРЎРѓР В»Р С‘ РЎРЊРЎвЂљР С• Р С—РЎР‚Р С•Р В±Р В»Р ВµР СР В° Р С—Р С• VPN, Р Т‘Р С•Р В±Р В°Р Р†РЎРЉРЎвЂљР Вµ ID Р С‘ Р С”РЎР‚Р В°РЎвЂљР С”Р С•Р Вµ Р С•Р С—Р С‘РЎРѓР В°Р Р…Р С‘Р Вµ.",
+                "    .",
+                "  .     VPN,  ID   .",
             ),
         )
 
@@ -3406,18 +3491,18 @@ def build_problem_report_text(
     problem_text: str,
 ) -> str:
     lines = [
-        "РџСЂРѕР±Р»РµРјР° РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
-        f"Р’СЂРµРјСЏ: {datetime.now().isoformat(timespec='seconds')}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ ID: {sender_id}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ username: @{sender_username_value}" if sender_username_value else "РћС‚РїСЂР°РІРёС‚РµР»СЊ username: РЅРµС‚",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: {sender_full_name}" if sender_full_name else "РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: РЅРµС‚",
-        f"РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: {user_lookup or 'РЅРµ СѓРєР°Р·Р°РЅ'}",
+        "Проблема от пользователя",
+        f"Время: {datetime.now().isoformat(timespec='seconds')}",
+        f"Отправитель ID: {sender_id}",
+        f"Отправитель username: @{sender_username_value}" if sender_username_value else "Отправитель username: нет",
+        f"Отправитель имя: {sender_full_name}" if sender_full_name else "Отправитель имя: нет",
+        f"Поиск пользователя: {user_lookup or 'не указан'}",
         "",
-        "РўРµРєСЃС‚ РїСЂРѕР±Р»РµРјС‹:",
-        problem_text.strip() or "[РїСѓСЃС‚Рѕ]",
+        "Текст проблемы:",
+        problem_text.strip() or "[пусто]",
     ]
     if user_card:
-        lines.extend(("", "РљР°СЂС‚РѕС‡РєР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ:", user_card))
+        lines.extend(("", "Карточка пользователя:", user_card))
     return "\n".join(lines)
 
 
@@ -3784,58 +3869,58 @@ def command_from_smart_action(action: dict) -> tuple[str, bool, str]:
     use_database = bool(action.get("use_database"))
     suffix = " -b" if use_database else ""
     if name == "menu":
-        return "menu", False, "РћС‚РєСЂС‹С‚СЊ РјРµРЅСЋ"
+        return "menu", False, "Открыть меню"
     if name == "dashboard":
-        return "/dashboard", False, "РћС‚РєСЂС‹С‚СЊ admin system"
+        return "/dashboard", False, "Открыть admin system"
     if name == "processes":
-        return "/processes", False, "РџРѕРєР°Р·Р°С‚СЊ РїСЂРѕС†РµСЃСЃС‹"
+        return "/processes", False, "Показать процессы"
     if name == "diag":
-        return "/diag", False, "РџРѕРєР°Р·Р°С‚СЊ РґРёР°РіРЅРѕСЃС‚РёРєСѓ"
+        return "/diag", False, "Показать диагностику"
     if name == "version":
-        return "/version", False, "РџРѕРєР°Р·Р°С‚СЊ РІРµСЂСЃРёСЋ"
+        return "/version", False, "Показать версию"
     if name == "logs":
         lines = max(1, min(LOG_TAIL_MAX_LINES, int(action.get("lines") or LOG_TAIL_DEFAULT_LINES)))
-        return f"/tail {lines}", False, f"РџРѕРєР°Р·Р°С‚СЊ РїРѕСЃР»РµРґРЅРёРµ {lines} СЃС‚СЂРѕРє Р»РѕРіР°"
+        return f"/tail {lines}", False, f"Показать последние {lines} строк лога"
     if name == "user_summary":
         lookup = query or user_id
         if not lookup:
             return "", False, ""
-        return f"/user {lookup}{suffix}", False, f"РљСЂР°С‚РєР°СЏ РєР°СЂС‚РѕС‡РєР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ {lookup}"
+        return f"/user {lookup}{suffix}", False, f"Краткая карточка пользователя {lookup}"
     if name == "user_subs":
         lookup = query or user_id
         if not lookup:
             return "", False, ""
-        return f"/subs {lookup}{suffix}", False, f"РџРѕРґРїРёСЃРєРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ {lookup}"
+        return f"/subs {lookup}{suffix}", False, f"Подписки пользователя {lookup}"
     if name == "wizard":
         if not user_id:
             return "", False, ""
-        return f"/wizard {user_id}", True, f"РџРѕРґРіРѕС‚РѕРІРёС‚СЊ wizard РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ {user_id}"
+        return f"/wizard {user_id}", True, f"Подготовить wizard пользователя {user_id}"
     if name == "mail":
         if not user_id or not text:
             return "", False, ""
-        return f"/send {user_id} {text}".strip(), True, f"РћС‚РїСЂР°РІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ {user_id}"
+        return f"/send {user_id} {text}".strip(), True, f"Отправить сообщение пользователю {user_id}"
     if name == "broadcast":
         if not text:
             return "", False, ""
-        return f"/broadcast {text}".strip(), True, "Р—Р°РїСѓСЃС‚РёС‚СЊ СЂР°СЃСЃС‹Р»РєСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРј Р±РµР· РїРѕРґРїРёСЃРєРё"
+        return f"/broadcast {text}".strip(), True, "Запустить рассылку пользователям без подписки"
     if name == "promo":
         if not user_id:
             return "", False, ""
-        return f"/coupon {user_id} {text}".strip(), True, f"РЎРѕР·РґР°С‚СЊ РїСЂРѕРјРѕРєРѕРґ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ {user_id}"
+        return f"/coupon {user_id} {text}".strip(), True, f"Создать промокод пользователю {user_id}"
     if name == "scan_menu":
-        return "scan", False, "РћС‚РєСЂС‹С‚СЊ scan"
+        return "scan", False, "Открыть scan"
     if name == "scan_new":
-        return "scan new", True, "Р—Р°РїСѓСЃС‚РёС‚СЊ РЅРѕРІС‹Р№ scan"
+        return "scan new", True, "Запустить новый scan"
     if name == "scan_continue":
-        return "scan continue", False, "РџСЂРѕРґРѕР»Р¶РёС‚СЊ scan"
+        return "scan continue", False, "Продолжить scan"
     if name == "scan_results":
-        return "scan results", False, "РџРѕРєР°Р·Р°С‚СЊ СЂРµР·СѓР»СЊС‚Р°С‚С‹ scan"
+        return "scan results", False, "Показать результаты scan"
     if name == "scan_pause":
-        return "stop СЃРєР°РЅ", False, "РџРѕСЃС‚Р°РІРёС‚СЊ scan РЅР° РїР°СѓР·Сѓ"
+        return "stop скан", False, "Поставить scan на паузу"
     if name == "scan_reset":
-        return "scan reset", True, "РЎР±СЂРѕСЃРёС‚СЊ scan"
+        return "scan reset", True, "Сбросить scan"
     if name == "gpt_reset":
-        return "/gpt reset", False, "РћС‡РёСЃС‚РёС‚СЊ РєРѕРЅС‚РµРєСЃС‚ KBR_GPT"
+        return "/gpt reset", False, "Очистить контекст KBR_GPT"
     return "", False, ""
 
 
@@ -3846,17 +3931,17 @@ async def apply_wizard_note_after_command(event, sender_id: int, note: str) -> N
     if not pending:
         return
     base_text = str(pending.get("base_text") or "")
-    final_text = "\n\n".join((base_text, f"Р”РѕРїРѕР»РЅРµРЅРёРµ РїРѕ РіРѕР»РѕСЃРѕРІРѕР№/СѓРјРЅРѕР№ РєРѕРјР°РЅРґРµ:\n{note.strip()}"))
+    final_text = "\n\n".join((base_text, f"Дополнение по голосовой/умной команде:\n{note.strip()}"))
     pending["extra_text"] = note.strip()
     pending["final_text"] = final_text
     pending["stage"] = "await_final_choice"
-    await safe_event_reply(event, f"РћР±РЅРѕРІР»РµРЅРЅС‹Р№ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ wizard:\n\n{final_text}")
+    await safe_event_reply(event, f"Обновленный предпросмотр wizard:\n\n{final_text}")
     await safe_event_reply(
         event,
-        "РћС‚РїСЂР°РІР»СЏС‚СЊ СЌС‚РѕС‚ РІР°СЂРёР°РЅС‚?",
+        "Отправлять этот вариант?",
         buttons=[
-            [Button.text("1 РѕС‚РїСЂР°РІРёС‚СЊ"), Button.text("2 РёР·РјРµРЅРёС‚СЊ РґРѕРїРёСЃРєСѓ")],
-            [Button.text("0 РѕС‚РјРµРЅР°")],
+            [Button.text("1 отправить"), Button.text("2 изменить дописку")],
+            [Button.text("0 отмена")],
         ],
     )
 
@@ -3913,19 +3998,19 @@ async def execute_smart_action(event, sender_id: int, action: dict, *, confirmed
             title=title,
         )
         details = [
-            "РЇ РїРѕРЅСЏР» С‚Р°Рє:",
+            "Я понял так:",
             title,
-            f"РљРѕРјР°РЅРґР°: {command_text}",
+            f"Команда: {command_text}",
         ]
         if original_text:
-            details.append(f"РўРµРєСЃС‚: {original_text}")
+            details.append(f"Текст: {original_text}")
         details.append("")
-        details.append("1 РІС‹РїРѕР»РЅРёС‚СЊ")
-        details.append("0 РѕС‚РјРµРЅР°")
+        details.append("1 выполнить")
+        details.append("0 отмена")
         await safe_event_reply(
             event,
             "\n".join(details),
-            buttons=[[Button.text("1 РІС‹РїРѕР»РЅРёС‚СЊ"), Button.text("0 РѕС‚РјРµРЅР°")]],
+            buttons=[[Button.text("1 выполнить"), Button.text("0 отмена")]],
         )
         return
 
@@ -3961,10 +4046,10 @@ async def handle_smart_request(event, sender_id: int, request_text: str, *, sour
         status_message = await safe_event_reply(
             event,
             build_process_status(
-                "РЈРјРЅС‹Р№ РїРѕРјРѕС‰РЅРёРє",
+                "Умный помощник",
                 SMART_STEPS,
                 3,
-                extra_lines=[f"РСЃС‚РѕС‡РЅРёРє: {source}", f"РўРµРєСЃС‚: {len(request_text)} СЃРёРјРІРѕР»РѕРІ"],
+                extra_lines=[f"сточник: {source}", f"Текст: {len(request_text)} символов"],
             ),
         )
     try:
@@ -4000,11 +4085,11 @@ async def handle_smart_request(event, sender_id: int, request_text: str, *, sour
             await edit_status_message(
                 status_message,
                 build_process_status(
-                    "РЈРјРЅС‹Р№ РїРѕРјРѕС‰РЅРёРє",
+                    "Умный помощник",
                     SMART_STEPS,
                     4,
                     extra_lines=[
-                        f"Р Р°СЃРїРѕР·РЅР°РЅРѕ РґРµР№СЃС‚РІРёРµ: {action.get('action', 'chat')}",
+                        f"Распознано действие: {action.get('action', 'chat')}",
                         str(action.get("explanation") or "").strip()[:200],
                     ],
                     done=True,
@@ -4076,12 +4161,12 @@ def format_promo_mail_text(user_id: str, promo_code: str) -> str:
         )
     except Exception:
         logging.exception("Failed to format PROMO_MAIL_TEXT; using fallback text")
-        return f"Р”Р»СЏ РІР°СЃ СЃРѕР·РґР°РЅ РїСЂРѕРјРѕРєРѕРґ {promo_code} РЅР° {settings.promo_amount_rub} СЂСѓР±."
+        return f"Для вас создан промокод {promo_code} на {settings.promo_amount_rub} руб."
 
 
 def parse_promo_command(text: str) -> tuple[str, str, str] | None:
     match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('promo', 'coupon', 'promocode', 'РїСЂРѕРјРѕ', 'РїСЂРѕРјРѕРєРѕРґ')})\s+(\d{{1,20}})(?:\s+([\s\S]+))?\s*$",
+        rf"^\s*/?(?:{command_alias_pattern('promo', 'coupon', 'promocode', 'промо', 'промокод')})\s+(\d{{1,20}})(?:\s+([\s\S]+))?\s*$",
         text or "",
         flags=re.IGNORECASE,
     )
@@ -4095,7 +4180,7 @@ def parse_promo_command(text: str) -> tuple[str, str, str] | None:
 
 
 def parse_help_command(text: str) -> UserLookupCommand | None:
-    return parse_user_lookup_command(("help", "user", "find", "РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ", "РЅР°Р№С‚Рё"), text)
+    return parse_user_lookup_command(("help", "user", "find", "пользователь", "найти"), text)
 
 
 def is_help_overview_command(text: str) -> bool:
@@ -4103,17 +4188,17 @@ def is_help_overview_command(text: str) -> bool:
 
 
 def is_command_menu_command(text: str) -> bool:
-    return bool(re.match(r"^\s*/?(?:menu|commands|cmd|РєРѕРјР°РЅРґС‹|РјРµРЅСЋ)\s*$", text, flags=re.IGNORECASE))
+    return bool(re.match(r"^\s*/?(?:menu|commands|cmd|команды|меню)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_status_command(text: str) -> bool:
-    return bool(re.match(r"^\s*/?(?:dashboard|dash|status|report|РґР°С€Р±РѕСЂРґ|РѕС‚С‡РµС‚|РѕС‚С‡С‘С‚|СЃС‚Р°С‚СѓСЃ)\s*$", text, flags=re.IGNORECASE))
+    return bool(re.match(r"^\s*/?(?:dashboard|dash|status|report|дашборд|отчет|отчёт|статус)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_admin_site_command(text: str) -> bool:
     return bool(
         re.match(
-            r"^\s*/?(?:adminsite|admin_site|liveadmin|adminpanel|Р°РґРјРёРЅСЃР°Р№С‚|Р°РґРјРёРЅ\s*СЃР°Р№С‚)\s*$",
+            r"^\s*/?(?:adminsite|admin_site|liveadmin|adminpanel|админсайт|админ\s*сайт)\s*$",
             text,
             flags=re.IGNORECASE,
         )
@@ -4121,17 +4206,17 @@ def is_admin_site_command(text: str) -> bool:
 
 
 def is_version_command(text: str) -> bool:
-    return bool(re.match(r"^\s*/?(?:version|РІРµСЂСЃРёСЏ|v)\s*$", text, flags=re.IGNORECASE))
+    return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_diagnostics_command(text: str) -> bool:
-    return bool(re.match(r"^\s*/?(?:diag|diagnostics|doctor|health|РґРёР°РіРЅРѕСЃС‚РёРєР°)\s*$", text, flags=re.IGNORECASE))
+    return bool(re.match(r"^\s*/?(?:diag|diagnostics|doctor|health|диагностика)\s*$", text, flags=re.IGNORECASE))
 
 
 def is_poc_command(text: str) -> bool:
     return bool(
         re.match(
-            r"^\s*/?(?:poc|proc|process|processes|tasks|jobs|ps|РїСЂРѕС†РµСЃСЃС‹|РїСЂРѕС†РµСЃСЃ|РїСЂРѕС†РµСЃ|Р·Р°РґР°С‡Рё|Рїoc)\s*$",
+            r"^\s*/?(?:poc|proc|process|processes|tasks|jobs|ps|процессы|процесс|процес|задачи|пoc)\s*$",
             text,
             flags=re.IGNORECASE,
         )
@@ -4144,9 +4229,9 @@ def is_roots_command(text: str) -> bool:
 
 def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None:
     cleaned = text.strip().casefold()
-    if cleaned in {"/scan", "scan", "СЃРєР°РЅ"}:
+    if cleaned in {"/scan", "scan", "скан"}:
         return "menu"
-    if cleaned in {"/scan_new", "scan new", "new scan", "РЅРѕРІС‹Р№ scan", "РЅРѕРІС‹Р№ СЃРєР°РЅ", "РЅР°С‡Р°С‚СЊ СЃРєР°РЅ", "Р·Р°РїСѓСЃС‚Рё СЃРєР°РЅ"}:
+    if cleaned in {"/scan_new", "scan new", "new scan", "новый scan", "новый скан", "начать скан", "запусти скан"}:
         return "new"
     if cleaned in {
         "/scan_start",
@@ -4155,23 +4240,23 @@ def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None
         "scan continue",
         "continue scan",
         "start scan",
-        "РїСЂРѕРґРѕР»Р¶РёС‚СЊ scan",
-        "РїСЂРѕРґРѕР»Р¶РёС‚СЊ СЃРєР°РЅ",
-        "РїСЂРѕРґРѕР»Р¶Рё СЃРєР°РЅ",
+        "продолжить scan",
+        "продолжить скан",
+        "продолжи скан",
     }:
         return "continue"
     if cleaned in {
         "/stopscan",
         "stop scan",
-        "stop СЃРєР°РЅ",
-        "СЃС‚РѕРї СЃРєР°РЅ",
+        "stop скан",
+        "стоп скан",
         "scan stop",
         "scan pause",
         "pause scan",
-        "РїР°СѓР·Р° scan",
-        "РїР°СѓР·Р° СЃРєР°РЅ",
-        "РѕСЃС‚Р°РЅРѕРІРёС‚СЊ scan",
-        "РѕСЃС‚Р°РЅРѕРІРёС‚СЊ СЃРєР°РЅ",
+        "пауза scan",
+        "пауза скан",
+        "остановить scan",
+        "остановить скан",
     }:
         return "pause_results"
     mapping = {
@@ -4179,44 +4264,44 @@ def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None
         "/scanmenu": "menu",
         "scan menu": "menu",
         "scan status": "menu",
-        "СЃС‚Р°С‚СѓСЃ СЃРєР°РЅР°": "menu",
-        "СЃС‚Р°С‚СѓСЃ scan": "menu",
-        "СЃРєР°РЅС‹": "menu",
-        "РјРµРЅСЋ СЃРєР°РЅ": "menu",
-        "РјРµРЅСЋ СЃРєР°РЅРѕРІ": "menu",
+        "статус скана": "menu",
+        "статус scan": "menu",
+        "сканы": "menu",
+        "меню скан": "menu",
+        "меню сканов": "menu",
         "/scan_start": "start",
         "scan": "start",
-        "СЃРєР°РЅ": "start",
+        "скан": "start",
         "scan start": "start",
         "scan new": "start",
         "start scan": "start",
-        "РЅРѕРІС‹Р№ СЃРєР°РЅ": "start",
-        "РЅРѕРІС‹Р№ scan": "start",
-        "Р·Р°РїСѓСЃС‚Рё СЃРєР°РЅ": "start",
-        "РЅР°С‡Р°С‚СЊ СЃРєР°РЅ": "start",
-        "РїСЂРѕРґРѕР»Р¶РёС‚СЊ СЃРєР°РЅ": "start",
-        "РїСЂРѕРґРѕР»Р¶Рё СЃРєР°РЅ": "start",
+        "новый скан": "start",
+        "новый scan": "start",
+        "запусти скан": "start",
+        "начать скан": "start",
+        "продолжить скан": "start",
+        "продолжи скан": "start",
         "/stopscan": "pause",
         "/scan_pause": "pause",
         "scan pause": "pause",
         "scan stop": "pause",
         "pause scan": "pause",
         "stop scan": "pause",
-        "РїР°СѓР·Р° СЃРєР°РЅ": "pause",
-        "РїРѕСЃС‚Р°РІСЊ СЃРєР°РЅ РЅР° РїР°СѓР·Сѓ": "pause",
-        "РѕСЃС‚Р°РЅРѕРІРёС‚СЊ СЃРєР°РЅ": "pause",
+        "пауза скан": "pause",
+        "поставь скан на паузу": "pause",
+        "остановить скан": "pause",
         "/scan_reset": "reset",
         "scan reset": "reset",
         "reset scan": "reset",
-        "СЃР±СЂРѕСЃ СЃРєР°РЅР°": "reset",
-        "СЃР±СЂРѕСЃРёС‚СЊ СЃРєР°РЅ": "reset",
-        "СЃР±СЂРѕСЃ scan": "reset",
+        "сброс скана": "reset",
+        "сбросить скан": "reset",
+        "сброс scan": "reset",
         "/scan_results": "results",
         "scan results": "results",
         "scan result": "results",
         "results scan": "results",
-        "СЂРµР·СѓР»СЊС‚Р°С‚С‹ СЃРєР°РЅР°": "results",
-        "РїРѕРєР°Р·Р°С‚СЊ СЂРµР·СѓР»СЊС‚Р°С‚С‹ СЃРєР°РЅР°": "results",
+        "результаты скана": "results",
+        "показать результаты скана": "results",
     }
     action = mapping.get(cleaned)
     if action:
@@ -4237,12 +4322,12 @@ def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None
 
 
 def parse_info_command(text: str) -> UserLookupCommand | None:
-    return parse_user_lookup_command(("info", "subs", "subscriptions", "РїРѕРґРїРёСЃРєРё"), text)
+    return parse_user_lookup_command(("info", "subs", "subscriptions", "подписки"), text)
 
 
 def parse_wizard_command(text: str) -> str | None:
     match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('wizard', 'card', 'РєР°СЂС‚РѕС‡РєР°')})\s+(\d{{1,20}})\s*$",
+        rf"^\s*/?(?:{command_alias_pattern('wizard', 'card', 'карточка')})\s+(\d{{1,20}})\s*$",
         text or "",
         flags=re.IGNORECASE,
     )
@@ -4260,11 +4345,11 @@ def parse_wizard_reply_choice(text: str) -> str | None:
         return "add_text"
     if first_token == "0":
         return "cancel"
-    if cleaned in {"1", "РЅРµС‚", "no", "n", "РѕС‚РїСЂР°РІРёС‚СЊ", "send"}:
+    if cleaned in {"1", "нет", "no", "n", "отправить", "send"}:
         return "send_now"
-    if cleaned in {"2", "РґР°", "yes", "y", "РґРѕР±Р°РІРёС‚СЊ", "add"}:
+    if cleaned in {"2", "да", "yes", "y", "добавить", "add"}:
         return "add_text"
-    if cleaned in {"0", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
+    if cleaned in {"0", "отмена", "cancel", "/cancel"}:
         return "cancel"
     return None
 
@@ -4276,8 +4361,8 @@ def is_control_reply_text(text: str) -> bool:
     if re.fullmatch(r"\d{1,3}", cleaned):
         return True
     return cleaned in {
-        "РґР°",
-        "РЅРµС‚",
+        "да",
+        "нет",
         "yes",
         "no",
         "y",
@@ -4285,9 +4370,9 @@ def is_control_reply_text(text: str) -> bool:
         "send",
         "cancel",
         "/cancel",
-        "РѕС‚РјРµРЅР°",
-        "РІС‹РїРѕР»РЅРёС‚СЊ",
-        "РѕС‚РїСЂР°РІРёС‚СЊ",
+        "отмена",
+        "выполнить",
+        "отправить",
     }
 
 
@@ -4660,7 +4745,7 @@ def get_back_page_button(message) -> dict[str, int | str] | None:
     tokens = (
         settings.back_button_text.casefold(),
         settings.cancel_button_text.casefold(),
-        "РЅР°Р·Р°Рґ",
+        "назад",
         "back",
         "return",
     )
@@ -4684,9 +4769,9 @@ def is_users_page_message(message) -> bool:
 def score_users_menu_button(text: str) -> int:
     lowered = text.casefold()
     score = 0
-    if any(token in lowered for token in ("РїРѕР»СЊР·", "user", "users", "РєР»РёРµРЅС‚", "Р°Р±РѕРЅРµРЅС‚", "СѓС‡Р°СЃС‚")):
+    if any(token in lowered for token in ("польз", "user", "users", "клиент", "абонент", "участ")):
         score += 30
-    if any(symbol in text for symbol in ("рџ‘¤", "рџ‘Ґ", "рџ§‘", "рџ™Ќ")):
+    if any(symbol in text for symbol in ("рџ¤", "рџҐ", "рџ§", "рџ™Ќ")):
         score += 10
     if re.search(r"\d{1,20}", text):
         score += 2
@@ -4712,7 +4797,7 @@ def get_statistics_menu_button(message) -> dict[str, int | str] | None:
         text = str(button["text"])
         lowered = text.casefold()
         score = 0
-        if "СЃС‚Р°С‚" in lowered or "stat" in lowered or "Р°РЅР°Р»РёС‚" in lowered:
+        if "стат" in lowered or "stat" in lowered or "аналит" in lowered:
             score += 40
         if any(symbol in text for symbol in ("рџ“Љ", "рџ“€", "рџ“‰", "рџ§ѕ")):
             score += 10
@@ -4728,8 +4813,8 @@ def get_statistics_menu_button(message) -> dict[str, int | str] | None:
 
 def extract_total_users_from_statistics_text(text: str) -> int | None:
     patterns = (
-        r"РІСЃРµРіРѕ\s+РїРѕР»СЊР·РѕРІР°С‚РµР»[РµСЏР№]\s*[:\-]?\s*(\d+)",
-        r"РїРѕР»СЊР·РѕРІР°С‚РµР»[РµСЏР№]\s+РІСЃРµРіРѕ\s*[:\-]?\s*(\d+)",
+        r"всего\s+пользовател[еяй]\s*[:\-]?\s*(\d+)",
+        r"пользовател[еяй]\s+всего\s*[:\-]?\s*(\d+)",
         r"total\s+users\s*[:\-]?\s*(\d+)",
         r"users\s+total\s*[:\-]?\s*(\d+)",
     )
@@ -4749,7 +4834,7 @@ def extract_total_users_from_statistics_text(text: str) -> int | None:
         if not line:
             continue
         lowered = line.casefold()
-        if "РїРѕР»СЊР·" not in lowered and "user" not in lowered:
+        if "польз" not in lowered and "user" not in lowered:
             continue
         for match in re.finditer(r"\d+", line):
             try:
@@ -4779,12 +4864,12 @@ def parse_float_number(text: str) -> float | None:
 
 
 def extract_money_from_line(line: str) -> float | None:
-    pattern = re.compile(r"(\d[\d\s.,]*)\s*(?:в‚Ѕ|СЂСѓР±|СЂ\b|rub)", flags=re.IGNORECASE)
+    pattern = re.compile(r"(\d[\d\s.,]*)\s*(?:₽|руб|р\b|rub)", flags=re.IGNORECASE)
     match = pattern.search(line)
     if match:
         return parse_float_number(match.group(1))
 
-    if any(token in line.casefold() for token in ("РїСЂРёР±", "РґРѕС…РѕРґ", "РІС‹СЂСѓС‡", "profit", "revenue")):
+    if any(token in line.casefold() for token in ("приб", "доход", "выруч", "profit", "revenue")):
         match = re.search(r"(\d[\d\s.,]*)", line)
         if match:
             return parse_float_number(match.group(1))
@@ -4793,19 +4878,19 @@ def extract_money_from_line(line: str) -> float | None:
 
 def detect_period_key(line: str) -> str | None:
     lowered = line.casefold()
-    if any(token in lowered for token in ("СЃРµРіРѕРґРЅСЏ", "Р·Р° РґРµРЅСЊ", "РґРµРЅСЊ", "day", "daily")):
+    if any(token in lowered for token in ("сегодня", "за день", "день", "day", "daily")):
         return "day"
-    if any(token in lowered for token in ("РЅРµРґРµР»", "week", "weekly")):
+    if any(token in lowered for token in ("недел", "week", "weekly")):
         return "week"
-    if any(token in lowered for token in ("3 РјРµСЃ", "3 month", "РєРІР°СЂС‚", "quarter")):
+    if any(token in lowered for token in ("3 мес", "3 month", "кварт", "quarter")):
         return "quarter"
-    if any(token in lowered for token in ("6 РјРµСЃ", "РїРѕР»РіРѕРґ", "half-year", "half year")):
+    if any(token in lowered for token in ("6 мес", "полгод", "half-year", "half year")):
         return "half_year"
-    if any(token in lowered for token in ("РјРµСЃСЏС†", "month", "monthly")):
+    if any(token in lowered for token in ("месяц", "month", "monthly")):
         return "month"
-    if any(token in lowered for token in ("РіРѕРґ", "year", "yearly", "annual")):
+    if any(token in lowered for token in ("год", "year", "yearly", "annual")):
         return "year"
-    if any(token in lowered for token in ("РІСЃРµ РІСЂРµРјСЏ", "РІСЃС‘ РІСЂРµРјСЏ", "all time", "total")):
+    if any(token in lowered for token in ("все время", "всё время", "all time", "total")):
         return "all_time"
     return None
 
@@ -4823,7 +4908,7 @@ def extract_admin_statistics_snapshot(text: str) -> dict:
             continue
 
         lowered = line.casefold()
-        if any(token in lowered for token in ("РїРѕР»СЊР·", "user")):
+        if any(token in lowered for token in ("польз", "user")):
             user_match = re.search(r"(\d{1,9})", line)
             if user_match:
                 try:
@@ -4831,7 +4916,7 @@ def extract_admin_statistics_snapshot(text: str) -> dict:
                 except ValueError:
                     pass
 
-        if any(token in lowered for token in ("РїСЂРёР±", "РґРѕС…РѕРґ", "РІС‹СЂСѓС‡", "profit", "revenue", "СЂСѓР±", "в‚Ѕ", "rub")):
+        if any(token in lowered for token in ("приб", "доход", "выруч", "profit", "revenue", "руб", "₽", "rub")):
             money_value = extract_money_from_line(line)
             if money_value is not None:
                 profit_by_period[period_key] = money_value
@@ -4873,16 +4958,16 @@ def format_user_summary_from_record(record: dict) -> str:
         for subscription in subscriptions
         if str(subscription.get("subscription_id") or "").strip()
     ]
-    subscriptions_text = ", ".join(subscription_numbers) if subscription_numbers else "РїРѕРґРїРёСЃРѕРє РЅРµС‚"
+    subscriptions_text = ", ".join(subscription_numbers) if subscription_numbers else "подписок нет"
     user_number = extract_user_number(user_text, subscriptions_text_for_number)
 
     return "\n".join(
         (
-            f"1. Username Р±РѕС‚Р°: @{settings.admin_bot_username}",
-            f"2. ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: {user_number or user_id}",
-            f"3. Username РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: @{username}" if username else "3. Username РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: РЅРµС‚ РІ Р±Р°Р·Рµ",
-            f"4. РђР№РґРё РїРѕРґРїРёСЃРѕРє: {subscriptions_text}",
-            "5. РСЃС‚РѕС‡РЅРёРє: SQLite Р±Р°Р·Р°",
+            f"1. Username бота: @{settings.admin_bot_username}",
+            f"2. ID пользователя: {user_number or user_id}",
+            f"3. Username пользователя: @{username}" if username else "3. Username пользователя: нет в базе",
+            f"4. Айди подписок: {subscriptions_text}",
+            "5. сточник: SQLite база",
         )
     )
 
@@ -4902,29 +4987,29 @@ def format_subscription_info_from_record_html(record: dict) -> str:
         registration_date = parsed_registration_date.strftime("%Y-%m-%d") if parsed_registration_date else ""
 
     lines = [
-        f"1. Username Р±РѕС‚Р°: @{html.escape(settings.admin_bot_username)}",
-        f"2. ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: {html.escape(user_number or user_id)}",
+        f"1. Username бота: @{html.escape(settings.admin_bot_username)}",
+        f"2. ID пользователя: {html.escape(user_number or user_id)}",
         (
-            f"3. Username РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: @{html.escape(username)}"
+            f"3. Username пользователя: @{html.escape(username)}"
             if username
-            else "3. Username РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: РЅРµС‚ РІ Р±Р°Р·Рµ"
+            else "3. Username пользователя: нет в базе"
         ),
         (
-            f"4. Р”Р°С‚Р° СЂРµРіРёСЃС‚СЂР°С†РёРё: {html.escape(registration_date)}"
+            f"4. Дата регистрации: {html.escape(registration_date)}"
             if registration_date
-            else "4. Р”Р°С‚Р° СЂРµРіРёСЃС‚СЂР°С†РёРё: РЅРµС‚ РІ Р±Р°Р·Рµ"
+            else "4. Дата регистрации: нет в базе"
         ),
-        f"5. РџРѕРґРїРёСЃРѕРє РІ Р±Р°Р·Рµ: {len(subscriptions)}",
+        f"5. Подписок в базе: {len(subscriptions)}",
     ]
 
     if user_text.strip():
-        lines.extend(("", "6. РљР°СЂС‚РѕС‡РєР° РёР· Р±Р°Р·С‹:", html.escape(user_text.strip())))
+        lines.extend(("", "6. Карточка из базы:", html.escape(user_text.strip())))
 
     if not subscriptions:
-        lines.append("\n7. РРЅС„Рѕ РїРѕРґРїРёСЃРѕРє: РїРѕРґРїРёСЃРѕРє РЅРµС‚")
+        lines.append("\n7. нфо подписок: подписок нет")
         return "\n".join(lines)
 
-    lines.append("\n7. РРЅС„Рѕ РїРѕРґРїРёСЃРѕРє:")
+    lines.append("\n7. нфо подписок:")
     for subscription in subscriptions:
         subscription_id = str(subscription.get("subscription_id") or "")
         button_text = str(subscription.get("button_text") or "")
@@ -4933,7 +5018,7 @@ def format_subscription_info_from_record_html(record: dict) -> str:
         lines.append(f"[{html.escape(subscription_id)}] {html.escape(button_text)}")
         lines.append(make_keys_copyable_html(detail_text or "[empty subscription response]"))
 
-    lines.append("\n8. РСЃС‚РѕС‡РЅРёРє: SQLite Р±Р°Р·Р°")
+    lines.append("\n8. сточник: SQLite база")
     return "\n".join(lines)
 
 
@@ -5003,9 +5088,9 @@ async def get_admin_bot_entity():
     global admin_bot_entity_cache
     if admin_bot_entity_cache is not None:
         return admin_bot_entity_cache
-    set_admin_bot_health("[WAIT]", "РїСЂРѕРІРµСЂРєР°", "РїРѕР»СѓС‡Р°СЋ entity")
+    set_admin_bot_health("[WAIT]", "проверка", "получаю entity")
     admin_bot_entity_cache = await client.get_entity(settings.admin_bot_username)
-    set_admin_bot_health("[OK]", "РѕС‚РІРµС‡Р°РµС‚", "entity РїРѕР»СѓС‡РµРЅ")
+    set_admin_bot_health("[OK]", "отвечает", "entity получен")
     return admin_bot_entity_cache
 
 
@@ -5033,14 +5118,14 @@ def is_incoming_bot_message(message) -> bool:
 async def latest_bot_message(bot, *, limit: int = 12):
     for attempt in range(2):
         try:
-            set_admin_bot_health("[WAIT]", "РїСЂРѕРІРµСЂРєР°", "С‡РёС‚Р°СЋ РїРѕСЃР»РµРґРЅРµРµ СЃРѕРѕР±С‰РµРЅРёРµ")
+            set_admin_bot_health("[WAIT]", "проверка", "читаю последнее сообщение")
             messages = await client.get_messages(bot, limit=limit)
-            set_admin_bot_health("[OK]", "РѕС‚РІРµС‡Р°РµС‚", "РёСЃС‚РѕСЂРёСЏ РґРѕСЃС‚СѓРїРЅР°")
+            set_admin_bot_health("[OK]", "отвечает", "история доступна")
             break
         except FloodWaitError as error:
             wait_seconds = int(getattr(error, "seconds", 1) or 1)
             note_floodwait(wait_seconds)
-            set_admin_bot_health("[WAIT]", "РѕР¶РёРґР°РЅРёРµ", f"FloodWait {wait_seconds}s")
+            set_admin_bot_health("[WAIT]", "ожидание", f"FloodWait {wait_seconds}s")
             if attempt:
                 raise
             logging.warning("FloodWait on latest_bot_message: sleeping %ss", wait_seconds)
@@ -5048,7 +5133,7 @@ async def latest_bot_message(bot, *, limit: int = 12):
     for message in messages:
         if is_incoming_bot_message(message):
             return message
-    set_admin_bot_health("[ERR]", "РѕС€РёР±РєР°", "РЅРµС‚ РІС…РѕРґСЏС‰РёС… СЃРѕРѕР±С‰РµРЅРёР№")
+    set_admin_bot_health("[ERR]", "ошибка", "нет входящих сообщений")
     raise RuntimeError("No incoming messages found in admin bot chat.")
 
 
@@ -5061,11 +5146,11 @@ async def monitor_admin_bot_health() -> None:
             raise
         except FloodWaitError as error:
             wait_seconds = int(getattr(error, "seconds", 1) or 1)
-            set_admin_bot_health("[WAIT]", "РѕР¶РёРґР°РЅРёРµ", f"FloodWait {wait_seconds}s")
+            set_admin_bot_health("[WAIT]", "ожидание", f"FloodWait {wait_seconds}s")
             await asyncio.sleep(min(wait_seconds + 1, BOT_HEALTH_POLL_INTERVAL_SECONDS * 2))
             continue
         except Exception as error:
-            set_admin_bot_health("[ERR]", "РѕС€РёР±РєР°", str(error)[:80])
+            set_admin_bot_health("[ERR]", "ошибка", str(error)[:80])
             logging.warning("Admin bot health check failed: %s", error)
         await asyncio.sleep(BOT_HEALTH_POLL_INTERVAL_SECONDS)
 
@@ -5084,7 +5169,7 @@ def is_intermediate_message(message) -> bool:
 async def wait_bot_update(bot, previous_snapshot=None, ready=None, timeout_seconds: float | None = None):
     future = loop.create_future()
     timeout_seconds = timeout_seconds or settings.bot_response_timeout_seconds
-    set_admin_bot_health("[WAIT]", "РѕР¶РёРґР°РЅРёРµ", "Р¶РґСѓ РѕС‚РІРµС‚")
+    set_admin_bot_health("[WAIT]", "ожидание", "жду ответ")
 
     def is_usable_message(message) -> bool:
         if not is_incoming_bot_message(message):
@@ -5126,7 +5211,7 @@ async def wait_bot_update(bot, previous_snapshot=None, ready=None, timeout_secon
             return_when=asyncio.FIRST_COMPLETED,
         )
         if not done:
-            set_admin_bot_health("[ERR]", "Р·Р°РІРёСЃ", f"РЅРµС‚ РѕС‚РІРµС‚Р° {timeout_seconds:.0f}s")
+            set_admin_bot_health("[ERR]", "завис", f"нет ответа {timeout_seconds:.0f}s")
             raise TimeoutError(
                 f"Admin bot @{settings.admin_bot_username} did not send an expected update "
                 f"within {timeout_seconds:.0f}s."
@@ -5134,7 +5219,7 @@ async def wait_bot_update(bot, previous_snapshot=None, ready=None, timeout_secon
         for task in pending:
             task.cancel()
         result = done.pop().result()
-        set_admin_bot_health("[OK]", "РѕС‚РІРµС‡Р°РµС‚", "РїРѕР»СѓС‡РµРЅ РѕС‚РІРµС‚")
+        set_admin_bot_health("[OK]", "отвечает", "получен ответ")
         return result
     finally:
         poll_task.cancel()
@@ -5383,7 +5468,7 @@ def build_dashboard_loader_html(target_url: str) -> str:
 """
     note_html = """
     <div style="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);font:600 12px 'IBM Plex Mono',Consolas,monospace;letter-spacing:0;text-transform:uppercase;opacity:.58;color:#f7f5ee;white-space:nowrap;">
-      dashboard РѕС‚РєСЂРѕРµС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё
+      dashboard откроется автоматически
     </div>
 """
     if "</body>" in template:
@@ -5487,7 +5572,7 @@ def build_dashboard_empty_admin_html(message: str) -> str:
   <main>
     <h1>{brand}: admin dashboard</h1>
     <p>{safe_message}</p>
-    <p>Р—Р°РїСѓСЃС‚Рё <code>/scan</code>, РґРѕР¶РґРёСЃСЊ Р·Р°РїРёСЃРё РґР°РЅРЅС‹С… РІ SQLite, Р·Р°С‚РµРј РѕР±РЅРѕРІРё СЌС‚Сѓ СЃС‚СЂР°РЅРёС†Сѓ.</p>
+    <p>Запусти <code>/scan</code>, дождись записи данных в SQLite, затем обнови эту страницу.</p>
   </main>
 </body>
 </html>"""
@@ -5496,7 +5581,7 @@ def build_dashboard_empty_admin_html(message: str) -> str:
 def build_live_admin_dashboard_html() -> str:
     stats = load_latest_scan_stats_from_database()
     if not stats:
-        return build_dashboard_empty_admin_html("Р’ SQL Р±Р°Р·Рµ РїРѕРєР° РЅРµС‚ РїРѕСЃР»РµРґРЅРµРіРѕ scan РґР»СЏ РїРѕСЃС‚СЂРѕРµРЅРёСЏ Р¶РёРІРѕР№ Р°РґРјРёРЅ-РїР°РЅРµР»Рё.")
+        return build_dashboard_empty_admin_html("В SQL базе пока нет последнего scan для построения живой админ-панели.")
     stats["database"] = {
         "path": str(database_path()),
         "source": "sqlite-live",
@@ -5598,15 +5683,15 @@ def build_dashboard_operator_request(
     record = load_latest_record_by_lookup_from_database(resolved_user_id or user_lookup)
     card_text = format_user_summary_from_record(record) if record else ""
     lines = [
-        f"Р—Р°РґР°С‡Р° РёР· live admin: {action_label}",
-        f"Р’СЂРµРјСЏ: {datetime.now().isoformat(timespec='seconds')}",
-        f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: {resolved_user_id or user_lookup or '-'}",
+        f"Задача из live admin: {action_label}",
+        f"Время: {datetime.now().isoformat(timespec='seconds')}",
+        f"Пользователь: {resolved_user_id or user_lookup or '-'}",
         f"Lookup: {user_lookup or '-'}",
     ]
     if message_text.strip():
-        lines.extend(("", "РљРѕРјРјРµРЅС‚Р°СЂРёР№:", message_text.strip()))
+        lines.extend(("", "Комментарий:", message_text.strip()))
     if card_text:
-        lines.extend(("", "РљР°СЂС‚РѕС‡РєР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ:", card_text))
+        lines.extend(("", "Карточка пользователя:", card_text))
     return "\n".join(lines)
 
 
@@ -5626,10 +5711,10 @@ async def dashboard_execute_job(job_id: str) -> None:
         if action == "user_status":
             resolved_user_id = resolve_dashboard_user_id(user_lookup)
             if not resolved_user_id:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.")
+                raise ValueError("Не удалось определить ID пользователя.")
             record = load_latest_record_from_database(resolved_user_id)
             if not record:
-                raise ValueError("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ РІ SQL Р±Р°Р·Рµ.")
+                raise ValueError("Пользователь не найден в SQL базе.")
             result_text = format_user_summary_from_record(record)
             dashboard_update_job(
                 job_id,
@@ -5642,10 +5727,10 @@ async def dashboard_execute_job(job_id: str) -> None:
 
         if action == "mail":
             if not message_text:
-                raise ValueError("РўРµРєСЃС‚ СЃРѕРѕР±С‰РµРЅРёСЏ РїСѓСЃС‚РѕР№.")
+                raise ValueError("Текст сообщения пустой.")
             resolved_user_id = resolve_dashboard_user_id(user_lookup)
             if not resolved_user_id:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.")
+                raise ValueError("Не удалось определить ID пользователя.")
             result_text = await send_mail_to_user_in_admin_bot(resolved_user_id, message_text)
             dashboard_update_job(
                 job_id,
@@ -5658,7 +5743,7 @@ async def dashboard_execute_job(job_id: str) -> None:
 
         if action == "broadcast":
             if not message_text:
-                raise ValueError("РўРµРєСЃС‚ СЂР°СЃСЃС‹Р»РєРё РїСѓСЃС‚РѕР№.")
+                raise ValueError("Текст рассылки пустой.")
             cancel_event = asyncio.Event()
             active_mail2_cancel_event = cancel_event
             try:
@@ -5682,7 +5767,7 @@ async def dashboard_execute_job(job_id: str) -> None:
         if action == "promo":
             resolved_user_id = resolve_dashboard_user_id(user_lookup)
             if not resolved_user_id:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.")
+                raise ValueError("Не удалось определить ID пользователя.")
             promo_code = f"{resolved_user_id}nPromo"
             promo_result = await create_promo_code_in_admin_bot(
                 resolved_user_id,
@@ -5708,9 +5793,9 @@ async def dashboard_execute_job(job_id: str) -> None:
         if action == "replace_key":
             resolved_user_id = resolve_dashboard_user_id(user_lookup)
             if not resolved_user_id:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.")
+                raise ValueError("Не удалось определить ID пользователя.")
             final_text = build_dashboard_operator_request(
-                action_label="Р—Р°РјРµРЅР° РєР»СЋС‡Р°",
+                action_label="Замена ключа",
                 user_lookup=user_lookup,
                 resolved_user_id=resolved_user_id,
                 message_text=message_text,
@@ -5728,9 +5813,9 @@ async def dashboard_execute_job(job_id: str) -> None:
         if action == "delete_access":
             resolved_user_id = resolve_dashboard_user_id(user_lookup)
             if not resolved_user_id:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.")
+                raise ValueError("Не удалось определить ID пользователя.")
             final_text = build_dashboard_operator_request(
-                action_label="РЈРґР°Р»РµРЅРёРµ РґРѕСЃС‚СѓРїР°",
+                action_label="Удаление доступа",
                 user_lookup=user_lookup,
                 resolved_user_id=resolved_user_id,
                 message_text=message_text,
@@ -5748,7 +5833,7 @@ async def dashboard_execute_job(job_id: str) -> None:
         if action == "wizard_card":
             resolved_user_id = resolve_dashboard_user_id(user_lookup)
             if not resolved_user_id:
-                raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ ID РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.")
+                raise ValueError("Не удалось определить ID пользователя.")
             record = load_latest_record_from_database(resolved_user_id)
             if record:
                 card_text = format_user_summary_from_record(record)
@@ -5759,7 +5844,7 @@ async def dashboard_execute_job(job_id: str) -> None:
                     progress_title="Dashboard wizard",
                     progress_steps=WIZARD_STEPS,
                 )
-            final_text = card_text if not message_text else f"{card_text}\n\nР”РѕРїРѕР»РЅРµРЅРёРµ:\n{message_text}"
+            final_text = card_text if not message_text else f"{card_text}\n\nДополнение:\n{message_text}"
             await send_to_wizard_target(final_text)
             dashboard_update_job(
                 job_id,
@@ -5772,10 +5857,10 @@ async def dashboard_execute_job(job_id: str) -> None:
 
         if action == "pause_scan":
             if not active_scan_cancel_event or active_scan_cancel_event.is_set():
-                result_text = "Scan СЃРµР№С‡Р°СЃ РЅРµ Р°РєС‚РёРІРµРЅ."
+                result_text = "Scan сейчас не активен."
             else:
                 active_scan_cancel_event.set()
-                result_text = "РџР°СѓР·Р° scan РїРѕСЃС‚Р°РІР»РµРЅР° РёР· admin panel."
+                result_text = "Пауза scan поставлена из admin panel."
             dashboard_update_job(
                 job_id,
                 status="done",
@@ -5787,10 +5872,10 @@ async def dashboard_execute_job(job_id: str) -> None:
 
         if action == "stop_mail2":
             if not active_mail2_cancel_event or active_mail2_cancel_event.is_set():
-                result_text = "Mail2 СЃРµР№С‡Р°СЃ РЅРµ Р°РєС‚РёРІРµРЅ."
+                result_text = "Mail2 сейчас не активен."
             else:
                 active_mail2_cancel_event.set()
-                result_text = "Mail2 РѕСЃС‚Р°РЅРѕРІРєР° Р·Р°РїСЂРѕС€РµРЅР° РёР· admin panel."
+                result_text = "Mail2 остановка запрошена из admin panel."
             dashboard_update_job(
                 job_id,
                 status="done",
@@ -5802,7 +5887,7 @@ async def dashboard_execute_job(job_id: str) -> None:
 
         if action == "wizard_text":
             if not message_text:
-                raise ValueError("РўРµРєСЃС‚ РґР»СЏ wizard РїСѓСЃС‚РѕР№.")
+                raise ValueError("Текст для wizard пустой.")
             await send_to_wizard_target(message_text)
             dashboard_update_job(
                 job_id,
@@ -5813,7 +5898,7 @@ async def dashboard_execute_job(job_id: str) -> None:
             )
             return
 
-        raise ValueError(f"РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ: {action}")
+        raise ValueError(f"Неизвестное действие: {action}")
     except Exception as error:
         logging.exception("Dashboard action failed job_id=%s action=%s", job_id, action)
         dashboard_update_job(
@@ -6022,7 +6107,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             content = build_live_admin_dashboard_html().encode("utf-8")
         except Exception:
             logging.exception("Failed to build live admin dashboard")
-            content = build_dashboard_empty_admin_html("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР±СЂР°С‚СЊ Р¶РёРІСѓСЋ Р°РґРјРёРЅ-РїР°РЅРµР»СЊ. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.").encode("utf-8")
+            content = build_dashboard_empty_admin_html("Не удалось собрать живую админ-панель. Подробности записаны в лог.").encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
@@ -6397,11 +6482,11 @@ def resolve_unresolved_request(request_id: int, note: str = "") -> bool:
 
 def unresolved_reason_label(reason: str) -> str:
     mapping = {
-        "support_escalation": "РїРµСЂРµРґР°РЅРѕ РІ РїРѕРґРґРµСЂР¶РєСѓ",
-        "gpt_not_configured": "GPT РЅРµ РЅР°СЃС‚СЂРѕРµРЅ",
-        "gpt_rate_limit_timeout": "Р»РёРјРёС‚ GPT Р±РѕР»РµРµ 2 РјРёРЅСѓС‚",
-        "gpt_error": "РѕС€РёР±РєР° GPT",
-        "voice_transcription_failed": "РЅРµ СѓРґР°Р»РѕСЃСЊ СЂР°СЃРїРѕР·РЅР°С‚СЊ РіРѕР»РѕСЃ",
+        "support_escalation": "передано в поддержку",
+        "gpt_not_configured": "GPT не настроен",
+        "gpt_rate_limit_timeout": "лимит GPT более 2 минут",
+        "gpt_error": "ошибка GPT",
+        "voice_transcription_failed": "не удалось распознать голос",
     }
     cleaned = str(reason or "").strip()
     return mapping.get(cleaned, cleaned or "-")
@@ -6409,9 +6494,9 @@ def unresolved_reason_label(reason: str) -> str:
 
 def build_unresolved_list_text(*, status: str = "open", limit: int = 15) -> str:
     rows = list_unresolved_requests(status=status, limit=limit)
-    title = "РќРµСЂР°Р·РѕР±СЂР°РЅРЅС‹Рµ РѕР±СЂР°С‰РµРЅРёСЏ" if status == "open" else "Р Р°Р·РѕР±СЂР°РЅРЅС‹Рµ РѕР±СЂР°С‰РµРЅРёСЏ"
+    title = "Неразобранные обращения" if status == "open" else "Разобранные обращения"
     if not rows:
-        return f"{title}\n\nРЎРїРёСЃРѕРє РїСѓСЃС‚."
+        return f"{title}\n\nСписок пуст."
     lines = [title, ""]
     for row in rows:
         sender_part = str(row["sender_id"] or "-")
@@ -6428,45 +6513,45 @@ def build_unresolved_list_text(*, status: str = "open", limit: int = 15) -> str:
         if question_preview:
             lines.append(f"  {question_preview}")
     lines.append("")
-    lines.append("РљРѕРјР°РЅРґС‹: /unresolved <id>, /unresolved done <id> [Р·Р°РјРµС‚РєР°], /unresolved all")
+    lines.append("Команды: /unresolved <id>, /unresolved done <id> [заметка], /unresolved all")
     return "\n".join(lines)
 
 
 def build_unresolved_detail_text(request_id: int) -> str:
     row = get_unresolved_request(request_id)
     if not row:
-        return f"РћР±СЂР°С‰РµРЅРёРµ #{request_id} РЅРµ РЅР°Р№РґРµРЅРѕ."
+        return f"Обращение #{request_id} не найдено."
     lines = [
-        f"РћР±СЂР°С‰РµРЅРёРµ #{int(row['id'])}",
+        f"Обращение #{int(row['id'])}",
         "",
-        f"РЎС‚Р°С‚СѓСЃ: {str(row['status'] or '-')}",
-        f"РџСЂРёС‡РёРЅР°: {unresolved_reason_label(str(row['reason'] or ''))}",
-        f"РСЃС‚РѕС‡РЅРёРє: {str(row['source'] or '-')}",
-        f"РЎРѕР·РґР°РЅРѕ: {str(row['created_at'] or '-')[:19].replace('T', ' ')}",
+        f"Статус: {str(row['status'] or '-')}",
+        f"Причина: {unresolved_reason_label(str(row['reason'] or ''))}",
+        f"сточник: {str(row['source'] or '-')}",
+        f"Создано: {str(row['created_at'] or '-')[:19].replace('T', ' ')}",
         f"Sender ID: {str(row['sender_id'] or '-')}",
         (
             f"Username: @{str(row['sender_username'] or '').strip()}"
             if str(row["sender_username"] or "").strip()
             else "Username: -"
         ),
-        f"РРјСЏ: {str(row['sender_name'] or '-')}",
+        f"мя: {str(row['sender_name'] or '-')}",
         f"Chat: {str(row['chat_id'] or '-')}",
         f"Message: {str(row['message_id'] or '-')}",
         "",
-        "РўРµРєСЃС‚ Р·Р°РїСЂРѕСЃР°:",
-        str(row["question_text"] or "[РїСѓСЃС‚Рѕ]"),
+        "Текст запроса:",
+        str(row["question_text"] or "[пусто]"),
     ]
     transcript_text = str(row["transcript_text"] or "").strip()
     if transcript_text:
-        lines.extend(("", "РўСЂР°РЅСЃРєСЂРёРїС‚:", transcript_text))
+        lines.extend(("", "Транскрипт:", transcript_text))
     resolved_at = str(row["resolved_at"] or "").strip()
     resolution_note = str(row["resolution_note"] or "").strip()
     if resolved_at or resolution_note:
         lines.extend(
             (
                 "",
-                f"Р—Р°РєСЂС‹С‚Рѕ: {resolved_at[:19].replace('T', ' ') if resolved_at else '-'}",
-                f"Р—Р°РјРµС‚РєР°: {resolution_note or '-'}",
+                f"Закрыто: {resolved_at[:19].replace('T', ' ') if resolved_at else '-'}",
+                f"Заметка: {resolution_note or '-'}",
             )
         )
     return "\n".join(lines)
@@ -6562,12 +6647,12 @@ async def handle_unresolved_command_event(event, unresolved_command: tuple[str, 
         if resolved:
             await safe_event_reply(
                 event,
-                f"РћР±СЂР°С‰РµРЅРёРµ #{request_id} РѕС‚РјРµС‡РµРЅРѕ РєР°Рє СЂР°Р·РѕР±СЂР°РЅРЅРѕРµ." + (f"\nР—Р°РјРµС‚РєР°: {note}" if note else ""),
+                f"Обращение #{request_id} отмечено как разобранное." + (f"\nЗаметка: {note}" if note else ""),
             )
         else:
             await safe_event_reply(
                 event,
-                f"РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РєСЂС‹С‚СЊ РѕР±СЂР°С‰РµРЅРёРµ #{request_id}. Р’РѕР·РјРѕР¶РЅРѕ, РѕРЅРѕ СѓР¶Рµ Р·Р°РєСЂС‹С‚Рѕ РёР»Рё РЅРµ РЅР°Р№РґРµРЅРѕ.",
+                f"Не удалось закрыть обращение #{request_id}. Возможно, оно уже закрыто или не найдено.",
             )
         return True
     return False
@@ -7361,7 +7446,7 @@ def build_status_summary_from_stats(stats: dict, dashboard_path: Path) -> str:
         lines.append("Прогноз дохода:")
         for item in projections:
             lines.append(
-                f"- {int(item['months'])} РјРµСЃ: {float(item['revenue_rub']):.0f} RUB, "
+                f"- {int(item['months'])} мес: {float(item['revenue_rub']):.0f} RUB, "
                 f"users ~{int(round(float(item['users'])))} / subs ~{int(round(float(item['subscriptions'])))}"
             )
     return "\n".join(lines)
@@ -7719,7 +7804,7 @@ async def open_user_in_admin_bot(
     bot,
     user_id: str,
     progress_callback: ProgressCallback | None = None,
-    progress_title: str = "РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+    progress_title: str = "Поиск пользователя",
     progress_steps: list[str] | None = None,
 ):
     steps = progress_steps or SEARCH_STEPS
@@ -7729,7 +7814,7 @@ async def open_user_in_admin_bot(
         steps,
         1,
         user_id=user_id,
-        extra_lines=[f"РђРґРјРёРЅ-Р±РѕС‚: @{settings.admin_bot_username}", f"РљРѕРјР°РЅРґР°: {settings.admin_command}"],
+        extra_lines=[f"Админ-бот: @{settings.admin_bot_username}", f"Команда: {settings.admin_command}"],
     )
     admin_message = await send_admin_and_get_menu(conv, bot)
     admin_message = await reset_admin_state_if_needed(conv, bot, admin_message)
@@ -7740,7 +7825,7 @@ async def open_user_in_admin_bot(
         steps,
         2,
         user_id=user_id,
-        extra_lines=[f"РљРЅРѕРїРєР° СЂР°Р·РґРµР»Р°: {settings.users_button_text}"],
+        extra_lines=[f"Кнопка раздела: {settings.users_button_text}"],
     )
     users_message = await click_and_read(
         bot,
@@ -7755,7 +7840,7 @@ async def open_user_in_admin_bot(
         steps,
         3,
         user_id=user_id,
-        extra_lines=[f"РљРЅРѕРїРєР° РїРѕРёСЃРєР°: {settings.find_user_button_text}", f"РћС‚РїСЂР°РІР»СЏСЋ ID: {user_id}"],
+        extra_lines=[f"Кнопка поиска: {settings.find_user_button_text}", f"Отправляю ID: {user_id}"],
     )
     find_message = await click_and_read(bot, users_message, settings.find_user_button_text)
 
@@ -7770,7 +7855,7 @@ async def open_user_in_admin_bot(
 async def find_user_in_admin_bot(
     user_id: str,
     progress_callback: ProgressCallback | None = None,
-    progress_title: str = "РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+    progress_title: str = "Поиск пользователя",
     progress_steps: list[str] | None = None,
 ) -> str:
     steps = progress_steps or SEARCH_STEPS
@@ -7780,7 +7865,7 @@ async def find_user_in_admin_bot(
         steps,
         1,
         user_id=user_id,
-        extra_lines=["РћР¶РёРґР°СЋ СЃРІРѕР±РѕРґРЅС‹Р№ Р°РґРјРёРЅ-РїСЂРѕС†РµСЃСЃ"],
+        extra_lines=["Ожидаю свободный админ-процесс"],
     )
     async with admin_flow_context(
         progress_title,
@@ -7796,7 +7881,7 @@ async def find_user_in_admin_bot(
             steps,
             1,
             user_id=user_id,
-            extra_lines=[f"РџРѕР»СѓС‡Р°СЋ Telegram entity @{settings.admin_bot_username}"],
+            extra_lines=[f"Получаю Telegram entity @{settings.admin_bot_username}"],
         )
         bot = await get_admin_bot_entity()
         logging.info("Starting admin search for user_id=%s in @%s", user_id, settings.admin_bot_username)
@@ -7816,7 +7901,7 @@ async def find_user_in_admin_bot(
                 steps,
                 4,
                 user_id=user_id,
-                extra_lines=[f"РљРЅРѕРїРєР° РїРѕРґРїРёСЃРѕРє: {settings.subscriptions_button_text}"],
+                extra_lines=[f"Кнопка подписок: {settings.subscriptions_button_text}"],
             )
             subscriptions_message = await click_and_read(
                 bot,
@@ -7832,8 +7917,8 @@ async def find_user_in_admin_bot(
             5,
             user_id=user_id,
             extra_lines=[
-                f"РќР°Р№РґРµРЅРѕ РїРѕРґРїРёСЃРѕРє: {len(subscription_numbers)}",
-                "Р“РѕС‚РѕРІР»СЋ РєРѕСЂРѕС‚РєСѓСЋ РєР°СЂС‚РѕС‡РєСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                f"Найдено подписок: {len(subscription_numbers)}",
+                "Готовлю короткую карточку пользователя",
             ],
         )
         result_text = format_user_summary(
@@ -7915,9 +8000,9 @@ def extract_expiration_date(text: str) -> datetime | None:
 
 def extract_registration_date(text: str) -> datetime | None:
     labels = (
-        "РґР°С‚Р° СЂРµРіРёСЃС‚СЂР°С†РёРё",
-        "Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ",
-        "СЂРµРіРёСЃС‚СЂР°С†РёСЏ",
+        "дата регистрации",
+        "зарегистрирован",
+        "регистрация",
         "created at",
         "registered at",
         "registration date",
@@ -7938,7 +8023,7 @@ def extract_registration_date(text: str) -> datetime | None:
         line_lower = line.casefold()
         if not line:
             continue
-        if not any(token in line_lower for token in ("СЂРµРі", "register", "created")):
+        if not any(token in line_lower for token in ("рег", "register", "created")):
             continue
         found = extract_expiration_date(line)
         if found and 2000 <= found.year <= datetime.now().year + 1:
@@ -8318,141 +8403,141 @@ def build_scan_report(records: list[dict], pages_total: int = 0, admin_statistic
     }
 
     lines = [
-        "РћС‚С‡РµС‚ scan",
-        f"РЎС„РѕСЂРјРёСЂРѕРІР°РЅ: {now.strftime('%Y-%m-%d %H:%M:%S')}",
-        f"РџСЂРѕРІРµСЂРµРЅРѕ ID: {pages_total}",
-        f"РџРѕР»СЊР·РѕРІР°С‚РµР»РµР№: {len(records)}",
-        f"РџРѕР»СЊР·РѕРІР°С‚РµР»РµР№ СЃ РїРѕРґРїРёСЃРєР°РјРё: {users_with_subscriptions}",
-        f"РџРѕР»СЊР·РѕРІР°С‚РµР»РµР№ Р±РµР· РїРѕРґРїРёСЃРѕРє: {len(users_without_subscriptions)}",
-        f"РџРѕРґРїРёСЃРѕРє: {total_subscriptions}",
-        f"РЎСЂРµРґРЅРµРµ РїРѕРґРїРёСЃРѕРє РЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: {avg_subscriptions_per_user:.2f}",
-        f"РЎСЂРµРґРЅРµРµ РїРѕРґРїРёСЃРѕРє РЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ СЃ РїРѕРґРїРёСЃРєР°РјРё: {avg_subscriptions_per_active_user:.2f}",
-        f"РџРѕРґРїРёСЃРѕРє СЃ РґР°С‚РѕР№ РѕРєРѕРЅС‡Р°РЅРёСЏ: {dated_subscriptions}",
-        f"РџРѕРґРїРёСЃРѕРє Р±РµР· РґР°С‚С‹ РѕРєРѕРЅС‡Р°РЅРёСЏ: {undated_subscriptions}",
-        f"РЎР°РјР°СЏ СЂР°РЅРЅСЏСЏ РґР°С‚Р° РѕРєРѕРЅС‡Р°РЅРёСЏ: {stats['earliest_expiration'] or 'РЅРµС‚'}",
-        f"РЎР°РјР°СЏ РїРѕР·РґРЅСЏСЏ РґР°С‚Р° РѕРєРѕРЅС‡Р°РЅРёСЏ: {stats['latest_expiration'] or 'РЅРµС‚'}",
+        "Отчет scan",
+        f"Сформирован: {now.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Проверено ID: {pages_total}",
+        f"Пользователей: {len(records)}",
+        f"Пользователей с подписками: {users_with_subscriptions}",
+        f"Пользователей без подписок: {len(users_without_subscriptions)}",
+        f"Подписок: {total_subscriptions}",
+        f"Среднее подписок на пользователя: {avg_subscriptions_per_user:.2f}",
+        f"Среднее подписок на пользователя с подписками: {avg_subscriptions_per_active_user:.2f}",
+        f"Подписок с датой окончания: {dated_subscriptions}",
+        f"Подписок без даты окончания: {undated_subscriptions}",
+        f"Самая ранняя дата окончания: {stats['earliest_expiration'] or 'нет'}",
+        f"Самая поздняя дата окончания: {stats['latest_expiration'] or 'нет'}",
         "",
-        "Р”РѕС…РѕРґРЅРѕСЃС‚СЊ РЅР° СЃР»РµРґСѓСЋС‰РёР№ РјРµСЃСЏС† (РїРѕ СЂРµР°Р»СЊРЅС‹Рј СЃСЂРѕРєР°Рј РёСЃС‚РµС‡РµРЅРёСЏ):",
-        f"- РџРѕРґРїРёСЃРѕРє СЃ РёСЃС‚РµС‡РµРЅРёРµРј РІ 30 РґРЅРµР№: {expiring_30_total}",
-        f"- Р‘Р°Р·РѕРІС‹Р№ СЃС†РµРЅР°СЂРёР№ (70% РїСЂРѕРґР»СЏС‚): ~{fmt_money(scenario_base)} RUB",
-        f"- РљРѕРЅСЃРµСЂРІР°С‚РёРІРЅС‹Р№ (60%): ~{fmt_money(scenario_low)} RUB",
-        f"- РћРїС‚РёРјРёСЃС‚РёС‡РЅС‹Р№ (80%): ~{fmt_money(scenario_high)} RUB",
-        f"- Р РёСЃРє РїРѕС‚РµСЂРё РІС‹СЂСѓС‡РєРё РїСЂРё РЅРµРїСЂРѕРґР»РµРЅРёРё: ~{fmt_money(churn_risk_revenue_30d)} RUB",
-        f"- РџРѕС‚РµРЅС†РёР°Р» РІРѕР·РІСЂР°С‚Р° СѓР¶Рµ РёСЃС‚РµРєС€РёС… (winback): ~{fmt_money(expected_winback_revenue_30d)} RUB",
+        "Доходность на следующий месяц (по реальным срокам истечения):",
+        f"- Подписок с истечением в 30 дней: {expiring_30_total}",
+        f"- Базовый сценарий (70% продлят): ~{fmt_money(scenario_base)} RUB",
+        f"- Консервативный (60%): ~{fmt_money(scenario_low)} RUB",
+        f"- Оптимистичный (80%): ~{fmt_money(scenario_high)} RUB",
+        f"- Риск потери выручки при непродлении: ~{fmt_money(churn_risk_revenue_30d)} RUB",
+        f"- Потенциал возврата уже истекших (winback): ~{fmt_money(expected_winback_revenue_30d)} RUB",
         "",
-        "Р¤РёРЅР°РЅСЃРѕРІС‹Р№ РїСЂРѕРіРЅРѕР· (РѕР±СЉРµРґРёРЅРµРЅРёРµ СЃС‚Р°С‚РёСЃС‚РёРєРё Рё РїРѕРґРїРёСЃРѕРє):",
-        f"- Р§РµСЂРµР· 1 РјРµСЃСЏС†: ~{fmt_money(financial_month_1)} RUB",
-        f"- Р§РµСЂРµР· 6 РјРµСЃСЏС†РµРІ: ~{fmt_money(financial_month_6)} RUB",
-        f"- Р§РµСЂРµР· 12 РјРµСЃСЏС†РµРІ: ~{fmt_money(financial_month_12)} RUB",
-        f"- РСЃС‚РѕС‡РЅРёРє Р±Р°Р·С‹: {'РїСЂРёР±С‹Р»СЊ РёР· СЃС‚Р°С‚РёСЃС‚РёРєРё' if stats_month_profit > 0 else 'РѕС†РµРЅРєР° MRR РїРѕ РїРѕРґРїРёСЃРєР°Рј'}",
-        f"- РСЃС‚РѕСЂРёСЏ РїСЂРёР±С‹Р»Рё РёР· СЃС‚Р°С‚РёСЃС‚РёРєРё: РјРµСЃСЏС† {fmt_money(stats_month_profit)} / РїРѕР»РіРѕРґР° {fmt_money(stats_half_year_profit)} / РіРѕРґ {fmt_money(stats_year_profit)} RUB",
+        "Финансовый прогноз (объединение статистики и подписок):",
+        f"- Через 1 месяц: ~{fmt_money(financial_month_1)} RUB",
+        f"- Через 6 месяцев: ~{fmt_money(financial_month_6)} RUB",
+        f"- Через 12 месяцев: ~{fmt_money(financial_month_12)} RUB",
+        f"- сточник базы: {'прибыль из статистики' if stats_month_profit > 0 else 'оценка MRR по подпискам'}",
+        f"- стория прибыли из статистики: месяц {fmt_money(stats_month_profit)} / полгода {fmt_money(stats_half_year_profit)} / год {fmt_money(stats_year_profit)} RUB",
         "",
-        "РџСЂРѕРіРЅРѕР· С‡РµСЂРµР· 6 РјРµСЃСЏС†РµРІ (РїРѕ СЃРєРѕСЂРѕСЃС‚Рё РїСЂРёСЂРѕСЃС‚Р° РѕС‚ РґР°С‚С‹ СЂРµРіРёСЃС‚СЂР°С†РёРё):",
-        f"- РџРµСЂРёРѕРґ РЅР°Р±Р»СЋРґРµРЅРёСЏ: {observation_days} РґРЅРµР№ (СЃ {observation_start.isoformat() if observation_start else 'РЅРµС‚ РґР°РЅРЅС‹С…'})",
-        f"- РџРѕРєСЂС‹С‚РёРµ РґР°С‚ СЂРµРіРёСЃС‚СЂР°С†РёРё (РІСЃРµ РїРѕР»СЊР·РѕРІР°С‚РµР»Рё): {registration_coverage_users:.0%}",
-        f"- РџРѕРєСЂС‹С‚РёРµ РґР°С‚ СЂРµРіРёСЃС‚СЂР°С†РёРё (РїР»Р°С‚СЏС‰РёРµ): {registration_coverage_paid:.0%}",
-        f"- РЎРєРѕСЂРѕСЃС‚СЊ РїСЂРёСЂРѕСЃС‚Р° РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№: {users_growth_per_day:.2f}/РґРµРЅСЊ",
-        f"- РЎРєРѕСЂРѕСЃС‚СЊ РїСЂРёСЂРѕСЃС‚Р° РїР»Р°С‚СЏС‰РёС…: {paid_users_growth_per_day:.2f}/РґРµРЅСЊ",
-        f"- РЎРєРѕСЂРѕСЃС‚СЊ РїСЂРёСЂРѕСЃС‚Р° РїРѕРґРїРёСЃРѕРє: {subscriptions_growth_per_day:.2f}/РґРµРЅСЊ",
-        f"- РџСЂРѕРіРЅРѕР· РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ С‡РµСЂРµР· 6Рј: ~{int(round(projected_users_6m))}",
-        f"- РџСЂРѕРіРЅРѕР· РїР»Р°С‚СЏС‰РёС… С‡РµСЂРµР· 6Рј: ~{int(round(projected_paid_users_6m))}",
-        f"- РџСЂРѕРіРЅРѕР· РїРѕРґРїРёСЃРѕРє С‡РµСЂРµР· 6Рј: ~{int(round(projected_subscriptions_6m))}",
-        f"- РџСЂРѕРіРЅРѕР· MRR С‡РµСЂРµР· 6Рј: ~{fmt_money(projected_mrr_6m)} RUB",
+        "Прогноз через 6 месяцев (по скорости прироста от даты регистрации):",
+        f"- Период наблюдения: {observation_days} дней (с {observation_start.isoformat() if observation_start else 'нет данных'})",
+        f"- Покрытие дат регистрации (все пользователи): {registration_coverage_users:.0%}",
+        f"- Покрытие дат регистрации (платящие): {registration_coverage_paid:.0%}",
+        f"- Скорость прироста пользователей: {users_growth_per_day:.2f}/день",
+        f"- Скорость прироста платящих: {paid_users_growth_per_day:.2f}/день",
+        f"- Скорость прироста подписок: {subscriptions_growth_per_day:.2f}/день",
+        f"- Прогноз пользователей через 6м: ~{int(round(projected_users_6m))}",
+        f"- Прогноз платящих через 6м: ~{int(round(projected_paid_users_6m))}",
+        f"- Прогноз подписок через 6м: ~{int(round(projected_subscriptions_6m))}",
+        f"- Прогноз MRR через 6м: ~{fmt_money(projected_mrr_6m)} RUB",
         "",
-        "Р Р°СЃРїСЂРµРґРµР»РµРЅРёРµ РїРѕ СЃСЂРѕРєР°Рј (Р°РєС‚РёРІРЅС‹Рµ Рё РёСЃС‚РµРєС€РёРµ):",
-        f"- РСЃС‚РµРєР»Рё: {timing_buckets['expired']}",
-        f"- 0..3 РґРЅСЏ: {timing_buckets['0_3_days']}",
-        f"- 4..7 РґРЅРµР№: {timing_buckets['4_7_days']}",
-        f"- 8..14 РґРЅРµР№: {timing_buckets['8_14_days']}",
-        f"- 15..30 РґРЅРµР№: {timing_buckets['15_30_days']}",
-        f"- 31..60 РґРЅРµР№: {timing_buckets['31_60_days']}",
-        f"- 61+ РґРЅРµР№: {timing_buckets['61_plus_days']}",
-        f"- Р‘РµР· РґР°С‚С‹: {timing_buckets['without_date']}",
+        "Распределение по срокам (активные и истекшие):",
+        f"- стекли: {timing_buckets['expired']}",
+        f"- 0..3 дня: {timing_buckets['0_3_days']}",
+        f"- 4..7 дней: {timing_buckets['4_7_days']}",
+        f"- 8..14 дней: {timing_buckets['8_14_days']}",
+        f"- 15..30 дней: {timing_buckets['15_30_days']}",
+        f"- 31..60 дней: {timing_buckets['31_60_days']}",
+        f"- 61+ дней: {timing_buckets['61_plus_days']}",
+        f"- Без даты: {timing_buckets['without_date']}",
         "",
-        "Р›РѕРєР°С†РёРё:",
+        "Локации:",
     ]
     if locations:
         lines.extend(f"- {location}: {count}" for location, count in locations.most_common())
     else:
-        lines.append("- РЅРµС‚ РґР°РЅРЅС‹С…")
+        lines.append("- нет данных")
 
     lines.append("")
-    lines.append("Р”РѕС…РѕРґ СЃР»РµРґСѓСЋС‰РµРіРѕ РјРµСЃСЏС†Р° РїРѕ Р»РѕРєР°С†РёСЏРј (СЃС†РµРЅР°СЂРёР№ 70%):")
+    lines.append("Доход следующего месяца по локациям (сценарий 70%):")
     if renewal_income_next_month_by_location:
         for location, amount in sorted(renewal_income_next_month_by_location.items(), key=lambda item: item[1], reverse=True):
             due_count = due_next_month_by_location[location]
-            lines.append(f"- {location}: {fmt_money(amount)} RUB (РёСЃС‚РµРєР°РµС‚ {due_count})")
+            lines.append(f"- {location}: {fmt_money(amount)} RUB (истекает {due_count})")
     else:
-        lines.append("- РЅРµС‚ РґР°РЅРЅС‹С…")
+        lines.append("- нет данных")
 
     lines.append("")
-    lines.append("РўРѕРї РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РїРѕ С‡РёСЃР»Сѓ РїРѕРґРїРёСЃРѕРє:")
+    lines.append("Топ пользователей по числу подписок:")
     if top_users_by_subscriptions:
         for user_id, count in top_users_by_subscriptions[:20]:
             lines.append(f"- user {user_id}: {count}")
     else:
-        lines.append("- РЅРµС‚ РґР°РЅРЅС‹С…")
+        lines.append("- нет данных")
 
     lines.append("")
-    lines.append("Р—Р°РєР°РЅС‡РёРІР°СЋС‚СЃСЏ РІ С‚РµС‡РµРЅРёРµ 3 РґРЅРµР№:")
+    lines.append("Заканчиваются в течение 3 дней:")
     if expiring_soon:
         for item in expiring_soon:
             lines.append(
                 f"- user {item['user_id']}, sub {item['subscription_id']}, {item['location']}, {item['expires_at']}"
             )
     else:
-        lines.append("- РЅРµС‚")
+        lines.append("- нет")
 
     lines.append("")
-    lines.append("Р—Р°РєР°РЅС‡РёРІР°СЋС‚СЃСЏ РІ С‚РµС‡РµРЅРёРµ 7 РґРЅРµР№:")
+    lines.append("Заканчиваются в течение 7 дней:")
     if expiring_within_7_days:
         for item in expiring_within_7_days:
             lines.append(
                 f"- user {item['user_id']}, sub {item['subscription_id']}, {item['location']}, {item['expires_at']}"
             )
     else:
-        lines.append("- РЅРµС‚")
+        lines.append("- нет")
 
     lines.append("")
-    lines.append("Р—Р°РєР°РЅС‡РёРІР°СЋС‚СЃСЏ РІ С‚РµС‡РµРЅРёРµ 30 РґРЅРµР№:")
+    lines.append("Заканчиваются в течение 30 дней:")
     if expiring_within_30_days:
         for item in expiring_within_30_days[:50]:
             lines.append(
                 f"- user {item['user_id']}, sub {item['subscription_id']}, {item['location']}, {item['expires_at']}"
             )
     else:
-        lines.append("- РЅРµС‚")
+        lines.append("- нет")
 
     lines.append("")
-    lines.append("РЈР¶Рµ РёСЃС‚РµРєР»Рё:")
+    lines.append("Уже истекли:")
     if expired_subscriptions:
         for item in expired_subscriptions:
             lines.append(
                 f"- user {item['user_id']}, sub {item['subscription_id']}, {item['location']}, {item['expires_at']}"
             )
     else:
-        lines.append("- РЅРµС‚")
+        lines.append("- нет")
 
     lines.append("")
-    lines.append("РџРѕР»СЊР·РѕРІР°С‚РµР»Рё Р±РµР· РїРѕРґРїРёСЃРѕРє:")
+    lines.append("Пользователи без подписок:")
     if users_without_subscriptions:
         lines.extend(f"- user {user_id}" for user_id in sorted(users_without_subscriptions))
     else:
-        lines.append("- РЅРµС‚")
+        lines.append("- нет")
 
     lines.append("")
-    lines.append("Р”РѕРїСѓС‰РµРЅРёСЏ РїСЂРѕРіРЅРѕР·Р°:")
-    lines.append(f"- Р¦РµРЅР° РїРѕРґРїРёСЃРєРё: {fmt_money(price)} RUB")
-    lines.append(f"- РџСЂРѕРґР»РµРЅРёРµ РІ 7 РґРЅРµР№: {renew_7:.0%}")
-    lines.append(f"- РџСЂРѕРґР»РµРЅРёРµ РІ 30 РґРЅРµР№: {renew_30:.0%}")
-    lines.append(f"- Р’РѕР·РІСЂР°С‚ РёСЃС‚РµРєС€РёС…: {winback:.0%}")
-    lines.append("- Р”Р»СЏ РїРѕРґРїРёСЃРѕРє Р±РµР· РґР°С‚С‹ Р±РµСЂРµС‚СЃСЏ 50% РєР°Рє Р°РєС‚РёРІРЅС‹Рµ.")
+    lines.append("Допущения прогноза:")
+    lines.append(f"- Цена подписки: {fmt_money(price)} RUB")
+    lines.append(f"- Продление в 7 дней: {renew_7:.0%}")
+    lines.append(f"- Продление в 30 дней: {renew_30:.0%}")
+    lines.append(f"- Возврат истекших: {winback:.0%}")
+    lines.append("- Для подписок без даты берется 50% как активные.")
 
     return "\n".join(lines), stats
 
 
 def build_detailed_scan_report(records: list[dict]) -> str:
-    lines = ["РџРѕРґСЂРѕР±РЅС‹Р№ РѕС‚С‡РµС‚ scan", ""]
+    lines = ["Подробный отчет scan", ""]
     for index, record in enumerate(records, start=1):
         user_id = str(record["user_id"])
         user_button_text = str(record["user_button_text"])
@@ -8525,12 +8610,12 @@ def build_scan_dashboard_html(stats: dict) -> str:
     location_rows = "".join(
         f"<tr><td>{esc(location)}</td><td>{fmt_int(count)}</td></tr>"
         for location, count in sorted(locations.items(), key=lambda item: item[1], reverse=True)[:5]
-    ) or "<tr><td colspan='2'>РќРµС‚ РґР°РЅРЅС‹С…</td></tr>"
+    ) or "<tr><td colspan='2'>Нет данных</td></tr>"
 
     top_user_rows = "".join(
         f"<tr><td>{esc(item.get('user_id', '-'))}</td><td>{fmt_int(item.get('subscriptions', 0))}</td></tr>"
         for item in top_users[:5]
-    ) or "<tr><td colspan='2'>РќРµС‚ РґР°РЅРЅС‹С…</td></tr>"
+    ) or "<tr><td colspan='2'>Нет данных</td></tr>"
 
     def build_expiration_rows(items: list[dict], limit: int = 30, with_days: bool = True) -> str:
         rows = "".join(
@@ -8548,7 +8633,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
             for item in items[:limit]
         )
         colspan = "5" if with_days else "4"
-        return rows or f"<tr><td colspan='{colspan}'>РќРµС‚ РґР°РЅРЅС‹С…</td></tr>"
+        return rows or f"<tr><td colspan='{colspan}'>Нет данных</td></tr>"
 
     def admin_user_rows_json(records: list[dict]) -> str:
         today = datetime.now().date()
@@ -8578,22 +8663,22 @@ def build_scan_dashboard_html(stats: dict) -> str:
             nearest_days = min((expires_at - today).days for expires_at in expiration_dates) if expiration_dates else None
             if not subscriptions:
                 status = "no_subs"
-                status_label = "Р‘РµР· РїРѕРґРїРёСЃРєРё"
+                status_label = "Без подписки"
             elif nearest_days is None:
                 status = "unknown_date"
-                status_label = "Р•СЃС‚СЊ РїРѕРґРїРёСЃРєР°, РґР°С‚Р° РЅРµРёР·РІРµСЃС‚РЅР°"
+                status_label = "Есть подписка, дата неизвестна"
             elif nearest_days < 0:
                 status = "expired"
-                status_label = "РСЃС‚РµРєР»Р°"
+                status_label = "стекла"
             elif nearest_days <= 7:
                 status = "expiring_7"
-                status_label = "РСЃС‚РµРєР°РµС‚ Р·Р° 7 РґРЅРµР№"
+                status_label = "стекает за 7 дней"
             elif nearest_days <= 30:
                 status = "expiring_30"
-                status_label = "РСЃС‚РµРєР°РµС‚ Р·Р° 30 РґРЅРµР№"
+                status_label = "стекает за 30 дней"
             else:
                 status = "active"
-                status_label = "РђРєС‚РёРІРЅР°"
+                status_label = "Активна"
             rows.append(
                 {
                     "user_id": user_id,
@@ -8695,21 +8780,21 @@ def build_scan_dashboard_html(stats: dict) -> str:
 
     timing_rows = "".join(
         (
-            f"<tr><td>РСЃС‚РµРєР»Рё</td><td>{fmt_int(timing_buckets.get('expired', 0))}</td></tr>"
-            f"<tr><td>0..3 РґРЅСЏ</td><td>{fmt_int(timing_buckets.get('0_3_days', 0))}</td></tr>"
-            f"<tr><td>4..7 РґРЅРµР№</td><td>{fmt_int(timing_buckets.get('4_7_days', 0))}</td></tr>"
-            f"<tr><td>8..14 РґРЅРµР№</td><td>{fmt_int(timing_buckets.get('8_14_days', 0))}</td></tr>"
-            f"<tr><td>15..30 РґРЅРµР№</td><td>{fmt_int(timing_buckets.get('15_30_days', 0))}</td></tr>"
-            f"<tr><td>31..60 РґРЅРµР№</td><td>{fmt_int(timing_buckets.get('31_60_days', 0))}</td></tr>"
-            f"<tr><td>61+ РґРЅРµР№</td><td>{fmt_int(timing_buckets.get('61_plus_days', 0))}</td></tr>"
-            f"<tr><td>Р‘РµР· РґР°С‚С‹</td><td>{fmt_int(timing_buckets.get('without_date', 0))}</td></tr>"
+            f"<tr><td>стекли</td><td>{fmt_int(timing_buckets.get('expired', 0))}</td></tr>"
+            f"<tr><td>0..3 дня</td><td>{fmt_int(timing_buckets.get('0_3_days', 0))}</td></tr>"
+            f"<tr><td>4..7 дней</td><td>{fmt_int(timing_buckets.get('4_7_days', 0))}</td></tr>"
+            f"<tr><td>8..14 дней</td><td>{fmt_int(timing_buckets.get('8_14_days', 0))}</td></tr>"
+            f"<tr><td>15..30 дней</td><td>{fmt_int(timing_buckets.get('15_30_days', 0))}</td></tr>"
+            f"<tr><td>31..60 дней</td><td>{fmt_int(timing_buckets.get('31_60_days', 0))}</td></tr>"
+            f"<tr><td>61+ дней</td><td>{fmt_int(timing_buckets.get('61_plus_days', 0))}</td></tr>"
+            f"<tr><td>Без даты</td><td>{fmt_int(timing_buckets.get('without_date', 0))}</td></tr>"
         )
     )
 
     due_location_rows = "".join(
-        f"<tr><td>{esc(location)}</td><td>{fmt_int(due_count)}</td><td>{fmt_money(float(due_income_by_location.get(location, 0.0)))} в‚Ѕ</td></tr>"
+        f"<tr><td>{esc(location)}</td><td>{fmt_int(due_count)}</td><td>{fmt_money(float(due_income_by_location.get(location, 0.0)))} ₽</td></tr>"
         for location, due_count in sorted(due_by_location.items(), key=lambda item: item[1], reverse=True)[:5]
-    ) or "<tr><td colspan='3'>РќРµС‚ РґР°РЅРЅС‹С…</td></tr>"
+    ) or "<tr><td colspan='3'>Нет данных</td></tr>"
 
     generated_at = esc(stats.get("generated_at", "-")).replace("T", " ")
     pages_total = fmt_int(stats.get("pages_total", 0))
@@ -8997,191 +9082,191 @@ def build_scan_dashboard_html(stats: dict) -> str:
     </div>
 
     <div class="grid">
-      <div class="card"><div class="k">РџСЂРѕРІРµСЂРµРЅРѕ ID</div><div class="v">{pages_total}</div></div>
-      <div class="card"><div class="k">РџРѕР»СЊР·РѕРІР°С‚РµР»РµР№</div><div class="v">{users_total}</div></div>
-      <div class="card"><div class="k">РџРѕРґРїРёСЃРѕРє</div><div class="v">{subscriptions_total}</div></div>
-      <div class="card"><div class="k">РСЃС‚РµРєР°РµС‚ РІ 30 РґРЅРµР№</div><div class="v warn">{due_30_count}</div></div>
-      <div class="card"><div class="k">Р”РѕС…РѕРґ next month (70%)</div><div class="v good">{revenue_next_base} в‚Ѕ</div></div>
-      <div class="card"><div class="k">РџСЂРёР±С‹Р»СЊ 1 РјРµСЃСЏС† (РёС‚РѕРі)</div><div class="v good">{profit_m1} в‚Ѕ</div></div>
-      <div class="card"><div class="k">РџСЂРёР±С‹Р»СЊ 6 РјРµСЃСЏС†РµРІ (РёС‚РѕРі)</div><div class="v good">{profit_m6} в‚Ѕ</div></div>
-      <div class="card"><div class="k">РџСЂРёР±С‹Р»СЊ 12 РјРµСЃСЏС†РµРІ (РёС‚РѕРі)</div><div class="v good">{profit_y1} в‚Ѕ</div></div>
-      <div class="card"><div class="k">РћР¶РёРґР°РµРјС‹Рµ РїСЂРѕРґР»РµРЅРёСЏ</div><div class="v good">{renewals_next_base}</div></div>
-      <div class="card"><div class="k">Р‘Р°Р·РѕРІС‹Р№ MRR</div><div class="v">{mrr_estimate} в‚Ѕ</div></div>
-      <div class="card"><div class="k">Р’РѕР·РІСЂР°С‚С‹ РёСЃС‚РµРєС€РёС… 30 РґРЅРµР№</div><div class="v warn">{winback_30} в‚Ѕ</div></div>
-      <div class="card"><div class="k">Р РёСЃРє РїРѕС‚РµСЂРё 30 РґРЅРµР№</div><div class="v bad">{churn_risk} в‚Ѕ</div></div>
+      <div class="card"><div class="k">Проверено ID</div><div class="v">{pages_total}</div></div>
+      <div class="card"><div class="k">Пользователей</div><div class="v">{users_total}</div></div>
+      <div class="card"><div class="k">Подписок</div><div class="v">{subscriptions_total}</div></div>
+      <div class="card"><div class="k">стекает в 30 дней</div><div class="v warn">{due_30_count}</div></div>
+      <div class="card"><div class="k">Доход next month (70%)</div><div class="v good">{revenue_next_base} ₽</div></div>
+      <div class="card"><div class="k">Прибыль 1 месяц (итог)</div><div class="v good">{profit_m1} ₽</div></div>
+      <div class="card"><div class="k">Прибыль 6 месяцев (итог)</div><div class="v good">{profit_m6} ₽</div></div>
+      <div class="card"><div class="k">Прибыль 12 месяцев (итог)</div><div class="v good">{profit_y1} ₽</div></div>
+      <div class="card"><div class="k">Ожидаемые продления</div><div class="v good">{renewals_next_base}</div></div>
+      <div class="card"><div class="k">Базовый MRR</div><div class="v">{mrr_estimate} ₽</div></div>
+      <div class="card"><div class="k">Возвраты истекших 30 дней</div><div class="v warn">{winback_30} ₽</div></div>
+      <div class="card"><div class="k">Риск потери 30 дней</div><div class="v bad">{churn_risk} ₽</div></div>
     </div>
 
     <div class="panel">
-      <h2>Р”РѕС…РѕРґРЅРѕСЃС‚СЊ РЅР° СЃР»РµРґСѓСЋС‰РёР№ РјРµСЃСЏС†</h2>
+      <h2>Доходность на следующий месяц</h2>
       <table>
-        <thead><tr><th>РЎС†РµРЅР°СЂРёР№</th><th>РЎС‚Р°РІРєР° РїСЂРѕРґР»РµРЅРёСЏ</th><th>РџСЂРѕРіРЅРѕР· РІС‹СЂСѓС‡РєРё</th></tr></thead>
+        <thead><tr><th>Сценарий</th><th>Ставка продления</th><th>Прогноз выручки</th></tr></thead>
         <tbody>
-          <tr><td>РљРѕРЅСЃРµСЂРІР°С‚РёРІРЅС‹Р№</td><td>60%</td><td>{revenue_next_low} в‚Ѕ</td></tr>
-          <tr><td>Р‘Р°Р·РѕРІС‹Р№</td><td>70%</td><td>{revenue_next_base} в‚Ѕ</td></tr>
-          <tr><td>РћРїС‚РёРјРёСЃС‚РёС‡РЅС‹Р№</td><td>80%</td><td>{revenue_next_high} в‚Ѕ</td></tr>
+          <tr><td>Консервативный</td><td>60%</td><td>{revenue_next_low} ₽</td></tr>
+          <tr><td>Базовый</td><td>70%</td><td>{revenue_next_base} ₽</td></tr>
+          <tr><td>Оптимистичный</td><td>80%</td><td>{revenue_next_high} ₽</td></tr>
         </tbody>
       </table>
     </div>
 
     <div class="panel">
-      <h2>РСЃС‚РѕСЂРёС‡РµСЃРєРёРµ РїРѕРєР°Р·Р°С‚РµР»Рё РёР· РєРЅРѕРїРєРё РЎС‚Р°С‚РёСЃС‚РёРєР°</h2>
+      <h2>сторические показатели из кнопки Статистика</h2>
       <table>
-        <thead><tr><th>РџРµСЂРёРѕРґ</th><th>РџРѕР»СЊР·РѕРІР°С‚РµР»Рё</th><th>РџСЂРёР±С‹Р»СЊ</th></tr></thead>
+        <thead><tr><th>Период</th><th>Пользователи</th><th>Прибыль</th></tr></thead>
         <tbody>
-          <tr><td>РњРµСЃСЏС†</td><td>{fmt_int(int(stats_users_period.get("month", 0)))}</td><td>{stats_profit_month} в‚Ѕ</td></tr>
-          <tr><td>РџРѕР»РіРѕРґР°</td><td>{fmt_int(int(stats_users_period.get("half_year", 0)))}</td><td>{stats_profit_half} в‚Ѕ</td></tr>
-          <tr><td>Р“РѕРґ</td><td>{fmt_int(int(stats_users_period.get("year", 0)))}</td><td>{stats_profit_year} в‚Ѕ</td></tr>
+          <tr><td>Месяц</td><td>{fmt_int(int(stats_users_period.get("month", 0)))}</td><td>{stats_profit_month} ₽</td></tr>
+          <tr><td>Полгода</td><td>{fmt_int(int(stats_users_period.get("half_year", 0)))}</td><td>{stats_profit_half} ₽</td></tr>
+          <tr><td>Год</td><td>{fmt_int(int(stats_users_period.get("year", 0)))}</td><td>{stats_profit_year} ₽</td></tr>
         </tbody>
       </table>
     </div>
 
     <div class="panel">
-      <h2>РџСЂРѕРіРЅРѕР· РЅР° 6 РјРµСЃСЏС†РµРІ (СЃРєРѕСЂРѕСЃС‚СЊ РїСЂРёСЂРѕСЃС‚Р°)</h2>
+      <h2>Прогноз на 6 месяцев (скорость прироста)</h2>
       <table>
-        <thead><tr><th>РњРµС‚СЂРёРєР°</th><th>Р—РЅР°С‡РµРЅРёРµ</th></tr></thead>
+        <thead><tr><th>Метрика</th><th>Значение</th></tr></thead>
         <tbody>
-          <tr><td>РџРµСЂРёРѕРґ РЅР°Р±Р»СЋРґРµРЅРёСЏ</td><td>{obs_days} РґРЅРµР№ (СЃ {obs_start})</td></tr>
-          <tr><td>РџРѕРєСЂС‹С‚РёРµ РґР°С‚ СЂРµРіРёСЃС‚СЂР°С†РёРё (РІСЃРµ)</td><td>{reg_cov_all}</td></tr>
-          <tr><td>РџРѕРєСЂС‹С‚РёРµ РґР°С‚ СЂРµРіРёСЃС‚СЂР°С†РёРё (РїР»Р°С‚СЏС‰РёРµ)</td><td>{reg_cov_paid}</td></tr>
-          <tr><td>РџСЂРёСЂРѕСЃС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№</td><td>{growth_users_day:.2f}/РґРµРЅСЊ</td></tr>
-          <tr><td>РџСЂРёСЂРѕСЃС‚ РїР»Р°С‚СЏС‰РёС…</td><td>{growth_paid_day:.2f}/РґРµРЅСЊ</td></tr>
-          <tr><td>РџСЂРёСЂРѕСЃС‚ РїРѕРґРїРёСЃРѕРє</td><td>{growth_subs_day:.2f}/РґРµРЅСЊ</td></tr>
-          <tr><td>РџРѕР»СЊР·РѕРІР°С‚РµР»Рё С‡РµСЂРµР· 6Рј</td><td>{proj_users_6m}</td></tr>
-          <tr><td>РџР»Р°С‚СЏС‰РёРµ С‡РµСЂРµР· 6Рј</td><td>{proj_paid_6m}</td></tr>
-          <tr><td>РџРѕРґРїРёСЃРєРё С‡РµСЂРµР· 6Рј</td><td>{proj_subs_6m}</td></tr>
-          <tr><td>РџСЂРѕРіРЅРѕР· MRR С‡РµСЂРµР· 6Рј</td><td>{proj_mrr_6m} в‚Ѕ</td></tr>
+          <tr><td>Период наблюдения</td><td>{obs_days} дней (с {obs_start})</td></tr>
+          <tr><td>Покрытие дат регистрации (все)</td><td>{reg_cov_all}</td></tr>
+          <tr><td>Покрытие дат регистрации (платящие)</td><td>{reg_cov_paid}</td></tr>
+          <tr><td>Прирост пользователей</td><td>{growth_users_day:.2f}/день</td></tr>
+          <tr><td>Прирост платящих</td><td>{growth_paid_day:.2f}/день</td></tr>
+          <tr><td>Прирост подписок</td><td>{growth_subs_day:.2f}/день</td></tr>
+          <tr><td>Пользователи через 6м</td><td>{proj_users_6m}</td></tr>
+          <tr><td>Платящие через 6м</td><td>{proj_paid_6m}</td></tr>
+          <tr><td>Подписки через 6м</td><td>{proj_subs_6m}</td></tr>
+          <tr><td>Прогноз MRR через 6м</td><td>{proj_mrr_6m} ₽</td></tr>
         </tbody>
       </table>
       <div class="chart-wrap">
-        <div class="legend">РџРѕР»СЊР·РѕРІР°С‚РµР»Рё: СЃРїР»РѕС€РЅР°СЏ Р»РёРЅРёСЏ вЂ” РёСЃС‚РѕСЂРёСЏ, РїСѓРЅРєС‚РёСЂ вЂ” РїСЂРѕРіРЅРѕР·</div>
+        <div class="legend">Пользователи: сплошная линия — история, пунктир — прогноз</div>
         {users_chart_svg}
       </div>
       <div class="chart-wrap">
-        <div class="legend">РџРѕРґРїРёСЃРєРё: СЃРїР»РѕС€РЅР°СЏ Р»РёРЅРёСЏ вЂ” РёСЃС‚РѕСЂРёСЏ, РїСѓРЅРєС‚РёСЂ вЂ” РїСЂРѕРіРЅРѕР·</div>
+        <div class="legend">Подписки: сплошная линия — история, пунктир — прогноз</div>
         {subs_chart_svg}
       </div>
     </div>
 
     <div class="cols">
       <div class="panel">
-        <h2>Р›РѕРєР°С†РёРё (С‚РѕРї 5)</h2>
+        <h2>Локации (топ 5)</h2>
         <table>
-          <thead><tr><th>Р›РѕРєР°С†РёСЏ</th><th>РџРѕРґРїРёСЃРѕРє</th></tr></thead>
+          <thead><tr><th>Локация</th><th>Подписок</th></tr></thead>
           <tbody>{location_rows}</tbody>
         </table>
       </div>
       <div class="panel">
-        <h2>РўРѕРї РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ (5)</h2>
+        <h2>Топ пользователей (5)</h2>
         <table>
-          <thead><tr><th>User ID</th><th>РџРѕРґРїРёСЃРѕРє</th></tr></thead>
+          <thead><tr><th>User ID</th><th>Подписок</th></tr></thead>
           <tbody>{top_user_rows}</tbody>
         </table>
       </div>
     </div>
 
     <div class="panel">
-      <h2>Р Р°СЃРїСЂРµРґРµР»РµРЅРёРµ СЃСЂРѕРєРѕРІ РїРѕРґРїРёСЃРѕРє</h2>
+      <h2>Распределение сроков подписок</h2>
       <table>
-        <thead><tr><th>Р”РёР°РїР°Р·РѕРЅ</th><th>РљРѕР»-РІРѕ</th></tr></thead>
+        <thead><tr><th>Диапазон</th><th>Кол-во</th></tr></thead>
         <tbody>{timing_rows}</tbody>
       </table>
     </div>
 
     <div class="panel">
-      <h2>Р’С‹СЂСѓС‡РєР° next month РїРѕ Р»РѕРєР°С†РёСЏРј (С‚РѕРї 5, 70%)</h2>
+      <h2>Выручка next month по локациям (топ 5, 70%)</h2>
       <table>
-        <thead><tr><th>Р›РѕРєР°С†РёСЏ</th><th>РСЃС‚РµРєР°РµС‚ РІ 30 РґРЅРµР№</th><th>РџСЂРѕРіРЅРѕР· РІС‹СЂСѓС‡РєРё</th></tr></thead>
+        <thead><tr><th>Локация</th><th>стекает в 30 дней</th><th>Прогноз выручки</th></tr></thead>
         <tbody>{due_location_rows}</tbody>
       </table>
     </div>
 
     <div class="panel">
-      <h2>РљСЂРёС‚РёС‡РЅС‹Рµ РёСЃС‚РµС‡РµРЅРёСЏ (0..3 РґРЅСЏ, С‚РѕРї 5)</h2>
+      <h2>Критичные истечения (0..3 дня, топ 5)</h2>
       <table>
-        <thead><tr><th>User</th><th>Sub</th><th>Р›РѕРєР°С†РёСЏ</th><th>Р”Р°С‚Р°</th><th>Р”РЅРµР№ РґРѕ РєРѕРЅС†Р°</th></tr></thead>
+        <thead><tr><th>User</th><th>Sub</th><th>Локация</th><th>Дата</th><th>Дней до конца</th></tr></thead>
         <tbody>{build_expiration_rows(expiring_3, limit=5)}</tbody>
       </table>
     </div>
 
     <div class="panel">
-      <h2>РСЃС‚РµС‡РµРЅРёСЏ 0..30 РґРЅРµР№ (С‚РѕРї 5)</h2>
+      <h2>стечения 0..30 дней (топ 5)</h2>
       <table>
-        <thead><tr><th>User</th><th>Sub</th><th>Р›РѕРєР°С†РёСЏ</th><th>Р”Р°С‚Р°</th><th>Р”РЅРµР№ РґРѕ РєРѕРЅС†Р°</th></tr></thead>
+        <thead><tr><th>User</th><th>Sub</th><th>Локация</th><th>Дата</th><th>Дней до конца</th></tr></thead>
         <tbody>{build_expiration_rows(expiring_30, limit=5)}</tbody>
       </table>
     </div>
 
     <div class="panel">
-      <h2>РЈР¶Рµ РёСЃС‚РµРєР»Рё (С‚РѕРї 5)</h2>
+      <h2>Уже истекли (топ 5)</h2>
       <table>
-        <thead><tr><th>User</th><th>Sub</th><th>Р›РѕРєР°С†РёСЏ</th><th>Р”Р°С‚Р°</th><th>Р”РЅРµР№ РґРѕ РєРѕРЅС†Р°</th></tr></thead>
+        <thead><tr><th>User</th><th>Sub</th><th>Локация</th><th>Дата</th><th>Дней до конца</th></tr></thead>
         <tbody>{build_expiration_rows(expired, limit=5)}</tbody>
       </table>
     </div>
 
     <div class="panel" id="admin">
-      <h2>РђРґРјРёРЅ-СЃР°Р№С‚: РїРѕР»СЊР·РѕРІР°С‚РµР»Рё, С„РёР»СЊС‚СЂС‹ Рё Р±С‹СЃС‚СЂС‹Р№ СЂР°Р·Р±РѕСЂ Р±Р°Р·С‹</h2>
+      <h2>Админ-сайт: пользователи, фильтры и быстрый разбор базы</h2>
       <div class="admin-shell">
         <div class="side-nav">
-          <button class="nav-btn active" data-tab="users">РџРѕР»СЊР·РѕРІР°С‚РµР»Рё</button>
-          <button class="nav-btn" data-tab="attention">РќСѓР¶РЅРѕ РІРЅРёРјР°РЅРёРµ</button>
-          <button class="nav-btn" data-tab="segments">РЎРµРіРјРµРЅС‚С‹</button>
-          <button class="nav-btn" data-tab="forecast">РџСЂРѕРіРЅРѕР·</button>
-          <button class="nav-btn" data-tab="processes">РџСЂРѕС†РµСЃСЃС‹</button>
-          <button class="nav-btn" data-tab="unresolved">РќРµСЂР°Р·РѕР±СЂР°РЅРЅРѕРµ</button>
+          <button class="nav-btn active" data-tab="users">Пользователи</button>
+          <button class="nav-btn" data-tab="attention">Нужно внимание</button>
+          <button class="nav-btn" data-tab="segments">Сегменты</button>
+          <button class="nav-btn" data-tab="forecast">Прогноз</button>
+          <button class="nav-btn" data-tab="processes">Процессы</button>
+          <button class="nav-btn" data-tab="unresolved">Неразобранное</button>
         </div>
         <div>
           <section class="tab-panel active" data-panel="users">
             <div class="toolbar">
-              <input id="adminSearch" placeholder="РџРѕРёСЃРє: ID, username, Р»РѕРєР°С†РёСЏ, С‚РµРєСЃС‚ РєР°СЂС‚РѕС‡РєРё">
+              <input id="adminSearch" placeholder="Поиск: ID, username, локация, текст карточки">
               <select id="adminStatus">
-                <option value="all">Р’СЃРµ СЃС‚Р°С‚СѓСЃС‹</option>
-                <option value="active">РђРєС‚РёРІРЅС‹Рµ</option>
-                <option value="expiring_7">РСЃС‚РµРєР°СЋС‚ Р·Р° 7 РґРЅРµР№</option>
-                <option value="expiring_30">РСЃС‚РµРєР°СЋС‚ Р·Р° 30 РґРЅРµР№</option>
-                <option value="expired">РСЃС‚РµРєС€РёРµ</option>
-                <option value="no_subs">Р‘РµР· РїРѕРґРїРёСЃРєРё</option>
-                <option value="unknown_date">Р”Р°С‚Р° РЅРµРёР·РІРµСЃС‚РЅР°</option>
+                <option value="all">Все статусы</option>
+                <option value="active">Активные</option>
+                <option value="expiring_7">стекают за 7 дней</option>
+                <option value="expiring_30">стекают за 30 дней</option>
+                <option value="expired">стекшие</option>
+                <option value="no_subs">Без подписки</option>
+                <option value="unknown_date">Дата неизвестна</option>
               </select>
               <select id="adminSort">
-                <option value="risk">РЎРЅР°С‡Р°Р»Р° СЂРёСЃРє</option>
-                <option value="subs">Р‘РѕР»СЊС€Рµ РїРѕРґРїРёСЃРѕРє</option>
-                <option value="new">РќРѕРІС‹Рµ СЂРµРіРёСЃС‚СЂР°С†РёРё</option>
-                <option value="id">ID РїРѕ РІРѕР·СЂР°СЃС‚Р°РЅРёСЋ</option>
+                <option value="risk">Сначала риск</option>
+                <option value="subs">Больше подписок</option>
+                <option value="new">Новые регистрации</option>
+                <option value="id">ID по возрастанию</option>
               </select>
-              <select id="adminLocation"><option value="all">Р вЂєР С•Р С”Р В°РЎвЂ Р С‘Р С‘: Р Р†РЎРѓР Вµ</option></select>
-              <select id="adminRegMonth"><option value="all">Р В Р ВµР С–Р С‘РЎРѓРЎвЂљРЎР‚Р В°РЎвЂ Р С‘РЎРЏ: Р Р†РЎРѓР Вµ</option></select>
+              <select id="adminLocation"><option value="all">Локации: все</option></select>
+              <select id="adminRegMonth"><option value="all">: </option></select>
               <select id="adminPageSize">
-                <option value="25">25 / РЎРѓРЎвЂљРЎР‚.</option>
-                <option value="50">50 / РЎРѓРЎвЂљРЎР‚.</option>
-                <option value="100">100 / РЎРѓРЎвЂљРЎР‚.</option>
+                <option value="25">25 / .</option>
+                <option value="50">50 / .</option>
+                <option value="100">100 / .</option>
               </select>
             </div>
             <div class="filter-row">
-              <button class="filter-btn active" data-status="all">Р’СЃРµ</button>
-              <button class="filter-btn" data-status="no_subs">Р‘РµР· РїРѕРґРїРёСЃРєРё</button>
-              <button class="filter-btn" data-status="expired">РСЃС‚РµРєС€РёРµ</button>
-              <button class="filter-btn" data-status="expiring_7">7 РґРЅРµР№</button>
-              <button class="filter-btn" data-status="expiring_30">30 РґРЅРµР№</button>
-              <button class="filter-btn" data-status="active">РђРєС‚РёРІРЅС‹Рµ</button>
+              <button class="filter-btn active" data-status="all">Все</button>
+              <button class="filter-btn" data-status="no_subs">Без подписки</button>
+              <button class="filter-btn" data-status="expired">стекшие</button>
+              <button class="filter-btn" data-status="expiring_7">7 дней</button>
+              <button class="filter-btn" data-status="expiring_30">30 дней</button>
+              <button class="filter-btn" data-status="active">Активные</button>
             </div>
             <div class="muted" id="adminCount"></div>
             <div class="admin-kpis" id="adminKpis"></div>
             <div class="action-panel">
-              <h2>Р‘С‹СЃС‚СЂРѕРµ СѓРїСЂР°РІР»РµРЅРёРµ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј</h2>
+              <h2>Быстрое управление пользователем</h2>
               <div class="action-grid">
-                <input id="actionUser" placeholder="ID РёР»Рё @username">
-                <textarea id="actionMessage" placeholder="РўРµРєСЃС‚ СЃРѕРѕР±С‰РµРЅРёСЏ (РґР»СЏ Mail Рё РґРѕРїРёСЃРєРё РІ Wizard)"></textarea>
+                <input id="actionUser" placeholder="ID или @username">
+                <textarea id="actionMessage" placeholder="Текст сообщения (для Mail и дописки в Wizard)"></textarea>
               </div>
               <div class="action-buttons">
                 <button class="action-btn" id="actionUserStatus">Статус из базы</button>
-                <button class="action-btn primary" id="actionMail">РћС‚РїСЂР°РІРёС‚СЊ Mail</button>
+                <button class="action-btn primary" id="actionMail">Отправить Mail</button>
                 <button class="action-btn" id="actionBroadcast">Рассылка без подписки</button>
                 <button class="action-btn good" id="actionPromo">Промокод + Mail</button>
                 <button class="action-btn" id="actionReplaceKey">Заменить ключ</button>
                 <button class="action-btn warn" id="actionDeleteAccess">Снять доступ</button>
-                <button class="action-btn good" id="actionWizardCard">РљР°СЂС‚РѕС‡РєР° РІ Wizard</button>
-                <button class="action-btn warn" id="actionWizardText">РўРµРєСЃС‚ РІ Wizard</button>
+                <button class="action-btn good" id="actionWizardCard">Карточка в Wizard</button>
+                <button class="action-btn warn" id="actionWizardText">Текст в Wizard</button>
               </div>
               <div class="action-status" id="actionStatus">Готово. Выбери пользователя, при необходимости добавь текст и запусти нужное действие.</div>
             </div>
@@ -9189,46 +9274,46 @@ def build_scan_dashboard_html(stats: dict) -> str:
               <table>
                 <thead>
                   <tr>
-                    <th>ID</th><th>Username</th><th>Р РµРіРёСЃС‚СЂР°С†РёСЏ</th><th>РџРѕРґРїРёСЃРѕРє</th><th>Р›РѕРєР°С†РёРё</th><th>Р‘Р»РёР¶Р°Р№С€РµРµ РѕРєРѕРЅС‡Р°РЅРёРµ</th><th>РЎС‚Р°С‚СѓСЃ</th>
+                    <th>ID</th><th>Username</th><th>Регистрация</th><th>Подписок</th><th>Локации</th><th>Ближайшее окончание</th><th>Статус</th>
                   </tr>
                 </thead>
                 <tbody id="adminUsersBody"></tbody>
               </table>
             </div>
             <div class="pager">
-              <button class="pager-btn" id="adminPrev">Р СњР В°Р В·Р В°Р Т‘</button>
+              <button class="pager-btn" id="adminPrev"></button>
               <div class="muted" id="adminPageInfo"></div>
-              <button class="pager-btn" id="adminNext">Р вЂќР В°Р В»Р ВµР Вµ</button>
+              <button class="pager-btn" id="adminNext">Далее</button>
             </div>
           </section>
           <section class="tab-panel" data-panel="attention">
             <div class="cols">
               <div class="panel">
-                <h2>РџРµСЂРІС‹Рµ РЅР° СЃРІСЏР·СЊ</h2>
-                <p class="muted">РџРѕР»СЊР·РѕРІР°С‚РµР»Рё СЃ РёСЃС‚РµРєС€РёРјРё РёР»Рё РїРѕС‡С‚Рё РёСЃС‚РµРєС€РёРјРё РїРѕРґРїРёСЃРєР°РјРё. РС… РІС‹РіРѕРґРЅРµРµ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ РїРµСЂРІС‹РјРё.</p>
-                <div class="table-scroll"><table><thead><tr><th>ID</th><th>Username</th><th>Р”Р°С‚Р°</th><th>РЎС‚Р°С‚СѓСЃ</th></tr></thead><tbody id="attentionBody"></tbody></table></div>
+                <h2>Первые на связь</h2>
+                <p class="muted">Пользователи с истекшими или почти истекшими подписками. х выгоднее обработать первыми.</p>
+                <div class="table-scroll"><table><thead><tr><th>ID</th><th>Username</th><th>Дата</th><th>Статус</th></tr></thead><tbody id="attentionBody"></tbody></table></div>
               </div>
               <div class="panel">
-                <h2>Р‘РµР· РїРѕРґРїРёСЃРєРё</h2>
-                <p class="muted">Р“РѕС‚РѕРІР°СЏ Р°СѓРґРёС‚РѕСЂРёСЏ РґР»СЏ Р°РєРєСѓСЂР°С‚РЅРѕР№ СЂР°СЃСЃС‹Р»РєРё `/broadcast`.</p>
-                <div class="table-scroll"><table><thead><tr><th>ID</th><th>Username</th><th>Р РµРіРёСЃС‚СЂР°С†РёСЏ</th></tr></thead><tbody id="noSubsBody"></tbody></table></div>
+                <h2>Без подписки</h2>
+                <p class="muted">Готовая аудитория для аккуратной рассылки `/broadcast`.</p>
+                <div class="table-scroll"><table><thead><tr><th>ID</th><th>Username</th><th>Регистрация</th></tr></thead><tbody id="noSubsBody"></tbody></table></div>
               </div>
             </div>
           </section>
           <section class="tab-panel" data-panel="segments">
             <div class="cols">
               <div class="panel">
-                <h2>РЎС‚Р°С‚СѓСЃС‹ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№</h2>
+                <h2>Статусы пользователей</h2>
                 <table><tbody id="statusSegmentsBody"></tbody></table>
               </div>
               <div class="panel">
-                <h2>Р§С‚Рѕ РґРµР»Р°С‚СЊ РґР°Р»СЊС€Рµ</h2>
+                <h2>Что делать дальше</h2>
                 <table>
                   <tbody>
-                    <tr><td>РСЃС‚РµРєС€РёРµ</td><td>РџСЂРµРґР»РѕР¶РёС‚СЊ РїСЂРѕРјРѕРєРѕРґ РёР»Рё Р·Р°РјРµРЅСѓ РєР»СЋС‡Р° С‡РµСЂРµР· wizard.</td></tr>
-                    <tr><td>0..7 РґРЅРµР№</td><td>РќР°РїРѕРјРЅРёС‚СЊ Рѕ РїСЂРѕРґР»РµРЅРёРё РґРѕ РѕРєРѕРЅС‡Р°РЅРёСЏ СЃСЂРѕРєР°.</td></tr>
-                    <tr><td>Р‘РµР· РїРѕРґРїРёСЃРєРё</td><td>Р—Р°РїСѓСЃС‚РёС‚СЊ РјСЏРіРєСѓСЋ СЂР°СЃСЃС‹Р»РєСѓ С‡РµСЂРµР· `/broadcast`.</td></tr>
-                    <tr><td>Р”Р°С‚Р° РЅРµРёР·РІРµСЃС‚РЅР°</td><td>РџРµСЂРµСЃРєР°РЅРёСЂРѕРІР°С‚СЊ РёР»Рё РїСЂРѕРІРµСЂРёС‚СЊ С‚РѕС‡РµС‡РЅРѕ С‡РµСЂРµР· `/subs &lt;id&gt;`.</td></tr>
+                    <tr><td>стекшие</td><td>Предложить промокод или замену ключа через wizard.</td></tr>
+                    <tr><td>0..7 дней</td><td>Напомнить о продлении до окончания срока.</td></tr>
+                    <tr><td>Без подписки</td><td>Запустить мягкую рассылку через `/broadcast`.</td></tr>
+                    <tr><td>Дата неизвестна</td><td>Пересканировать или проверить точечно через `/subs &lt;id&gt;`.</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -9236,28 +9321,28 @@ def build_scan_dashboard_html(stats: dict) -> str:
           </section>
           <section class="tab-panel" data-panel="forecast">
             <div class="grid">
-              <div class="card"><div class="k">Р§РµСЂРµР· РјРµСЃСЏС†</div><div class="v good">{profit_m1} в‚Ѕ</div></div>
-              <div class="card"><div class="k">Р§РµСЂРµР· РїРѕР»РіРѕРґР°</div><div class="v good">{profit_m6} в‚Ѕ</div></div>
-              <div class="card"><div class="k">Р§РµСЂРµР· РіРѕРґ</div><div class="v good">{profit_y1} в‚Ѕ</div></div>
-              <div class="card"><div class="k">РџРѕРґРїРёСЃРѕРє С‡РµСЂРµР· 6Рј</div><div class="v">{proj_subs_6m}</div></div>
+              <div class="card"><div class="k">Через месяц</div><div class="v good">{profit_m1} ₽</div></div>
+              <div class="card"><div class="k">Через полгода</div><div class="v good">{profit_m6} ₽</div></div>
+              <div class="card"><div class="k">Через год</div><div class="v good">{profit_y1} ₽</div></div>
+              <div class="card"><div class="k">Подписок через 6м</div><div class="v">{proj_subs_6m}</div></div>
             </div>
-            <p class="muted">РџСЂРѕРіРЅРѕР· СЃС‚СЂРѕРёС‚СЃСЏ РёР· РёСЃС‚РѕСЂРёРё СЂРµРіРёСЃС‚СЂР°С†РёРё, С‚РµРєСѓС‰РёС… РїРѕРґРїРёСЃРѕРє, СЃСЂРѕРєРѕРІ РѕРєРѕРЅС‡Р°РЅРёСЏ Рё СЃС‚Р°С‚РёСЃС‚РёРєРё РїСЂРёР±С‹Р»Рё РёР· Р°РґРјРёРЅ-Р±РѕС‚Р°.</p>
+            <p class="muted">Прогноз строится из истории регистрации, текущих подписок, сроков окончания и статистики прибыли из админ-бота.</p>
           </section>
           <section class="tab-panel" data-panel="processes">
             <div class="grid" id="processCards"></div>
             <div class="cols">
               <div class="panel">
-                <h2>Р–РёРІРѕРµ СЃРѕСЃС‚РѕСЏРЅРёРµ</h2>
+                <h2>Живое состояние</h2>
                 <table><tbody id="processStateBody"></tbody></table>
               </div>
               <div class="panel">
-                <h2>Р§С‚Рѕ СЃРµР№С‡Р°СЃ Р·Р°РЅСЏС‚Рѕ</h2>
+                <h2>Что сейчас занято</h2>
                 <table><tbody id="processMetaBody"></tbody></table>
               </div>
             </div>
             <div class="panel">
-              <h2>РћР±РЅРѕРІР»РµРЅРёРµ</h2>
-              <div class="muted" id="processRefreshInfo">РџР°РЅРµР»СЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РїРѕРґС‚СЏРіРёРІР°РµС‚ Р¶РёРІРѕРµ СЃРѕСЃС‚РѕСЏРЅРёРµ admin flow, scan, GPT Рё pending-РѕС‡РµСЂРµРґРµР№.</div>
+              <h2>Обновление</h2>
+              <div class="muted" id="processRefreshInfo">Панель автоматически подтягивает живое состояние admin flow, scan, GPT и pending-очередей.</div>
               <div class="action-buttons" style="margin-top:12px;">
                 <button class="action-btn" id="actionPauseScan">Пауза scan</button>
                 <button class="action-btn warn" id="actionStopMail2">Остановить mail2</button>
@@ -9266,15 +9351,15 @@ def build_scan_dashboard_html(stats: dict) -> str:
           </section>
           <section class="tab-panel" data-panel="unresolved">
             <div class="grid">
-              <div class="card"><div class="k">РћС‚РєСЂС‹С‚Рѕ СЃР»СѓС‡Р°РµРІ</div><div class="v warn" id="unresolvedOpenCount">0</div></div>
-              <div class="card"><div class="k">РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ</div><div class="v" id="overviewGeneratedAt">-</div></div>
+              <div class="card"><div class="k">Открыто случаев</div><div class="v warn" id="unresolvedOpenCount">0</div></div>
+              <div class="card"><div class="k">Последнее обновление</div><div class="v" id="overviewGeneratedAt">-</div></div>
             </div>
             <div class="panel">
-              <h2>РќРµСЂР°Р·РѕР±СЂР°РЅРЅС‹Рµ РѕР±СЂР°С‰РµРЅРёСЏ</h2>
-              <p class="muted">Р—РґРµСЃСЊ РІРёРґРЅС‹ СЃР»СѓС‡Р°Рё, РіРґРµ Р±РѕС‚ РЅРµ СЃРјРѕРі СѓРІРµСЂРµРЅРЅРѕ Р·Р°РєСЂС‹С‚СЊ РІРѕРїСЂРѕСЃ СЃР°Рј.</p>
+              <h2>Неразобранные обращения</h2>
+              <p class="muted">Здесь видны случаи, где бот не смог уверенно закрыть вопрос сам.</p>
               <div class="table-scroll">
                 <table>
-                  <thead><tr><th>ID</th><th>Р’СЂРµРјСЏ</th><th>РџСЂРёС‡РёРЅР°</th><th>РћС‚РєСѓРґР°</th><th>РћС‚РїСЂР°РІРёС‚РµР»СЊ</th><th>РџСЂРµРІСЊСЋ</th></tr></thead>
+                  <thead><tr><th>ID</th><th>Время</th><th>Причина</th><th>Откуда</th><th>Отправитель</th><th>Превью</th></tr></thead>
                   <tbody id="unresolvedBody"></tbody>
                 </table>
               </div>
@@ -9325,12 +9410,12 @@ def build_scan_dashboard_html(stats: dict) -> str:
       let activeJobPollTimer = null;
       let overviewRefreshTimer = null;
       const statusLabels = {{
-        active: "РђРєС‚РёРІРЅС‹Рµ",
-        expiring_7: "РСЃС‚РµРєР°СЋС‚ Р·Р° 7 РґРЅРµР№",
-        expiring_30: "РСЃС‚РµРєР°СЋС‚ Р·Р° 30 РґРЅРµР№",
-        expired: "РСЃС‚РµРєС€РёРµ",
-        no_subs: "Р‘РµР· РїРѕРґРїРёСЃРєРё",
-        unknown_date: "Р”Р°С‚Р° РЅРµРёР·РІРµСЃС‚РЅР°"
+        active: "Активные",
+        expiring_7: "стекают за 7 дней",
+        expiring_30: "стекают за 30 дней",
+        expired: "стекшие",
+        no_subs: "Без подписки",
+        unknown_date: "Дата неизвестна"
       }};
 
       function escapeText(value) {{
@@ -9390,18 +9475,18 @@ def build_scan_dashboard_html(stats: dict) -> str:
 
       function renderUsers() {{
         const rows = filteredRows();
-        count.textContent = `РџРѕРєР°Р·Р°РЅРѕ ${{rows.length}} РёР· ${{adminUsers.length}} РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№`;
+        count.textContent = `Показано ${{rows.length}} из ${{adminUsers.length}} пользователей`;
         body.innerHTML = rows.slice(0, 300).map(row => `
           <tr>
             <td>${{escapeText(row.user_id)}}</td>
-            <td>${{row.username ? "@" + escapeText(row.username) : "<span class='muted'>РЅРµС‚</span>"}}</td>
+            <td>${{row.username ? "@" + escapeText(row.username) : "<span class='muted'>нет</span>"}}</td>
             <td>${{escapeText(row.registration_date || "-")}}</td>
             <td>${{escapeText(row.subscriptions)}}</td>
             <td>${{escapeText(row.locations || "-")}}</td>
-            <td>${{escapeText(row.nearest_expiration || "-")}} ${{row.days_left !== "" ? "(" + escapeText(row.days_left) + " РґРЅ.)" : ""}}</td>
+            <td>${{escapeText(row.nearest_expiration || "-")}} ${{row.days_left !== "" ? "(" + escapeText(row.days_left) + " дн.)" : ""}}</td>
             <td><span class="status-pill ${{escapeText(row.status)}}">${{escapeText(row.status_label)}}</span></td>
           </tr>
-        `).join("") || "<tr><td colspan='7'>РќРµС‚ РґР°РЅРЅС‹С…</td></tr>";
+        `).join("") || "<tr><td colspan='7'>Нет данных</td></tr>";
       }}
 
       function renderKpis(rows) {{
@@ -9410,10 +9495,10 @@ def build_scan_dashboard_html(stats: dict) -> str:
         const urgent = rows.filter(row => row.status === "expired" || row.status === "expiring_7").length;
         const noSubs = rows.filter(row => row.status === "no_subs").length;
         kpis.innerHTML = `
-          <div class="admin-kpi"><span class="muted">Р СњР В°Р в„–Р Т‘Р ВµР Р…Р С•</span><b>${{total}}</b></div>
-          <div class="admin-kpi"><span class="muted">Р РЋ Р С—Р С•Р Т‘Р С—Р С‘РЎРѓР С”Р С•Р в„–</span><b>${{paid}}</b></div>
-          <div class="admin-kpi"><span class="muted">Р РЋРЎР‚Р С•РЎвЂЎР Р…РЎвЂ№Р Вµ</span><b>${{urgent}}</b></div>
-          <div class="admin-kpi"><span class="muted">Р вЂР ВµР В· Р С—Р С•Р Т‘Р С—Р С‘РЎРѓР С”Р С‘</span><b>${{noSubs}}</b></div>
+          <div class="admin-kpi"><span class="muted"></span><b>${{total}}</b></div>
+          <div class="admin-kpi"><span class="muted"> </span><b>${{paid}}</b></div>
+          <div class="admin-kpi"><span class="muted"></span><b>${{urgent}}</b></div>
+          <div class="admin-kpi"><span class="muted">ез подписки</span><b>${{noSubs}}</b></div>
         `;
       }}
 
@@ -9424,33 +9509,33 @@ def build_scan_dashboard_html(stats: dict) -> str:
         currentPage = Math.max(1, Math.min(currentPage, totalPages));
         const start = (currentPage - 1) * pageSize;
         const pageRows = rows.slice(start, start + pageSize);
-        count.textContent = `Р СџР С•Р С”Р В°Р В·Р В°Р Р…Р С• ${{rows.length}} Р С‘Р В· ${{adminUsers.length}} Р С—Р С•Р В»РЎРЉР В·Р С•Р Р†Р В°РЎвЂљР ВµР В»Р ВµР в„–`;
-        pageInfo.textContent = `Р РЋРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ Р В° ${{currentPage}} Р С‘Р В· ${{totalPages}}`;
+        count.textContent = ` ${{rows.length}}  ${{adminUsers.length}} `;
+        pageInfo.textContent = ` ${{currentPage}}  ${{totalPages}}`;
         prevButton.disabled = currentPage <= 1;
         nextButton.disabled = currentPage >= totalPages;
         renderKpis(rows);
         body.innerHTML = pageRows.map(row => `
           <tr data-user-id="${{escapeText(row.user_id)}}">
             <td>${{escapeText(row.user_id)}}</td>
-            <td>${{row.username ? "@" + escapeText(row.username) : "<span class='muted'>Р Р…Р ВµРЎвЂљ</span>"}}</td>
+            <td>${{row.username ? "@" + escapeText(row.username) : "<span class='muted'></span>"}}</td>
             <td>${{escapeText(row.registration_date || "-")}}</td>
             <td>${{escapeText(row.subscriptions)}}</td>
             <td>${{escapeText(row.locations || "-")}}</td>
-            <td>${{escapeText(row.nearest_expiration || "-")}} ${{row.days_left !== "" ? "(" + escapeText(row.days_left) + " Р Т‘Р Р….)" : ""}}</td>
+            <td>${{escapeText(row.nearest_expiration || "-")}} ${{row.days_left !== "" ? "(" + escapeText(row.days_left) + " .)" : ""}}</td>
             <td><span class="status-pill ${{escapeText(row.status)}}">${{escapeText(row.status_label)}}</span></td>
           </tr>
-        `).join("") || "<tr><td colspan='7'>Р СњР ВµРЎвЂљ Р Т‘Р В°Р Р…Р Р…РЎвЂ№РЎвЂ¦</td></tr>";
+        `).join("") || "<tr><td colspan='7'> </td></tr>";
       }}
 
       function renderAttention() {{
         const attention = sortedRows(adminUsers.filter(row => ["expired", "expiring_7", "expiring_30"].includes(row.status))).slice(0, 25);
         document.getElementById("attentionBody").innerHTML = attention.map(row => `
           <tr><td>${{escapeText(row.user_id)}}</td><td>${{row.username ? "@" + escapeText(row.username) : "-"}}</td><td>${{escapeText(row.nearest_expiration || "-")}}</td><td>${{escapeText(row.status_label)}}</td></tr>
-        `).join("") || "<tr><td colspan='4'>РќРµС‚ СЃСЂРѕС‡РЅС‹С… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№</td></tr>";
+        `).join("") || "<tr><td colspan='4'>Нет срочных пользователей</td></tr>";
         const noSubs = adminUsers.filter(row => row.status === "no_subs").slice(0, 25);
         document.getElementById("noSubsBody").innerHTML = noSubs.map(row => `
           <tr><td>${{escapeText(row.user_id)}}</td><td>${{row.username ? "@" + escapeText(row.username) : "-"}}</td><td>${{escapeText(row.registration_date || "-")}}</td></tr>
-        `).join("") || "<tr><td colspan='3'>РќРµС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ Р±РµР· РїРѕРґРїРёСЃРєРё</td></tr>";
+        `).join("") || "<tr><td colspan='3'>Нет пользователей без подписки</td></tr>";
       }}
 
       function renderSegments() {{
@@ -9467,8 +9552,8 @@ def build_scan_dashboard_html(stats: dict) -> str:
         const processes = adminOverview.processes || {{}};
         processCards.innerHTML = `
           <div class="card"><div class="k">Admin flow</div><div class="v">${{escapeText(processes.admin_flow || "-")}}</div></div>
-          <div class="card"><div class="k">Scan</div><div class="v">${{processes.scan_active ? "РђРєС‚РёРІРµРЅ" : "РЎРІРѕР±РѕРґРµРЅ"}}</div></div>
-          <div class="card"><div class="k">Mail2</div><div class="v">${{processes.mail2_active ? "РђРєС‚РёРІРЅР°" : "РЎРІРѕР±РѕРґРЅР°"}}</div></div>
+          <div class="card"><div class="k">Scan</div><div class="v">${{processes.scan_active ? "Активен" : "Свободен"}}</div></div>
+          <div class="card"><div class="k">Mail2</div><div class="v">${{processes.mail2_active ? "Активна" : "Свободна"}}</div></div>
           <div class="card"><div class="k">GPT</div><div class="v">${{escapeText(processes.gpt_active || 0)}} active / ${{escapeText(processes.gpt_pending || 0)}} pending</div></div>
         `;
         processStateBody.innerHTML = `
@@ -9476,16 +9561,16 @@ def build_scan_dashboard_html(stats: dict) -> str:
           <tr><td>Scan checkpoint</td><td>${{escapeText(processes.scan_checkpoint || "-")}}</td></tr>
           <tr><td>Scan owner</td><td>${{escapeText(processes.scan_owner_id || "-")}}</td></tr>
           <tr><td>Scan delay</td><td>${{escapeText(processes.scan_delay_seconds || 0)}}s</td></tr>
-          <tr><td>Auto-resume</td><td>${{processes.scan_auto_resume ? "Р”Р°" : "РќРµС‚"}}</td></tr>
+          <tr><td>Auto-resume</td><td>${{processes.scan_auto_resume ? "Да" : "Нет"}}</td></tr>
         `;
         processMetaBody.innerHTML = `
           <tr><td>Wizard pending</td><td>${{escapeText(processes.wizard_pending || 0)}}</td></tr>
           <tr><td>Mail2 pending</td><td>${{escapeText(processes.mail2_pending || 0)}}</td></tr>
           <tr><td>Smart pending</td><td>${{escapeText(processes.smart_pending || 0)}}</td></tr>
           <tr><td>Pending TTL</td><td>${{escapeText(processes.pending_ttl_seconds || 0)}}s</td></tr>
-          <tr><td>РЎР»РµРґСѓСЋС‰РёР№ user_id</td><td>${{escapeText(processes.scan_next_user_id || "-")}}</td></tr>
+          <tr><td>Следующий user_id</td><td>${{escapeText(processes.scan_next_user_id || "-")}}</td></tr>
         `;
-        processRefreshInfo.textContent = `РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ: ${{escapeText(adminOverview.generated_at || "-")}}`;
+        processRefreshInfo.textContent = `Последнее обновление: ${{escapeText(adminOverview.generated_at || "-")}}`;
       }}
 
       function renderUnresolved() {{
@@ -9501,7 +9586,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
             <td>${{escapeText(row.sender_id || "-")}}${{row.sender_username ? " (@" + escapeText(row.sender_username) + ")" : ""}}</td>
             <td>${{escapeText(row.question_preview || "-")}}</td>
           </tr>
-        `).join("") || "<tr><td colspan='6'>РќРµС‚ РѕС‚РєСЂС‹С‚С‹С… РѕР±СЂР°С‰РµРЅРёР№</td></tr>";
+        `).join("") || "<tr><td colspan='6'>Нет открытых обращений</td></tr>";
       }}
 
       async function refreshOverview() {{
@@ -9513,7 +9598,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
           renderProcesses();
           renderUnresolved();
         }} catch (error) {{
-          processRefreshInfo.textContent = `РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ live-СЃРѕСЃС‚РѕСЏРЅРёРµ: ${{error}}`;
+          processRefreshInfo.textContent = `Не удалось обновить live-состояние: ${{error}}`;
         }} finally {{
           clearTimeout(overviewRefreshTimer);
           overviewRefreshTimer = setTimeout(refreshOverview, 15000);
@@ -9539,15 +9624,15 @@ def build_scan_dashboard_html(stats: dict) -> str:
 
       function updateActionStatusFromJob(job) {{
         if (!job) {{
-          actionStatus.textContent = "РћС€РёР±РєР°: РїСѓСЃС‚РѕР№ РѕС‚РІРµС‚ РѕС‚ API.";
+          actionStatus.textContent = "Ошибка: пустой ответ от API.";
           return;
         }}
         const lines = [
-          `РЎС‚Р°С‚СѓСЃ Р·Р°РґР°С‡Рё: ${{job.status || "-"}}`,
-          job.id ? `ID Р·Р°РґР°С‡Рё: ${{job.id}}` : "",
-          job.resolved_user_id ? `РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: ${{job.resolved_user_id}}` : "",
-          job.error_text ? `РћС€РёР±РєР°: ${{job.error_text}}` : "",
-          job.result_text ? `Р РµР·СѓР»СЊС‚Р°С‚: ${{String(job.result_text).slice(0, 500)}}` : "",
+          `Статус задачи: ${{job.status || "-"}}`,
+          job.id ? `ID задачи: ${{job.id}}` : "",
+          job.resolved_user_id ? `Пользователь: ${{job.resolved_user_id}}` : "",
+          job.error_text ? `Ошибка: ${{job.error_text}}` : "",
+          job.result_text ? `Результат: ${{String(job.result_text).slice(0, 500)}}` : "",
         ].filter(Boolean);
         actionStatus.textContent = lines.join("\\n");
       }}
@@ -9565,7 +9650,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
           const response = await fetch(`${{actionApiBase}}/job/${{encodeURIComponent(jobId)}}`, {{ cache: "no-store" }});
           const payload = await response.json();
           if (!response.ok || !payload.ok) {{
-            actionStatus.textContent = "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ СЃС‚Р°С‚СѓСЃ Р·Р°РґР°С‡Рё.";
+            actionStatus.textContent = "Не удалось получить статус задачи.";
             setActionBusy(false);
             return;
           }}
@@ -9577,7 +9662,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
           }}
           setActionBusy(false);
         }} catch (error) {{
-          actionStatus.textContent = `РћС€РёР±РєР° РѕРїСЂРѕСЃР°: ${{error}}`;
+          actionStatus.textContent = `Ошибка опроса: ${{error}}`;
           setActionBusy(false);
         }}
       }}
@@ -9586,15 +9671,15 @@ def build_scan_dashboard_html(stats: dict) -> str:
         const user = String(actionUser.value || "").trim();
         const message = String(actionMessage.value || "").trim();
         if (requireUser && !user) {{
-          actionStatus.textContent = "РЈРєР°Р¶Рё ID РёР»Рё @username.";
+          actionStatus.textContent = "Укажи ID или @username.";
           return;
         }}
         if (requireMessage && !message) {{
-          actionStatus.textContent = "Р”РѕР±Р°РІСЊ С‚РµРєСЃС‚ СЃРѕРѕР±С‰РµРЅРёСЏ.";
+          actionStatus.textContent = "Добавь текст сообщения.";
           return;
         }}
         setActionBusy(true);
-        actionStatus.textContent = "Р—Р°РґР°С‡Р° РѕС‚РїСЂР°РІР»РµРЅР°. РћР¶РёРґР°СЋ РѕС‚РІРµС‚...";
+        actionStatus.textContent = "Задача отправлена. Ожидаю ответ...";
         try {{
           const response = await fetch(`${{actionApiBase}}/action`, {{
             method: "POST",
@@ -9608,7 +9693,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
           const payload = await response.json();
           if (!response.ok || !payload.ok || !payload.job || !payload.job.id) {{
             const errorText = payload && payload.error ? payload.error : "unknown_error";
-            actionStatus.textContent = `РћС€РёР±РєР° API: ${{errorText}}`;
+            actionStatus.textContent = `Ошибка API: ${{errorText}}`;
             setActionBusy(false);
             return;
           }}
@@ -9616,7 +9701,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
           updateActionStatusFromJob(payload.job);
           pollJob(activeJobId);
         }} catch (error) {{
-          actionStatus.textContent = `РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё: ${{error}}`;
+          actionStatus.textContent = `Ошибка отправки: ${{error}}`;
           setActionBusy(false);
         }}
       }}
@@ -9627,7 +9712,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
         const selectedUserId = String(row.dataset.userId || "").trim();
         if (!selectedUserId) return;
         actionUser.value = selectedUserId;
-        actionStatus.textContent = `Р’С‹Р±СЂР°РЅ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ: ${{selectedUserId}}`;
+        actionStatus.textContent = `Выбран пользователь: ${{selectedUserId}}`;
       }});
 
       document.querySelectorAll(".nav-btn").forEach(button => {{
@@ -9679,14 +9764,14 @@ def build_scan_dashboard_html(stats: dict) -> str:
     </script>
 
     <div class="panel">
-      <h2>Р”РѕРїСѓС‰РµРЅРёСЏ РїСЂРѕРіРЅРѕР·Р°</h2>
+      <h2>Допущения прогноза</h2>
       <div class="assumptions">
-        Р¦РµРЅР° РїРѕРґРїРёСЃРєРё: <code>{price} в‚Ѕ</code><br>
-        Р”РѕС…РѕРґ next month СЃС‡РёС‚Р°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РїРѕ РїРѕРґРїРёСЃРєР°Рј, С‡РµР№ СЃСЂРѕРє РёСЃС‚РµС‡РµС‚ РІ Р±Р»РёР¶Р°Р№С€РёРµ 30 РґРЅРµР№.<br>
-        РџСЂРѕРґР»РµРЅРёСЏ РІ 30 РґРЅРµР№ (Р±Р°Р·Р°): <code>{renew_30_rate}</code><br>
-        РџСЂРѕРґР»РµРЅРёРµ РІ 7 РґРЅРµР№: <code>{renew_7_rate}</code><br>
-        Р’РѕР·РІСЂР°С‚ РёСЃС‚РµРєС€РёС…: <code>{winback_rate}</code><br>
-        Р”Р»СЏ РїРѕРґРїРёСЃРѕРє Р±РµР· РґР°С‚С‹ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґРѕР»СЏ Р°РєС‚РёРІРЅС‹С…: <code>50%</code>
+        Цена подписки: <code>{price} ₽</code><br>
+        Доход next month считается только по подпискам, чей срок истечет в ближайшие 30 дней.<br>
+        Продления в 30 дней (база): <code>{renew_30_rate}</code><br>
+        Продление в 7 дней: <code>{renew_7_rate}</code><br>
+        Возврат истекших: <code>{winback_rate}</code><br>
+        Для подписок без даты используется доля активных: <code>50%</code>
       </div>
     </div>
   </div>
@@ -9789,15 +9874,15 @@ def clear_scan_checkpoint() -> None:
 
 def build_scan_menu_text() -> str:
     checkpoint = load_scan_checkpoint()
-    checkpoint_text = "РЅРµС‚"
+    checkpoint_text = "нет"
     if checkpoint:
         next_user_id = int(checkpoint.get("next_user_id") or checkpoint.get("page_number") or 1)
         total_users_hint = int(checkpoint.get("total_users_hint") or 0)
         range_text = f"{next_user_id}" if total_users_hint <= 0 else f"{next_user_id}/{total_users_hint}"
         checkpoint_text = (
-            f"ID РїРѕР·РёС†РёСЏ {range_text}, "
-            f"РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ {len(checkpoint.get('records') or [])}, "
-            f"СЃРѕС…СЂР°РЅРµРЅ {checkpoint.get('saved_at', '-')}"
+            f"ID позиция {range_text}, "
+            f"пользователей {len(checkpoint.get('records') or [])}, "
+            f"сохранен {checkpoint.get('saved_at', '-')}"
         )
 
     report_dir = Path(settings.report_dir)
@@ -9815,26 +9900,26 @@ def build_scan_menu_text() -> str:
             if len(recent_reports) >= 3:
                 break
 
-    running_text = "РґР°" if active_scan_cancel_event and not active_scan_cancel_event.is_set() else "РЅРµС‚"
+    running_text = "да" if active_scan_cancel_event and not active_scan_cancel_event.is_set() else "нет"
     lines = [
-        "РњРµРЅСЋ scan",
-        f"РђРєС‚РёРІРЅС‹Р№ scan: {running_text}",
-        f"РђРґРјРёРЅ-Р±РѕС‚: {format_admin_bot_health()}",
+        "Меню scan",
+        f"Активный scan: {running_text}",
+        f"Админ-бот: {format_admin_bot_health()}",
         f"Checkpoint: {checkpoint_text}",
         "",
-        "Р’С‹Р±РµСЂРё РґРµР№СЃС‚РІРёРµ РєРЅРѕРїРєРѕР№ РёР»Рё С†РёС„СЂРѕР№:",
-        "1 - РќРѕРІС‹Р№ scan СЃ РїРµСЂРІРѕР№ СЃС‚СЂР°РЅРёС†С‹",
-        "2 - РџСЂРѕРґРѕР»Р¶РёС‚СЊ СЃРѕС…СЂР°РЅРµРЅРЅС‹Р№ scan",
-        "3 - Stop scan: РїР°СѓР·Р° Рё С‚РµРєСѓС‰РёРµ СЂРµР·СѓР»СЊС‚Р°С‚С‹",
-        "4 - Р РµР·СѓР»СЊС‚Р°С‚С‹ scan",
-        "5 - РЎР±СЂРѕСЃ СЃРѕС…СЂР°РЅРµРЅРЅРѕРіРѕ scan",
-        "6 - РћР±РЅРѕРІРёС‚СЊ СЃС‚Р°С‚СѓСЃ",
+        "Выбери действие кнопкой или цифрой:",
+        "1 - Новый scan с первой страницы",
+        "2 - Продолжить сохраненный scan",
+        "3 - Stop scan: пауза и текущие результаты",
+        "4 - Результаты scan",
+        "5 - Сброс сохраненного scan",
+        "6 - Обновить статус",
         "",
-        "РљРѕРјР°РЅРґС‹: scan new, scan continue, stop СЃРєР°РЅ, scan results, scan reset.",
+        "Команды: scan new, scan continue, stop скан, scan results, scan reset.",
     ]
     if recent_reports:
         lines.append("")
-        lines.append("РџРѕСЃР»РµРґРЅРёРµ РѕС‚С‡РµС‚С‹:")
+        lines.append("Последние отчеты:")
         lines.extend(f"- {name}" for name in recent_reports)
     return "\n".join(lines)
 
@@ -9842,7 +9927,7 @@ def build_scan_menu_text() -> str:
 def build_scan_menu_buttons():
     return [
         [Button.text("scan new"), Button.text("scan continue")],
-        [Button.text("stop СЃРєР°РЅ"), Button.text("scan results")],
+        [Button.text("stop скан"), Button.text("scan results")],
         [Button.text("scan reset"), Button.text("menu")],
     ]
 
@@ -9854,16 +9939,16 @@ def build_scan_menu_text_fast() -> str:
 def format_scan_checkpoint_text() -> str:
     checkpoint = load_scan_checkpoint()
     if not checkpoint:
-        return "РЅРµС‚"
+        return "нет"
     next_user_id = int(checkpoint.get("next_user_id") or checkpoint.get("page_number") or 1)
     total_users_hint = int(checkpoint.get("total_users_hint") or 0)
     range_text = f"{next_user_id}" if total_users_hint <= 0 else f"{next_user_id}/{total_users_hint}"
     return (
         f"{checkpoint.get('status', 'saved')}, "
-        f"РїРѕР·РёС†РёСЏ ID {range_text}, "
-        f"РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ {len(checkpoint.get('records') or [])}, "
-        f"ID РїСЂРѕРІРµСЂРµРЅРѕ {int(checkpoint.get('pages_scanned') or 0)}, "
-        f"СЃРѕС…СЂР°РЅРµРЅ {checkpoint.get('saved_at', '-')}"
+        f"позиция ID {range_text}, "
+        f"пользователей {len(checkpoint.get('records') or [])}, "
+        f"ID проверено {int(checkpoint.get('pages_scanned') or 0)}, "
+        f"сохранен {checkpoint.get('saved_at', '-')}"
     )
 
 
@@ -9901,10 +9986,10 @@ def build_scan_results_text() -> str:
     txt_path, detailed_path, json_path, dashboard_path = latest_scan_report_paths()
 
     lines = [
-        "Р РµР·СѓР»СЊС‚Р°С‚С‹ scan",
-        f"РђРєС‚РёРІРЅС‹Р№ scan: {'РґР°' if active_scan_cancel_event and not active_scan_cancel_event.is_set() else 'РЅРµС‚'}",
-        f"РђРґРјРёРЅ-Р±РѕС‚: {format_admin_bot_health()}",
-        f"РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ: {format_scan_checkpoint_text()}",
+        "Результаты scan",
+        f"Активный scan: {'да' if active_scan_cancel_event and not active_scan_cancel_event.is_set() else 'нет'}",
+        f"Админ-бот: {format_admin_bot_health()}",
+        f"Сохраненный прогресс: {format_scan_checkpoint_text()}",
     ]
 
     if checkpoint_records:
@@ -9913,10 +9998,10 @@ def build_scan_results_text() -> str:
             int((checkpoint or {}).get("pages_scanned") or 0),
             admin_statistics=dict((checkpoint or {}).get("admin_statistics") or {}),
         )
-        lines.extend(("", "Р§Р°СЃС‚РёС‡РЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ:", summary_text))
+        lines.extend(("", "Частичный прогресс:", summary_text))
 
     if txt_path:
-        lines.extend(("", "РџРѕСЃР»РµРґРЅРёР№ РіРѕС‚РѕРІС‹Р№ РѕС‚С‡РµС‚:", f"TXT: {txt_path}"))
+        lines.extend(("", "Последний готовый отчет:", f"TXT: {txt_path}"))
         if detailed_path:
             lines.append(f"DETAILS: {detailed_path}")
         if json_path:
@@ -9934,31 +10019,31 @@ def build_scan_results_text() -> str:
                     lines.extend(
                         (
                             "",
-                            "РљР»СЋС‡РµРІРѕР№ РїСЂРѕРіРЅРѕР· РЅР° СЃР»РµРґСѓСЋС‰РёР№ РјРµСЃСЏС†:",
-                            f"- РџРѕРґРїРёСЃРѕРє СЃ РёСЃС‚РµС‡РµРЅРёРµРј РІ 30 РґРЅРµР№: {int(forecast.get('next_month_due_subscriptions_total', 0))}",
-                            f"- Р”РѕС…РѕРґ (Р±Р°Р·Р° 70%): {float(forecast.get('next_month_projected_revenue_base_rub', 0.0)):.0f} RUB",
-                            f"- Р”РѕС…РѕРґ (60%): {float(forecast.get('next_month_projected_revenue_low_rub', 0.0)):.0f} RUB",
-                            f"- Р”РѕС…РѕРґ (80%): {float(forecast.get('next_month_projected_revenue_high_rub', 0.0)):.0f} RUB",
+                            "Ключевой прогноз на следующий месяц:",
+                            f"- Подписок с истечением в 30 дней: {int(forecast.get('next_month_due_subscriptions_total', 0))}",
+                            f"- Доход (база 70%): {float(forecast.get('next_month_projected_revenue_base_rub', 0.0)):.0f} RUB",
+                            f"- Доход (60%): {float(forecast.get('next_month_projected_revenue_low_rub', 0.0)):.0f} RUB",
+                            f"- Доход (80%): {float(forecast.get('next_month_projected_revenue_high_rub', 0.0)):.0f} RUB",
                         )
                     )
                     if financial:
                         lines.extend(
                             (
                                 "",
-                                "РС‚РѕРіРѕРІС‹Р№ РїСЂРѕРіРЅРѕР· РїСЂРёР±С‹Р»Рё:",
-                                f"- Р§РµСЂРµР· 1 РјРµСЃСЏС†: ~{float(financial.get('profit_projection_month_1_rub', 0.0)):.0f} RUB",
-                                f"- Р§РµСЂРµР· 6 РјРµСЃСЏС†РµРІ: ~{float(financial.get('profit_projection_month_6_rub', 0.0)):.0f} RUB",
-                                f"- Р§РµСЂРµР· 12 РјРµСЃСЏС†РµРІ: ~{float(financial.get('profit_projection_month_12_rub', 0.0)):.0f} RUB",
+                                "тоговый прогноз прибыли:",
+                                f"- Через 1 месяц: ~{float(financial.get('profit_projection_month_1_rub', 0.0)):.0f} RUB",
+                                f"- Через 6 месяцев: ~{float(financial.get('profit_projection_month_6_rub', 0.0)):.0f} RUB",
+                                f"- Через 12 месяцев: ~{float(financial.get('profit_projection_month_12_rub', 0.0)):.0f} RUB",
                             )
                         )
                     if six_month:
                         lines.extend(
                             (
                                 "",
-                                "РљР»СЋС‡РµРІРѕР№ РїСЂРѕРіРЅРѕР· РЅР° 6 РјРµСЃСЏС†РµРІ:",
-                                f"- РџРѕР»СЊР·РѕРІР°С‚РµР»Рё: ~{int(round(float(six_month.get('users_total_projected_6m', 0.0))))}",
-                                f"- РџР»Р°С‚СЏС‰РёРµ: ~{int(round(float(six_month.get('users_with_subscriptions_projected_6m', 0.0))))}",
-                                f"- РџРѕРґРїРёСЃРєРё: ~{int(round(float(six_month.get('subscriptions_total_projected_6m', 0.0))))}",
+                                "Ключевой прогноз на 6 месяцев:",
+                                f"- Пользователи: ~{int(round(float(six_month.get('users_total_projected_6m', 0.0))))}",
+                                f"- Платящие: ~{int(round(float(six_month.get('users_with_subscriptions_projected_6m', 0.0))))}",
+                                f"- Подписки: ~{int(round(float(six_month.get('subscriptions_total_projected_6m', 0.0))))}",
                                 f"- MRR: ~{float(six_month.get('projected_mrr_6m_rub', 0.0)):.0f} RUB",
                             )
                         )
@@ -9972,9 +10057,9 @@ def build_scan_results_text() -> str:
         if preview:
             if len(preview) > 2500:
                 preview = preview[:2500].rstrip() + "\n..."
-            lines.extend(("", "РљСЂР°С‚РєРёР№ РїСЂРѕСЃРјРѕС‚СЂ:", preview))
+            lines.extend(("", "Краткий просмотр:", preview))
     elif not checkpoint_records:
-        lines.extend(("", "Р“РѕС‚РѕРІС‹С… РѕС‚С‡РµС‚РѕРІ РїРѕРєР° РЅРµС‚."))
+        lines.extend(("", "Готовых отчетов пока нет."))
 
     return "\n".join(lines)
 
@@ -10063,7 +10148,7 @@ async def send_status_dashboard_from_database(event) -> bool:
     if not built:
         await safe_event_reply(
             event,
-            "SQL Р±Р°Р·Р° РїСѓСЃС‚Р°. РЎРЅР°С‡Р°Р»Р° Р·Р°РїСѓСЃС‚Рё `scan new`, С‡С‚РѕР±С‹ СЃРѕР±СЂР°С‚СЊ РґР°РЅРЅС‹Рµ.",
+            "SQL база пуста. Сначала запусти `scan new`, чтобы собрать данные.",
         )
         return False
     dashboard_path, stats = built
@@ -10084,27 +10169,27 @@ async def get_user_subscriptions_info_in_admin_bot(
 ) -> str:
     await emit_process_progress(
         progress_callback,
-        "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+        "Info пользователя",
         INFO_STEPS,
         1,
         user_id=user_id,
-        extra_lines=["РћР¶РёРґР°СЋ СЃРІРѕР±РѕРґРЅС‹Р№ Р°РґРјРёРЅ-РїСЂРѕС†РµСЃСЃ"],
+        extra_lines=["Ожидаю свободный админ-процесс"],
     )
     async with admin_flow_context(
-        "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+        "Info пользователя",
         user_id=user_id,
         progress_callback=progress_callback,
-        progress_title="Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+        progress_title="Info пользователя",
         progress_steps=INFO_STEPS,
         progress_step=1,
     ):
         await emit_process_progress(
             progress_callback,
-            "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+            "Info пользователя",
             INFO_STEPS,
             1,
             user_id=user_id,
-            extra_lines=[f"РџРѕР»СѓС‡Р°СЋ Telegram entity @{settings.admin_bot_username}"],
+            extra_lines=[f"Получаю Telegram entity @{settings.admin_bot_username}"],
         )
         bot = await get_admin_bot_entity()
         logging.info("Starting admin info for user_id=%s in @%s", user_id, settings.admin_bot_username)
@@ -10115,16 +10200,16 @@ async def get_user_subscriptions_info_in_admin_bot(
                 bot,
                 user_id,
                 progress_callback=progress_callback,
-                progress_title="Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                progress_title="Info пользователя",
                 progress_steps=INFO_STEPS,
             )
             await emit_process_progress(
                 progress_callback,
-                "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                "Info пользователя",
                 INFO_STEPS,
                 4,
                 user_id=user_id,
-                extra_lines=[f"РљРЅРѕРїРєР° РїРѕРґРїРёСЃРѕРє: {settings.subscriptions_button_text}"],
+                extra_lines=[f"Кнопка подписок: {settings.subscriptions_button_text}"],
             )
             subscriptions_message = await click_and_read(
                 bot,
@@ -10137,24 +10222,24 @@ async def get_user_subscriptions_info_in_admin_bot(
             logging.info("Found %s subscription buttons for user_id=%s", len(subscription_buttons), user_id)
             await emit_process_progress(
                 progress_callback,
-                "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                "Info пользователя",
                 INFO_STEPS,
                 5,
                 user_id=user_id,
-                extra_lines=[f"РќР°Р№РґРµРЅРѕ РїРѕРґРїРёСЃРѕРє РґР»СЏ С‡С‚РµРЅРёСЏ: {len(subscription_buttons)}"],
+                extra_lines=[f"Найдено подписок для чтения: {len(subscription_buttons)}"],
             )
 
             current_menu = subscriptions_message
             for index, subscription in enumerate(subscription_buttons, start=1):
                 await emit_process_progress(
                     progress_callback,
-                    "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                    "Info пользователя",
                     INFO_STEPS,
                     5,
                     user_id=user_id,
                     extra_lines=[
-                        f"РџРѕРґРїРёСЃРєР° {index}/{len(subscription_buttons)}",
-                        f"РљРЅРѕРїРєР°: {subscription['text']}",
+                        f"Подписка {index}/{len(subscription_buttons)}",
+                        f"Кнопка: {subscription['text']}",
                     ],
                 )
                 detail_message = await click_button_position_and_read(
@@ -10182,11 +10267,11 @@ async def get_user_subscriptions_info_in_admin_bot(
 
         await emit_process_progress(
             progress_callback,
-            "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+            "Info пользователя",
             INFO_STEPS,
             6,
             user_id=user_id,
-            extra_lines=[f"РџСЂРѕС‡РёС‚Р°РЅРѕ РїРѕРґРїРёСЃРѕРє: {len(details)}", "РЎРѕР±РёСЂР°СЋ HTML-РѕС‚РІРµС‚"],
+            extra_lines=[f"Прочитано подписок: {len(details)}", "Собираю HTML-ответ"],
         )
         result_text = format_subscription_info_html(
             user_id,
@@ -10270,8 +10355,8 @@ async def open_users_page(conv, bot):
 async def get_admin_statistics_snapshot(conv, bot) -> tuple[int, dict]:
     admin_message = await send_admin_and_get_menu(conv, bot)
     admin_message = await reset_admin_state_if_needed(conv, bot, admin_message)
-    if has_button_text(admin_message, "СЃС‚Р°С‚"):
-        stats_message = await click_and_read(bot, admin_message, "СЃС‚Р°С‚")
+    if has_button_text(admin_message, "стат"):
+        stats_message = await click_and_read(bot, admin_message, "стат")
     else:
         stats_button = get_statistics_menu_button(admin_message)
         if not stats_button:
@@ -10325,7 +10410,7 @@ async def collect_user_record_via_search(
         prefix = f"{progress_context}. " if progress_context else ""
         await progress_callback(f"{prefix}{text}")
 
-    await emit_collect_progress(f"РћС‚РєСЂС‹РІР°СЋ РїРѕРёСЃРє Рё Р·Р°РїСЂР°С€РёРІР°СЋ ID {user_id}.")
+    await emit_collect_progress(f"Открываю поиск и запрашиваю ID {user_id}.")
     find_message = await click_and_read(bot, users_page_message, settings.find_user_button_text)
     previous_snapshot = message_snapshot(find_message)
     await send_conv_message_with_retry(bot, user_id)
@@ -10333,7 +10418,7 @@ async def collect_user_record_via_search(
     log_message(f"Search result for user_id={user_id}", result_message)
 
     if not has_button_text(result_message, settings.subscriptions_button_text):
-        await emit_collect_progress(f"ID {user_id}: РєР°СЂС‚РѕС‡РєР° РЅРµ РЅР°Р№РґРµРЅР° РёР»Рё Р±РµР· РґРѕСЃС‚СѓРїР°.")
+        await emit_collect_progress(f"ID {user_id}: карточка не найдена или без доступа.")
         back_button = get_back_page_button(result_message)
         if back_button:
             users_page_message = await click_button_position_and_read(
@@ -10351,7 +10436,7 @@ async def collect_user_record_via_search(
             users_page_message = await open_users_page(conv, bot)
         return None, users_page_message
 
-    await emit_collect_progress("РљР°СЂС‚РѕС‡РєР° РЅР°Р№РґРµРЅР°. Р§РёС‚Р°СЋ РїРѕРґРїРёСЃРєРё.")
+    await emit_collect_progress("Карточка найдена. Читаю подписки.")
     subscriptions_message = await click_and_read(
         bot,
         result_message,
@@ -10360,10 +10445,10 @@ async def collect_user_record_via_search(
     subscriptions = []
     current_subscription_menu = subscriptions_message
     subscription_buttons = extract_subscription_buttons(subscriptions_message)
-    await emit_collect_progress(f"РќР°Р№РґРµРЅРѕ РїРѕРґРїРёСЃРѕРє: {len(subscription_buttons)}.")
+    await emit_collect_progress(f"Найдено подписок: {len(subscription_buttons)}.")
     for subscription_index, subscription_button in enumerate(subscription_buttons, start=1):
         await emit_collect_progress(
-            f"РџРѕРґРїРёСЃРєР° {subscription_index}/{len(subscription_buttons)}: {subscription_button['text']}."
+            f"Подписка {subscription_index}/{len(subscription_buttons)}: {subscription_button['text']}."
         )
         detail_message = await click_button_position_and_read(
             bot,
@@ -10443,7 +10528,7 @@ async def collect_current_user_record(
         prefix = f"{progress_context}. " if progress_context else ""
         await progress_callback(f"{prefix}{text}")
 
-    await emit_collect_progress(f"РћС‚РєСЂС‹РІР°СЋ РєР°СЂС‚РѕС‡РєСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ ID {user_id}.")
+    await emit_collect_progress(f"Открываю карточку пользователя ID {user_id}.")
     user_message = await click_button_position_and_read(
         bot,
         users_page_message,
@@ -10461,10 +10546,10 @@ async def collect_current_user_record(
     subscriptions = []
     current_subscription_menu = subscriptions_message
     subscription_buttons = extract_subscription_buttons(subscriptions_message)
-    await emit_collect_progress(f"РќР°Р№РґРµРЅРѕ РїРѕРґРїРёСЃРѕРє: {len(subscription_buttons)}. Р§РёС‚Р°СЋ РґРµС‚Р°Р»Рё.")
+    await emit_collect_progress(f"Найдено подписок: {len(subscription_buttons)}. Читаю детали.")
     for subscription_index, subscription_button in enumerate(subscription_buttons, start=1):
         await emit_collect_progress(
-            f"РџРѕРґРїРёСЃРєР° {subscription_index}/{len(subscription_buttons)}: {subscription_button['text']}."
+            f"Подписка {subscription_index}/{len(subscription_buttons)}: {subscription_button['text']}."
         )
         detail_message = await click_button_position_and_read(
             bot,
@@ -10503,7 +10588,7 @@ async def collect_current_user_record(
         int(back_to_user_button["column"]),
         str(back_to_user_button["text"]),
     )
-    await emit_collect_progress("Р’РѕР·РІСЂР°С‰Р°СЋСЃСЊ Рє СЃРїРёСЃРєСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.")
+    await emit_collect_progress("Возвращаюсь к списку пользователей.")
     back_to_users_button = get_back_page_button(user_page_again)
     if not back_to_users_button:
         raise RuntimeError("Back button not found on user card page.")
@@ -10536,20 +10621,20 @@ async def scan_all_users_in_admin_bot(
     global active_scan_reset_requested
 
     if progress_callback:
-        await progress_callback("РћР¶РёРґР°СЋ СЃРІРѕР±РѕРґРЅС‹Р№ Р°РґРјРёРЅ-РїСЂРѕС†РµСЃСЃ РґР»СЏ scan.")
+        await progress_callback("Ожидаю свободный админ-процесс для scan.")
     async with admin_flow_context(
-        "Scan РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
+        "Scan пользователей",
         progress_callback=progress_callback,
-        progress_title="Scan РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
-        progress_steps=["РћР¶РёРґР°СЋ", "РЎРєР°РЅРёСЂСѓСЋ"],
+        progress_title="Scan пользователей",
+        progress_steps=["Ожидаю", "Сканирую"],
         progress_step=1,
     ):
         if cancel_event and cancel_event.is_set():
             if active_scan_reset_requested:
                 clear_scan_checkpoint()
                 active_scan_reset_requested = False
-                return "Scan СЃР±СЂРѕС€РµРЅ. РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ РѕС‡РёС‰РµРЅ."
-            return "Scan РЅР° РїР°СѓР·Рµ. РќРѕРІС‹С… РґРµР№СЃС‚РІРёР№ РЅРµ РІС‹РїРѕР»РЅРµРЅРѕ."
+                return "Scan сброшен. Сохраненный прогресс очищен."
+            return "Scan на паузе. Новых действий не выполнено."
 
         bot = await get_admin_bot_entity()
         logging.info("Starting full admin scan in @%s", settings.admin_bot_username)
@@ -10604,13 +10689,13 @@ async def scan_all_users_in_admin_bot(
         if checkpoint:
             await emit_progress(
                 (
-                    "РќР°Р№РґРµРЅ СЃРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ scan РїРѕ ID. "
-                    f"РџСЂРѕРґРѕР»Р¶Р°СЋ СЃ ID {start_user_id}, СѓР¶Рµ СЃРѕР±СЂР°РЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№: {len(records)}."
+                    "Найден сохраненный прогресс scan по ID. "
+                    f"Продолжаю с ID {start_user_id}, уже собрано пользователей: {len(records)}."
                 ),
                 force=True,
             )
         else:
-            await emit_progress("РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РїРѕ ID Р·Р°РїСѓС‰РµРЅРѕ СЃ С‡РёСЃС‚РѕРіРѕ СЃРѕСЃС‚РѕСЏРЅРёСЏ.", force=True)
+            await emit_progress("Сканирование по ID запущено с чистого состояния.", force=True)
 
         while current_user_id <= (total_users or current_user_id):
             if cancel_event and cancel_event.is_set():
@@ -10621,7 +10706,7 @@ async def scan_all_users_in_admin_bot(
             try:
                 async with admin_conversation(bot) as conv:
                     if not total_users:
-                        await emit_progress("РћС‚РєСЂС‹РІР°СЋ /admin СЃС‚Р°С‚РёСЃС‚РёРєСѓ Рё СЃС‡РёС‚С‹РІР°СЋ РѕР±С‰РµРµ С‡РёСЃР»Рѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.", force=True)
+                        await emit_progress("Открываю /admin статистику и считываю общее число пользователей.", force=True)
                         try:
                             total_users, admin_statistics_snapshot = await retry_async(
                                 "get admin statistics",
@@ -10636,10 +10721,10 @@ async def scan_all_users_in_admin_bot(
                                 total_users,
                             )
                             await emit_progress(
-                                f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЃС‚Р°С‚РёСЃС‚РёРєСѓ, РїСЂРѕРґРѕР»Р¶Р°СЋ РїРѕ checkpoint total={total_users}.",
+                                f"Не удалось обновить статистику, продолжаю по checkpoint total={total_users}.",
                                 force=True,
                             )
-                        await emit_progress(f"Р’СЃРµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РїРѕ СЃС‚Р°С‚РёСЃС‚РёРєРµ: {total_users}.", force=True)
+                        await emit_progress(f"Всего пользователей по статистике: {total_users}.", force=True)
                         if current_user_id > total_users:
                             current_user_id = total_users + 1
 
@@ -10655,8 +10740,8 @@ async def scan_all_users_in_admin_bot(
                         checked_ids_total += 1
                         await emit_progress(
                             (
-                                f"РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РїРѕ ID: {current_user_id}/{total_users}. "
-                                f"РЎРѕР±СЂР°РЅРѕ Р·Р°РїРёСЃРµР№: {len(records)}."
+                                f"Сканирование по ID: {current_user_id}/{total_users}. "
+                                f"Собрано записей: {len(records)}."
                             ),
                         )
 
@@ -10693,8 +10778,8 @@ async def scan_all_users_in_admin_bot(
                             )
                             await emit_progress(
                                 (
-                                    f"ID {user_id}: РѕС€РёР±РєР°, РїСЂРѕР±СѓСЋ РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊСЃСЏ. "
-                                    f"РџРѕРґСЂСЏРґ РѕС€РёР±РѕРє: {consecutive_failures}/{SCAN_MAX_CONSECUTIVE_FAILURES}."
+                                    f"ID {user_id}: ошибка, пробую восстановиться. "
+                                    f"Подряд ошибок: {consecutive_failures}/{SCAN_MAX_CONSECUTIVE_FAILURES}."
                                 ),
                                 force=True,
                             )
@@ -10704,7 +10789,7 @@ async def scan_all_users_in_admin_bot(
                                     consecutive_failures,
                                     user_id,
                                 )
-                                set_admin_bot_health("[WAIT]", "РїРµСЂРµР·Р°РїСѓСЃРє", "РјРЅРѕРіРѕ РѕС€РёР±РѕРє РїРѕРґСЂСЏРґ")
+                                set_admin_bot_health("[WAIT]", "перезапуск", "много ошибок подряд")
                                 consecutive_failures = 0
                                 await asyncio.sleep(SCAN_SESSION_RESTART_DELAY_SECONDS)
                                 break
@@ -10719,7 +10804,7 @@ async def scan_all_users_in_admin_bot(
                                     user_id,
                                 )
                                 remember_scan_error(user_id, "recover_users_page", recover_error)
-                                set_admin_bot_health("[WAIT]", "РїРµСЂРµР·Р°РїСѓСЃРє", "СЃС‚СЂР°РЅРёС†Р° РЅРµ РІРѕСЃСЃС‚Р°РЅРѕРІРёР»Р°СЃСЊ")
+                                set_admin_bot_health("[WAIT]", "перезапуск", "страница не восстановилась")
                                 await asyncio.sleep(SCAN_SESSION_RESTART_DELAY_SECONDS)
                                 break
                             current_user_id += 1
@@ -10782,12 +10867,12 @@ async def scan_all_users_in_admin_bot(
                 )
                 await emit_progress(
                     (
-                        f"РЎРµСЃСЃРёСЏ scan Р·Р°РІРёСЃР»Р°/СЃР»РѕРјР°Р»Р°СЃСЊ РЅР° ID {current_user_id}. "
-                        f"РџРµСЂРµР·Р°РїСѓСЃРє {session_restarts}/{SCAN_MAX_SESSION_RESTARTS}."
+                        f"Сессия scan зависла/сломалась на ID {current_user_id}. "
+                        f"Перезапуск {session_restarts}/{SCAN_MAX_SESSION_RESTARTS}."
                     ),
                     force=True,
                 )
-                set_admin_bot_health("[WAIT]", "РїРµСЂРµР·Р°РїСѓСЃРє", f"scan session {session_restarts}")
+                set_admin_bot_health("[WAIT]", "перезапуск", f"scan session {session_restarts}")
                 if session_restarts >= SCAN_MAX_SESSION_RESTARTS:
                     paused = True
                     break
@@ -10810,7 +10895,7 @@ async def scan_all_users_in_admin_bot(
                 scan_errors=scan_errors,
             )
             await emit_progress(
-                f"РџРµСЂРµР·Р°РїСѓСЃРєР°СЋ scan-СЃРµСЃСЃРёСЋ Рё РїСЂРѕРґРѕР»Р¶Р°СЋ СЃ ID {current_user_id}.",
+                f"Перезапускаю scan-сессию и продолжаю с ID {current_user_id}.",
                 force=True,
             )
             if session_restarts >= SCAN_MAX_SESSION_RESTARTS:
@@ -10822,8 +10907,8 @@ async def scan_all_users_in_admin_bot(
             clear_scan_checkpoint()
             reset_scan_database()
             active_scan_reset_requested = False
-            await emit_progress("Scan СЃР±СЂРѕС€РµРЅ. РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ РѕС‡РёС‰РµРЅ.", force=True)
-            return "Scan СЃР±СЂРѕС€РµРЅ. РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ РѕС‡РёС‰РµРЅ."
+            await emit_progress("Scan сброшен. Сохраненный прогресс очищен.", force=True)
+            return "Scan сброшен. Сохраненный прогресс очищен."
 
         next_user_id = current_user_id if "current_user_id" in locals() else start_user_id
         next_user_id = min(total_users + 1, max(1, int(next_user_id)))
@@ -10863,20 +10948,20 @@ async def scan_all_users_in_admin_bot(
         if paused:
             await emit_progress(
                 (
-                    f"Scan РЅР° РїР°СѓР·Рµ: РїСЂРѕРІРµСЂРµРЅРѕ ID {checked_ids_total}, "
-                    f"РѕР±СЂР°Р±РѕС‚Р°РЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ {len(records)}, СЃР»РµРґСѓСЋС‰Р°СЏ РїРѕР·РёС†РёСЏ ID {next_user_id}."
+                    f"Scan на паузе: проверено ID {checked_ids_total}, "
+                    f"обработано пользователей {len(records)}, следующая позиция ID {next_user_id}."
                 ),
                 force=True,
             )
         else:
             clear_scan_checkpoint()
             await emit_progress(
-                f"Scan Р·Р°РІРµСЂС€РµРЅ: РїСЂРѕРІРµСЂРµРЅРѕ ID {checked_ids_total}, РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ СЃРѕР±СЂР°РЅРѕ {len(records)}.",
+                f"Scan завершен: проверено ID {checked_ids_total}, пользователей собрано {len(records)}.",
                 force=True,
             )
         return "\n".join(
             (
-                "Scan РЅР° РїР°СѓР·Рµ. Р§Р°СЃС‚РёС‡РЅС‹Р№ РѕС‚С‡РµС‚ СЃРѕС…СЂР°РЅРµРЅ:" if paused else "Scan Р·Р°РІРµСЂС€РµРЅ.",
+                "Scan на паузе. Частичный отчет сохранен:" if paused else "Scan завершен.",
                 "",
                 summary_text,
                 "",
@@ -10910,8 +10995,8 @@ async def request_scan_pause_for_priority_command(event, command_name: str) -> d
     await safe_event_reply(
         event,
         (
-            f"[SCAN] РђРєС‚РёРІРЅС‹Р№ scan РІСЂРµРјРµРЅРЅРѕ СЃС‚Р°РІР»СЋ РЅР° РїР°СѓР·Сѓ РґР»СЏ РєРѕРјР°РЅРґС‹ `{command_name}`.\n"
-            "Р—Р°РІРµСЂС€Сѓ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ, РІС‹РїРѕР»РЅСЋ РєРѕРјР°РЅРґСѓ Рё РїСЂРѕРґРѕР»Р¶Сѓ scan Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё."
+            f"[SCAN] Активный scan временно ставлю на паузу для команды `{command_name}`.\n"
+            "Завершу текущего пользователя, выполню команду и продолжу scan автоматически."
         ),
     )
     return interruption
@@ -10925,8 +11010,8 @@ async def request_mail2_stop_for_priority_command(event, command_name: str) -> b
     await safe_event_reply(
         event,
         (
-            f"[MAIL2] РђРєС‚РёРІРЅСѓСЋ СЂР°СЃСЃС‹Р»РєСѓ РѕСЃС‚Р°РЅР°РІР»РёРІР°СЋ РґР»СЏ РєРѕРјР°РЅРґС‹ `{command_name}`.\n"
-            "Р”РѕР¶РґСѓСЃСЊ Р·Р°РІРµСЂС€РµРЅРёСЏ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё РѕСЃРІРѕР±РѕР¶Сѓ Р°РґРјРёРЅ-РїСЂРѕС†РµСЃСЃ."
+            f"[MAIL2] Активную рассылку останавливаю для команды `{command_name}`.\n"
+            "Дождусь завершения текущего пользователя и освобожу админ-процесс."
         ),
     )
     return True
@@ -10983,10 +11068,10 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
         progress_message = await client.send_message(
             chat_id,
             build_scan_status(
-                f"РџСЂРѕРґРѕР»Р¶Р°СЋ scan РїРѕСЃР»Рµ РєРѕРјР°РЅРґС‹ `{command_name}`.",
+                f"Продолжаю scan после команды `{command_name}`.",
                 checkpoint_text=format_scan_checkpoint_text(),
             ),
-            buttons=[[Button.inline("РџР°СѓР·Р° scan", data=SCAN_CANCEL_CALLBACK_DATA)]],
+            buttons=[[Button.inline("Пауза scan", data=SCAN_CANCEL_CALLBACK_DATA)]],
         )
 
         async def update_auto_scan_progress(
@@ -10996,7 +11081,7 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
             failed: bool = False,
             paused: bool = False,
         ) -> None:
-            buttons = None if done or failed or paused else [[Button.inline("РџР°СѓР·Р° scan", data=SCAN_CANCEL_CALLBACK_DATA)]]
+            buttons = None if done or failed or paused else [[Button.inline("Пауза scan", data=SCAN_CANCEL_CALLBACK_DATA)]]
             await edit_status_message(
                 progress_message,
                 build_scan_status(
@@ -11015,12 +11100,12 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
             progress_interval_seconds=progress_interval_seconds,
             cancel_event=active_scan_cancel_event,
         )
-        if "РЅР° РїР°СѓР·Рµ" in result.casefold():
-            await update_auto_scan_progress("Scan СЃРЅРѕРІР° РЅР° РїР°СѓР·Рµ. РџСЂРѕРіСЂРµСЃСЃ СЃРѕС…СЂР°РЅРµРЅ.", paused=True)
-        elif "СЃР±СЂРѕС€РµРЅ" in result.casefold():
-            await update_auto_scan_progress("Scan СЃР±СЂРѕС€РµРЅ. РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ РѕС‡РёС‰РµРЅ.", done=True)
+        if "на паузе" in result.casefold():
+            await update_auto_scan_progress("Scan снова на паузе. Прогресс сохранен.", paused=True)
+        elif "сброшен" in result.casefold():
+            await update_auto_scan_progress("Scan сброшен. Сохраненный прогресс очищен.", done=True)
         else:
-            await update_auto_scan_progress("Scan Р·Р°РІРµСЂС€РµРЅ. РС‚РѕРіРѕРІС‹Р№ РѕС‚С‡РµС‚ РіРѕС‚РѕРІ.", done=True)
+            await update_auto_scan_progress("Scan завершен. тоговый отчет готов.", done=True)
         await client.send_message(chat_id, result)
         await send_latest_dashboard_to_chat_id(chat_id)
     except Exception:
@@ -11028,7 +11113,7 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
         try:
             await client.send_message(
                 chat_id,
-                "РќРµ СѓРґР°Р»РѕСЃСЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РїСЂРѕРґРѕР»Р¶РёС‚СЊ scan. РћС‚РїСЂР°РІСЊ `scan continue`, С‡С‚РѕР±С‹ РїСЂРѕРґРѕР»Р¶РёС‚СЊ РІСЂСѓС‡РЅСѓСЋ.",
+                "Не удалось автоматически продолжить scan. Отправь `scan continue`, чтобы продолжить вручную.",
             )
         except Exception:
             logging.exception("Failed to notify chat about scan auto-resume failure")
@@ -11064,17 +11149,17 @@ def is_promo_created_message(message, promo_code: str) -> bool:
     action_name = type(action).__name__.casefold() if action is not None else ""
     text = (message.raw_text or "").strip()
     promo_code_lowered = promo_code.casefold()
-    is_pin_notice = "pin" in action_name or "pin" in haystack or "Р·Р°РєСЂРµРї" in haystack
+    is_pin_notice = "pin" in action_name or "pin" in haystack or "закреп" in haystack
     is_promo_context = any(
         token in haystack
         for token in (
             promo_code_lowered,
             "promo",
-            "РїСЂРѕРјРѕ",
-            "РїСЂРѕРјРѕРєРѕРґ",
-            "РґРѕР±Р°РІ",
-            "СЃРѕР·РґР°РЅ",
-            "СѓСЃРїРµС€",
+            "промо",
+            "промокод",
+            "добав",
+            "создан",
+            "успеш",
         )
     )
     if is_pin_notice and (is_promo_context or not text):
@@ -11133,7 +11218,7 @@ async def find_promo_message_in_dialog(bot, promo_code: str, *, min_id: int = 0,
 async def click_optional_promo_back(bot, message):
     button = find_button_by_keywords(
         message,
-        ((settings.back_button_text, "РЅР°Р·Р°Рґ", "back", "return"),),
+        ((settings.back_button_text, "назад", "back", "return"),),
         exclude_keywords=(settings.cancel_button_text,),
     )
     if not button:
@@ -11143,7 +11228,7 @@ async def click_optional_promo_back(bot, message):
         return await click_keyword_button_and_read(
             bot,
             message,
-            ((settings.back_button_text, "РЅР°Р·Р°Рґ", "back", "return"),),
+            ((settings.back_button_text, "назад", "back", "return"),),
             label="promo fallback back",
             exclude_keywords=(settings.cancel_button_text,),
         )
@@ -11154,15 +11239,15 @@ async def click_optional_promo_back(bot, message):
 
 async def click_optional_all_promocodes(bot, message):
     candidates = (
-        (("РІСЃРµ", "all"), ("РїСЂРѕРјРѕРєРѕРґ", "promo", "coupon", "РєРѕРґ")),
-        (("СЃРїРёСЃ", "list"), ("РїСЂРѕРјРѕРєРѕРґ", "promo", "coupon", "РєРѕРґ")),
-        (("РїСЂРѕРјРѕРєРѕРґ", "promo", "coupon"),),
+        (("все", "all"), ("промокод", "promo", "coupon", "код")),
+        (("спис", "list"), ("промокод", "promo", "coupon", "код")),
+        (("промокод", "promo", "coupon"),),
     )
     exclude_keywords = (
         settings.cancel_button_text,
         settings.back_button_text,
-        "СЃРѕР·Рґ",
-        "РґРѕР±Р°РІ",
+        "созд",
+        "добав",
         "new",
         "create",
     )
@@ -11211,8 +11296,8 @@ async def confirm_promo_created_after_submit(
         7,
         user_id=user_id,
         extra_lines=[
-            "РўРµРєСЃС‚ СѓСЃРїРµС…Р° РЅРµ РЅР°Р№РґРµРЅ РІ РёСЃС‚РѕСЂРёРё.",
-            "РџСЂРѕРІРµСЂСЏСЋ СЃРїРёСЃРѕРє РїСЂРѕРјРѕРєРѕРґРѕРІ.",
+            "Текст успеха не найден в истории.",
+            "Проверяю список промокодов.",
         ],
     )
     latest_message = current_message or await latest_bot_message(bot)
@@ -11250,7 +11335,7 @@ async def create_promo_code_in_admin_bot(
         PROMO_STEPS,
         1,
         user_id=user_id,
-        extra_lines=["РћР¶РёРґР°СЋ СЃРІРѕР±РѕРґРЅС‹Р№ Р°РґРјРёРЅ-РїСЂРѕС†РµСЃСЃ"],
+        extra_lines=["Ожидаю свободный админ-процесс"],
     )
     async with admin_flow_context(
         "Promo",
@@ -11266,7 +11351,7 @@ async def create_promo_code_in_admin_bot(
             PROMO_STEPS,
             1,
             user_id=user_id,
-            extra_lines=[f"РђРґРјРёРЅ-Р±РѕС‚: @{settings.admin_bot_username}"],
+            extra_lines=[f"Админ-бот: @{settings.admin_bot_username}"],
         )
         bot = await get_admin_bot_entity()
         logging.info("Starting promo creation user_id=%s promo_code=%s", user_id, promo_code)
@@ -11281,23 +11366,23 @@ async def create_promo_code_in_admin_bot(
                 PROMO_STEPS,
                 2,
                 user_id=user_id,
-                extra_lines=[f"РС‰Сѓ СЂР°Р·РґРµР»: {settings.promo_button_text}"],
+                extra_lines=[f"щу раздел: {settings.promo_button_text}"],
             )
             admin_message = await ensure_message_with_keyword_button(
                 conv,
                 bot,
                 admin_message,
-                ((settings.promo_button_text, "РїСЂРѕРјРѕРєРѕРґ", "promo", "coupon"),),
+                ((settings.promo_button_text, "промокод", "promo", "coupon"),),
                 label="promo section",
-                optional_keywords=("СЃРєРёРґ", "РєРѕРґ"),
+                optional_keywords=("скид", "код"),
                 exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
             )
             promo_menu_message = await click_keyword_button_and_read(
                 bot,
                 admin_message,
-                ((settings.promo_button_text, "РїСЂРѕРјРѕРєРѕРґ", "promo", "coupon"),),
+                ((settings.promo_button_text, "промокод", "promo", "coupon"),),
                 label="promo section",
-                optional_keywords=("СЃРєРёРґ", "РєРѕРґ"),
+                optional_keywords=("скид", "код"),
                 exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
             )
 
@@ -11307,14 +11392,14 @@ async def create_promo_code_in_admin_bot(
                 PROMO_STEPS,
                 3,
                 user_id=user_id,
-                extra_lines=[f"РС‰Сѓ РєРЅРѕРїРєСѓ: {settings.promo_create_button_text}"],
+                extra_lines=[f"щу кнопку: {settings.promo_create_button_text}"],
             )
             create_form_message = await click_keyword_button_and_read(
                 bot,
                 promo_menu_message,
-                ((settings.promo_create_button_text, "СЃРѕР·Рґ", "РґРѕР±Р°РІ", "new", "create"),),
+                ((settings.promo_create_button_text, "созд", "добав", "new", "create"),),
                 label="create promo",
-                optional_keywords=("РїСЂРѕРјРѕРєРѕРґ", "promo", "coupon"),
+                optional_keywords=("промокод", "promo", "coupon"),
                 exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
             )
 
@@ -11324,7 +11409,7 @@ async def create_promo_code_in_admin_bot(
                 PROMO_STEPS,
                 4,
                 user_id=user_id,
-                extra_lines=[f"РќР°Р·РІР°РЅРёРµ: {promo_code}"],
+                extra_lines=[f"Название: {promo_code}"],
             )
             budget_message = await send_promo_value_and_read(bot, create_form_message, promo_code, "code")
 
@@ -11334,7 +11419,7 @@ async def create_promo_code_in_admin_bot(
                 PROMO_STEPS,
                 5,
                 user_id=user_id,
-                extra_lines=[f"Р‘СЋРґР¶РµС‚: {settings.promo_budget_rub}"],
+                extra_lines=[f"Бюджет: {settings.promo_budget_rub}"],
             )
             amount_message = await send_promo_value_and_read(bot, budget_message, settings.promo_budget_rub, "budget")
 
@@ -11344,7 +11429,7 @@ async def create_promo_code_in_admin_bot(
                 PROMO_STEPS,
                 6,
                 user_id=user_id,
-                extra_lines=[f"Р Р°Р·РјРµСЂ СЃСѓРјРјС‹: {settings.promo_amount_rub}"],
+                extra_lines=[f"Размер суммы: {settings.promo_amount_rub}"],
             )
             submit_message = await send_promo_value_and_read(bot, amount_message, settings.promo_amount_rub, "amount")
 
@@ -11355,17 +11440,17 @@ async def create_promo_code_in_admin_bot(
                 7,
                 user_id=user_id,
                 extra_lines=[
-                    f"РљРЅРѕРїРєР°: {settings.promo_submit_button_text}",
-                    "РџРѕСЃР»Рµ РєР»РёРєР° РїСЂРѕРІРµСЂСЋ СЃРїРёСЃРѕРє РїСЂРѕРјРѕРєРѕРґРѕРІ.",
+                    f"Кнопка: {settings.promo_submit_button_text}",
+                    "После клика проверю список промокодов.",
                 ],
             )
             final_message = await click_keyword_button_and_settle(
                 bot,
                 submit_message,
-                ((settings.promo_submit_button_text, "СЃРѕР·Рґ", "СЃРѕС…СЂР°РЅ", "РіРѕС‚РѕРІ", "create", "save"),),
+                ((settings.promo_submit_button_text, "созд", "сохран", "готов", "create", "save"),),
                 label="submit promo",
                 settle_seconds=PROMO_AFTER_SUBMIT_SETTLE_SECONDS,
-                optional_keywords=("РїСЂРѕРјРѕРєРѕРґ", "promo", "coupon"),
+                optional_keywords=("промокод", "promo", "coupon"),
                 exclude_keywords=(settings.cancel_button_text, settings.back_button_text),
             )
             final_message = await confirm_promo_created_after_submit(
@@ -11380,10 +11465,10 @@ async def create_promo_code_in_admin_bot(
 
     result_text = "\n".join(
         (
-            f"Promo СЃРѕР·РґР°РЅ: {promo_code}",
-            f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ: {user_id}",
-            f"Р‘СЋРґР¶РµС‚: {settings.promo_budget_rub}",
-            f"РЎСѓРјРјР°: {settings.promo_amount_rub}",
+            f"Promo создан: {promo_code}",
+            f"Пользователь: {user_id}",
+            f"Бюджет: {settings.promo_budget_rub}",
+            f"Сумма: {settings.promo_amount_rub}",
         )
     )
     logging.info("Promo creation finished user_id=%s promo_code=%s", user_id, promo_code)
@@ -11399,17 +11484,17 @@ async def send_mail2_to_users_without_subscriptions(
     total = len(users)
     await emit_process_progress(
         progress_callback,
-        "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+        "Mail2 без подписки",
         MAIL2_STEPS,
         1,
         extra_lines=[
             f"SQLite: {database_path()}",
-            f"РќР°Р№РґРµРЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ Р±РµР· РїРѕРґРїРёСЃРєРё: {total}",
-            f"Р”Р»РёРЅР° С‚РµРєСЃС‚Р°: {len(message_text)} СЃРёРјРІРѕР»РѕРІ",
+            f"Найдено пользователей без подписки: {total}",
+            f"Длина текста: {len(message_text)} символов",
         ],
     )
     if not users:
-        return "Mail2: РІ Р±Р°Р·Рµ РЅРµС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ Р±РµР· РїРѕРґРїРёСЃРєРё. Р—Р°РїСѓСЃС‚Рё `scan new`, РµСЃР»Рё Р±Р°Р·Р° СѓСЃС‚Р°СЂРµР»Р°."
+        return "Mail2: в базе нет пользователей без подписки. Запусти `scan new`, если база устарела."
 
     sent: list[str] = []
     failed: list[dict[str, str]] = []
@@ -11420,14 +11505,14 @@ async def send_mail2_to_users_without_subscriptions(
             break
         await emit_process_progress(
             progress_callback,
-            "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+            "Mail2 без подписки",
             MAIL2_STEPS,
             4,
             user_id=user_id,
             extra_lines=[
-                f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ {index}/{total}",
-                f"РћС‚РїСЂР°РІР»РµРЅРѕ: {len(sent)}",
-                f"РћС€РёР±РѕРє: {len(failed)}",
+                f"Пользователь {index}/{total}",
+                f"Отправлено: {len(sent)}",
+                f"Ошибок: {len(failed)}",
             ],
         )
         try:
@@ -11452,41 +11537,41 @@ async def send_mail2_to_users_without_subscriptions(
 
     await emit_process_progress(
         progress_callback,
-        "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+        "Mail2 без подписки",
         MAIL2_STEPS,
         5,
         extra_lines=[
-            f"Р’СЃРµРіРѕ РЅР°Р№РґРµРЅРѕ: {total}",
-            f"РћС‚РїСЂР°РІР»РµРЅРѕ: {len(sent)}",
-            f"РћС€РёР±РѕРє: {len(failed)}",
-            "РћСЃС‚Р°РЅРѕРІР»РµРЅРѕ СЂР°РґРё РґСЂСѓРіРѕР№ Р°РґРјРёРЅ-РєРѕРјР°РЅРґС‹" if stopped else "",
+            f"Всего найдено: {total}",
+            f"Отправлено: {len(sent)}",
+            f"Ошибок: {len(failed)}",
+            "Остановлено ради другой админ-команды" if stopped else "",
         ],
         done=not failed,
         failed=bool(failed),
     )
 
     lines = [
-        "Mail2 РѕСЃС‚Р°РЅРѕРІР»РµРЅ" if stopped else "Mail2 Р·Р°РІРµСЂС€РµРЅ",
-        f"РўРµРєСЃС‚: {len(message_text)} СЃРёРјРІРѕР»РѕРІ",
-        f"РџРѕР»СЊР·РѕРІР°С‚РµР»РµР№ Р±РµР· РїРѕРґРїРёСЃРєРё: {total}",
-        f"РћС‚РїСЂР°РІР»РµРЅРѕ: {len(sent)}",
-        f"РћС€РёР±РѕРє: {len(failed)}",
+        "Mail2 остановлен" if stopped else "Mail2 завершен",
+        f"Текст: {len(message_text)} символов",
+        f"Пользователей без подписки: {total}",
+        f"Отправлено: {len(sent)}",
+        f"Ошибок: {len(failed)}",
     ]
     if stopped:
-        lines.append("РџСЂРёС‡РёРЅР°: РїСЂРёС€Р»Р° РґСЂСѓРіР°СЏ Р°РґРјРёРЅ-РєРѕРјР°РЅРґР°, Р°РґРјРёРЅ-РїСЂРѕС†РµСЃСЃ РѕСЃРІРѕР±РѕР¶РґРµРЅ.")
+        lines.append("Причина: пришла другая админ-команда, админ-процесс освобожден.")
     if sent:
         lines.append("")
-        lines.append("РћС‚РїСЂР°РІР»РµРЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРј:")
+        lines.append("Отправлено пользователям:")
         lines.extend(f"- {user_id}" for user_id in sent[:50])
         if len(sent) > 50:
-            lines.append(f"...Рё РµС‰Рµ {len(sent) - 50}")
+            lines.append(f"...и еще {len(sent) - 50}")
     if failed:
         lines.append("")
-        lines.append("РћС€РёР±РєРё:")
+        lines.append("Ошибки:")
         for item in failed[:50]:
             lines.append(f"- {item['user_id']}: {item['error'][:180]}")
         if len(failed) > 50:
-            lines.append(f"...Рё РµС‰Рµ РѕС€РёР±РѕРє: {len(failed) - 50}")
+            lines.append(f"...и еще ошибок: {len(failed) - 50}")
     return "\n".join(lines)
 
 
@@ -11497,27 +11582,27 @@ async def send_mail_to_user_in_admin_bot(
 ) -> str:
     await emit_process_progress(
         progress_callback,
-        "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+        "Mail пользователю",
         MAIL_STEPS,
         1,
         user_id=user_id,
-        extra_lines=["РћР¶РёРґР°СЋ СЃРІРѕР±РѕРґРЅС‹Р№ Р°РґРјРёРЅ-РїСЂРѕС†РµСЃСЃ"],
+        extra_lines=["Ожидаю свободный админ-процесс"],
     )
     async with admin_flow_context(
-        "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+        "Mail пользователю",
         user_id=user_id,
         progress_callback=progress_callback,
-        progress_title="Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+        progress_title="Mail пользователю",
         progress_steps=MAIL_STEPS,
         progress_step=1,
     ):
         await emit_process_progress(
             progress_callback,
-            "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+            "Mail пользователю",
             MAIL_STEPS,
             1,
             user_id=user_id,
-            extra_lines=[f"РџРѕР»СѓС‡Р°СЋ Telegram entity @{settings.admin_bot_username}"],
+            extra_lines=[f"Получаю Telegram entity @{settings.admin_bot_username}"],
         )
         bot = await get_admin_bot_entity()
         logging.info("Starting admin mail for user_id=%s in @%s", user_id, settings.admin_bot_username)
@@ -11528,28 +11613,28 @@ async def send_mail_to_user_in_admin_bot(
                 bot,
                 user_id,
                 progress_callback=progress_callback,
-                progress_title="Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                progress_title="Mail пользователю",
                 progress_steps=MAIL_STEPS,
             )
             await emit_process_progress(
                 progress_callback,
-                "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                "Mail пользователю",
                 MAIL_STEPS,
                 4,
                 user_id=user_id,
-                extra_lines=[f"РљРЅРѕРїРєР° РїРёСЃСЊРјР°: {settings.write_user_button_text}"],
+                extra_lines=[f"Кнопка письма: {settings.write_user_button_text}"],
             )
             write_message = await click_and_read(bot, result_message, settings.write_user_button_text)
 
             await emit_process_progress(
                 progress_callback,
-                "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                "Mail пользователю",
                 MAIL_STEPS,
                 5,
                 user_id=user_id,
                 extra_lines=[
-                    f"Р”Р»РёРЅР° С‚РµРєСЃС‚Р°: {len(message_text)} СЃРёРјРІРѕР»РѕРІ",
-                    f"РџСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ: {message_text[:120]}",
+                    f"Длина текста: {len(message_text)} символов",
+                    f"Предпросмотр: {message_text[:120]}",
                 ],
             )
             logging.info("Sending mail text to admin bot for user_id=%s text=%r", user_id, message_text)
@@ -11560,11 +11645,11 @@ async def send_mail_to_user_in_admin_bot(
 
             await emit_process_progress(
                 progress_callback,
-                "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                "Mail пользователю",
                 MAIL_STEPS,
                 6,
                 user_id=user_id,
-                extra_lines=[f"РљРЅРѕРїРєР° РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ: {settings.mail_next_button_text}"],
+                extra_lines=[f"Кнопка подтверждения: {settings.mail_next_button_text}"],
             )
             final_message = await click_and_read(bot, preview_message, settings.mail_next_button_text)
             log_message("Mail final response", final_message)
@@ -11624,19 +11709,19 @@ async def ask_wizard_confirmation(
             user_id=user_id,
             target=wizard_target,
             extra_lines=[
-                "РљР°СЂС‚РѕС‡РєР° РїРѕРґРіРѕС‚РѕРІР»РµРЅР°",
-                "РџСЂРѕРІРµСЂСЊ С‚РµРєСЃС‚ РїРµСЂРµРґ РѕС‚РїСЂР°РІРєРѕР№",
-                "РћС‚РІРµС‚СЊ: 1 - РѕС‚РїСЂР°РІРёС‚СЊ, 2 - РґРѕРїРёСЃР°С‚СЊ, 0 - РѕС‚РјРµРЅР°",
+                "Карточка подготовлена",
+                "Проверь текст перед отправкой",
+                "Ответь: 1 - отправить, 2 - дописать, 0 - отмена",
             ],
         )
     )
-    await safe_event_reply(event, f"РџСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ wizard:\n\n{base_text}")
+    await safe_event_reply(event, f"Предпросмотр wizard:\n\n{base_text}")
     await safe_event_reply(
         event,
-        "РћС‚РїСЂР°РІР»СЏС‚СЊ РІ wizard?",
+        "Отправлять в wizard?",
         buttons=[
-            [Button.text("1 РѕС‚РїСЂР°РІРёС‚СЊ"), Button.text("2 РґРѕРїРёСЃР°С‚СЊ")],
-            [Button.text("0 РѕС‚РјРµРЅР°")],
+            [Button.text("1 отправить"), Button.text("2 дописать")],
+            [Button.text("0 отмена")],
         ],
     )
 
@@ -11647,18 +11732,18 @@ async def handle_roots_command(event, sender) -> None:
     text = (event.raw_text or "").strip()
     parts = [part for part in text.split() if part]
 
-    if len(parts) == 1 or (len(parts) > 1 and parts[1].casefold() in {"list", "show", "СЃРїРёСЃРѕРє"}):
+    if len(parts) == 1 or (len(parts) > 1 and parts[1].casefold() in {"list", "show", "список"}):
         await safe_event_reply(event, build_roots_text(), buttons=build_roots_buttons())
         return
 
     action = parts[1].casefold()
-    if action in {"help", "РїРѕРјРѕС‰СЊ"}:
+    if action in {"help", "помощь"}:
         await safe_event_reply(event, build_roots_text(), buttons=build_roots_buttons())
         return
 
-    if action in {"add", "РґРѕР±Р°РІРёС‚СЊ"}:
+    if action in {"add", "добавить"}:
         if len(parts) < 3:
-            await safe_event_reply(event, "Р¤РѕСЂРјР°С‚: /roots add <user_id|@username|me> [РєРѕРјРјРµРЅС‚Р°СЂРёР№]")
+            await safe_event_reply(event, "Формат: /roots add <user_id|@username|me> [комментарий]")
             return
         target = parts[2].strip()
         note = " ".join(parts[3:]).strip()
@@ -11674,14 +11759,14 @@ async def handle_roots_command(event, sender) -> None:
                 added_by=str(sender_id),
             )
         except ValueError as error:
-            await safe_event_reply(event, f"РќРµ СЃРјРѕРі РґРѕР±Р°РІРёС‚СЊ Р·Р°РїСЂРѕСЃРЅРёРєР°: {error}")
+            await safe_event_reply(event, f"Не смог добавить запросника: {error}")
             return
-        await safe_event_reply(event, f"Р—Р°РїСЂРѕСЃРЅРёРє РґРѕР±Р°РІР»РµРЅ: {lookup_key}\n\n{build_roots_text()}")
+        await safe_event_reply(event, f"Запросник добавлен: {lookup_key}\n\n{build_roots_text()}")
         return
 
-    if action in {"del", "delete", "remove", "rm", "СѓРґР°Р»РёС‚СЊ"}:
+    if action in {"del", "delete", "remove", "rm", "удалить"}:
         if len(parts) < 3:
-            await safe_event_reply(event, "Р¤РѕСЂРјР°С‚: /roots del <user_id|@username>")
+            await safe_event_reply(event, "Формат: /roots del <user_id|@username>")
             return
         target = parts[2].strip()
         if target.casefold() == "me":
@@ -11689,22 +11774,22 @@ async def handle_roots_command(event, sender) -> None:
         removed = delete_requester(target)
         await safe_event_reply(
             event,
-            ("Р—Р°РїСЂРѕСЃРЅРёРє СѓРґР°Р»РµРЅ." if removed else "РўР°РєРѕРіРѕ Р·Р°РїСЂРѕСЃРЅРёРєР° РЅРµ РЅР°С€РµР».") + f"\n\n{build_roots_text()}",
+            ("Запросник удален." if removed else "Такого запросника не нашел.") + f"\n\n{build_roots_text()}",
         )
         return
 
-    if action in {"clear", "РѕС‡РёСЃС‚РёС‚СЊ"}:
-        if len(parts) < 3 or parts[2].casefold() not in {"yes", "confirm", "РґР°"}:
-            await safe_event_reply(event, "Р§С‚РѕР±С‹ РѕС‡РёСЃС‚РёС‚СЊ РІРµСЃСЊ СЃРїРёСЃРѕРє Р·Р°РїСЂРѕСЃРЅРёРєРѕРІ, РѕС‚РїСЂР°РІСЊ: /roots clear yes")
+    if action in {"clear", "очистить"}:
+        if len(parts) < 3 or parts[2].casefold() not in {"yes", "confirm", "да"}:
+            await safe_event_reply(event, "Чтобы очистить весь список запросников, отправь: /roots clear yes")
             return
         with connect_database() as conn:
             initialize_database(conn)
             conn.execute("DELETE FROM requesters")
             conn.commit()
-        await safe_event_reply(event, "РЎРїРёСЃРѕРє Р·Р°РїСЂРѕСЃРЅРёРєРѕРІ РѕС‡РёС‰РµРЅ. Р§С‚РѕР±С‹ СЃРЅРѕРІР° РґРѕР±Р°РІРёС‚СЊ СЃРµР±СЏ: /roots add me")
+        await safe_event_reply(event, "Список запросников очищен. Чтобы снова добавить себя: /roots add me")
         return
 
-    await safe_event_reply(event, "РќРµ РїРѕРЅСЏР» РєРѕРјР°РЅРґСѓ /roots. РћС‚РїСЂР°РІСЊ /roots, С‡С‚РѕР±С‹ РїРѕСЃРјРѕС‚СЂРµС‚СЊ СЃРїРёСЃРѕРє Рё РїРѕРґСЃРєР°Р·РєРё.")
+    await safe_event_reply(event, "Не понял команду /roots. Отправь /roots, чтобы посмотреть список и подсказки.")
 
 
 async def handle_gpt_prompt(
@@ -11751,7 +11836,7 @@ async def handle_gpt_prompt(
                     "KBR_GPT",
                     GPT_STEPS,
                     1,
-                    extra_lines=[f"РњРѕРґРµР»СЊ: {settings.openai_model}", f"Р’РѕРїСЂРѕСЃ: {len(prompt)} СЃРёРјРІРѕР»РѕРІ"],
+                    extra_lines=[f"Модель: {settings.openai_model}", f"Вопрос: {len(prompt)} символов"],
                 ),
             )
 
@@ -11799,12 +11884,12 @@ async def handle_gpt_prompt(
                     "KBR_GPT",
                     GPT_STEPS,
                     1,
-                    extra_lines=["OPENAI_API_KEY РЅРµ Р·Р°РґР°РЅ РІ .env РЅР° СЃРµСЂРІРµСЂРµ"],
+                    extra_lines=["OPENAI_API_KEY не задан в .env на сервере"],
                     failed=True,
                 ),
                 force=True,
             )
-            await safe_event_reply(event, "KBR_GPT РЅРµ РЅР°СЃС‚СЂРѕРµРЅ: РґРѕР±Р°РІСЊ `OPENAI_API_KEY` РІ `.env` РЅР° СЃРµСЂРІРµСЂРµ Рё РїРµСЂРµР·Р°РїСѓСЃС‚Рё Р±РѕС‚Р°.")
+            await safe_event_reply(event, "KBR_GPT не настроен: добавь `OPENAI_API_KEY` в `.env` на сервере и перезапусти бота.")
         return
 
     previous_response_id = gpt_chat_sessions.get(sender_id)
@@ -11823,7 +11908,7 @@ async def handle_gpt_prompt(
                     "KBR_GPT",
                     GPT_STEPS,
                     1,
-                    extra_lines=["Р—Р°РїСЂРѕСЃ РїРѕСЃС‚Р°РІР»РµРЅ РІ РѕС‡РµСЂРµРґСЊ", "Р–РґСѓ РѕСЃРІРѕР±РѕР¶РґРµРЅРёСЏ С‚РµРєСѓС‰РµРіРѕ РѕС‚РІРµС‚Р°"],
+                    extra_lines=["Запрос поставлен в очередь", "Жду освобождения текущего ответа"],
                 ),
                 force=True,
             )
@@ -11896,8 +11981,8 @@ async def handle_gpt_prompt(
                         GPT_STEPS,
                         2,
                         extra_lines=[
-                            f"РњРѕРґРµР»СЊ: {settings.openai_model}",
-                            "РљРѕРЅС‚РµРєСЃС‚: " + ("РїСЂРѕРґРѕР»Р¶Р°СЋ РїСЂРѕС€Р»С‹Р№ РґРёР°Р»РѕРі" if previous_response_id else "РЅРѕРІС‹Р№ РґРёР°Р»РѕРі"),
+                            f"Модель: {settings.openai_model}",
+                            "Контекст: " + ("продолжаю прошлый диалог" if previous_response_id else "новый диалог"),
                         ],
                     )
                 )
@@ -11907,6 +11992,8 @@ async def handle_gpt_prompt(
                     break
                 except Exception as retry_error:
                     error_text = str(retry_error)
+                    if is_daily_limit_error_text(error_text):
+                        raise
                     if is_rate_limit_error_text(error_text):
                         now_monotonic = time.monotonic()
                         remaining = rate_limit_deadline - now_monotonic
@@ -11980,12 +12067,12 @@ async def handle_gpt_prompt(
                         "KBR_GPT",
                         GPT_STEPS,
                         len(GPT_STEPS),
-                        extra_lines=[f"РћС‚РІРµС‚: {len(answer_text)} СЃРёРјРІРѕР»РѕРІ"],
+                        extra_lines=[f"Ответ: {len(answer_text)} символов"],
                         done=True,
                     ),
                     force=True,
                 )
-            final_answer_text = answer_text.strip() or "Р“РѕС‚РѕРІРѕ."
+            final_answer_text = answer_text.strip() or "Готово."
             edited_in_place = False
             if status_message:
                 edited_in_place = await edit_status_message(status_message, final_answer_text, force=True)
@@ -12053,22 +12140,22 @@ async def handle_gpt_prompt(
                     await send_to_wizard_target(
                         "\n".join(
                             (
-                                "Р­СЃРєР°Р»Р°С†РёСЏ KBR_GPT РІ РїРѕРґРґРµСЂР¶РєСѓ (Р»РёРјРёС‚ > 2 РјРёРЅСѓС‚)",
-                                f"Р’СЂРµРјСЏ: {datetime.now().isoformat(timespec='seconds')}",
-                                f"РћС‚РїСЂР°РІРёС‚РµР»СЊ Telegram ID: {sender_id}",
+                                "Эскалация KBR_GPT в поддержку (лимит > 2 минут)",
+                                f"Время: {datetime.now().isoformat(timespec='seconds')}",
+                                f"Отправитель Telegram ID: {sender_id}",
                                 (
-                                    f"РћС‚РїСЂР°РІРёС‚РµР»СЊ username: @{sender_username_value}"
+                                    f"Отправитель username: @{sender_username_value}"
                                     if sender_username_value
-                                    else "РћС‚РїСЂР°РІРёС‚РµР»СЊ username: РЅРµС‚"
+                                    else "Отправитель username: нет"
                                 ),
                                 (
-                                    f"РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: {sender_full_name_value}"
+                                    f"Отправитель имя: {sender_full_name_value}"
                                     if sender_full_name_value
-                                    else "РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: РЅРµС‚"
+                                    else "Отправитель имя: нет"
                                 ),
                                 "",
-                                "РўРµРєСЃС‚ Р·Р°РїСЂРѕСЃР°:",
-                                prompt.strip() or "[РїСѓСЃС‚Рѕ]",
+                                "Текст запроса:",
+                                prompt.strip() or "[пусто]",
                             )
                         )
                     )
@@ -12086,8 +12173,8 @@ async def handle_gpt_prompt(
                         GPT_STEPS,
                         len(GPT_STEPS),
                         extra_lines=[
-                            "Р—Р°РїСЂРѕСЃ Р·Р°РІРµСЂС€РёР»СЃСЏ РѕС€РёР±РєРѕР№",
-                            f"РћР¶РёРґР°РЅРёРµ СЂРµС‚СЂР°РµРІ: {int(rate_limit_wait_total)} СЃРµРє" if rate_limit_wait_total > 0 else "",
+                            "Запрос завершился ошибкой",
+                            f"Ожидание ретраев: {int(rate_limit_wait_total)} сек" if rate_limit_wait_total > 0 else "",
                             error_text[:300],
                         ],
                         failed=True,
@@ -12098,7 +12185,7 @@ async def handle_gpt_prompt(
                     await safe_event_reply(
                         event,
                         assistant_user_message(
-                            f"РЎРµСЂРІРёСЃ РїРµСЂРµРіСЂСѓР¶РµРЅ Р±РѕР»РµРµ 2 РјРёРЅСѓС‚. РџРµСЂРµРґР°СЋ РІ РїРѕРґРґРµСЂР¶РєСѓ.\nРЎРІСЏР¶РёС‚РµСЃСЊ СЃ @{SUPPORT_OPERATOR_USERNAME}"
+                            f"Сервис перегружен более 2 минут. Передаю в поддержку.\nСвяжитесь с @{SUPPORT_OPERATOR_USERNAME}"
                         ),
                     )
                 else:
@@ -12115,15 +12202,15 @@ async def handle_gpt_prompt(
 @client.on(events.CallbackQuery(data=SCAN_CANCEL_CALLBACK_DATA))
 async def handle_scan_cancel(event: events.CallbackQuery.Event) -> None:
     if not active_scan_cancel_event:
-        await event.answer("Scan СЃРµР№С‡Р°СЃ РЅРµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ.", alert=False)
+        await event.answer("Scan сейчас не выполняется.", alert=False)
         return
 
     if active_scan_owner_id is not None and event.sender_id != active_scan_owner_id:
-        await event.answer("РџРѕСЃС‚Р°РІРёС‚СЊ scan РЅР° РїР°СѓР·Сѓ РјРѕР¶РµС‚ С‚РѕР»СЊРєРѕ С‚РѕС‚, РєС‚Рѕ РµРіРѕ Р·Р°РїСѓСЃС‚РёР».", alert=True)
+        await event.answer("Поставить scan на паузу может только тот, кто его запустил.", alert=True)
         return
 
     active_scan_cancel_event.set()
-    await event.answer("РџР°СѓР·Р° РїСЂРёРЅСЏС‚Р°. Р—Р°РІРµСЂС€Сѓ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё СЃРѕС…СЂР°РЅСЋ РїСЂРѕРіСЂРµСЃСЃ.", alert=False)
+    await event.answer("Пауза принята. Завершу текущего пользователя и сохраню прогресс.", alert=False)
 
 
 @client.on(events.CallbackQuery(pattern=b"^poc:"))
@@ -12134,26 +12221,26 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
         if active_scan_cancel_event and not active_scan_cancel_event.is_set():
             active_scan_cancel_event.set()
             changed = True
-            await event.answer("Scan РїРѕСЃС‚Р°РІР»РµРЅ РЅР° РїР°СѓР·Сѓ.", alert=False)
+            await event.answer("Scan поставлен на паузу.", alert=False)
         else:
-            await event.answer("Scan СЃРµР№С‡Р°СЃ РЅРµ Р°РєС‚РёРІРµРЅ.", alert=False)
+            await event.answer("Scan сейчас не активен.", alert=False)
     elif data == POC_MAIL2_STOP_CALLBACK_DATA:
         if active_mail2_cancel_event and not active_mail2_cancel_event.is_set():
             active_mail2_cancel_event.set()
             changed = True
-            await event.answer("Mail2 РїРѕР»СѓС‡РёР» РєРѕРјР°РЅРґСѓ РѕСЃС‚Р°РЅРѕРІРєРё.", alert=False)
+            await event.answer("Mail2 получил команду остановки.", alert=False)
         else:
-            await event.answer("Mail2 СЃРµР№С‡Р°СЃ РЅРµ Р°РєС‚РёРІРµРЅ.", alert=False)
+            await event.answer("Mail2 сейчас не активен.", alert=False)
     elif data == POC_CLEAR_WIZARD_CALLBACK_DATA:
         count = len(pending_wizard_requests)
         pending_wizard_requests.clear()
         changed = count > 0
-        await event.answer(f"Wizard pending РѕС‡РёС‰РµРЅРѕ: {count}.", alert=False)
+        await event.answer(f"Wizard pending очищено: {count}.", alert=False)
     elif data == POC_CLEAR_MAIL2_PENDING_CALLBACK_DATA:
         count = len(pending_mail2_requests)
         pending_mail2_requests.clear()
         changed = count > 0
-        await event.answer(f"Mail2 pending РѕС‡РёС‰РµРЅРѕ: {count}.", alert=False)
+        await event.answer(f"Mail2 pending очищено: {count}.", alert=False)
     elif data == b"poc:clear_mail_pending":
         count = len(pending_direct_mail_requests)
         pending_direct_mail_requests.clear()
@@ -12163,12 +12250,12 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
         count = len(pending_gpt_requests)
         pending_gpt_requests.clear()
         changed = count > 0
-        await event.answer(f"GPT pending РѕС‡РёС‰РµРЅРѕ: {count}.", alert=False)
+        await event.answer(f"GPT pending очищено: {count}.", alert=False)
     elif data == b"poc:clear_smart_pending":
         count = len(pending_smart_actions)
         pending_smart_actions.clear()
         changed = count > 0
-        await event.answer(f"Smart pending РѕС‡РёС‰РµРЅРѕ: {count}.", alert=False)
+        await event.answer(f"Smart pending очищено: {count}.", alert=False)
     elif data == POC_CLEAR_ALL_PENDING_CALLBACK_DATA:
         count = (
             len(pending_wizard_requests)
@@ -12183,11 +12270,11 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
         pending_gpt_requests.clear()
         pending_smart_actions.clear()
         changed = count > 0
-        await event.answer(f"Pending РѕС‡РёС‰РµРЅРѕ: {count}.", alert=False)
+        await event.answer(f"Pending очищено: {count}.", alert=False)
     elif data == POC_REFRESH_CALLBACK_DATA:
-        await event.answer("РћР±РЅРѕРІР»СЏСЋ РїСЂРѕС†РµСЃСЃС‹.", alert=False)
+        await event.answer("Обновляю процессы.", alert=False)
     else:
-        await event.answer("РќРµРёР·РІРµСЃС‚РЅР°СЏ РєРѕРјР°РЅРґР° РїСЂРѕС†РµСЃСЃРѕРІ.", alert=True)
+        await event.answer("Неизвестная команда процессов.", alert=True)
         return
 
     logging.info("Process callback data=%r sender_id=%s changed=%s", data, event.sender_id, changed)
@@ -12260,19 +12347,19 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     if pending_smart:
         log_action_event("route", sender_id=sender_id, route="pending_smart", text=incoming_text)
         cleaned = incoming_text.strip().casefold()
-        if cleaned in {"1", "РґР°", "yes", "y", "РІС‹РїРѕР»РЅРёС‚СЊ", "РѕС‚РїСЂР°РІРёС‚СЊ", "send"}:
+        if cleaned in {"1", "да", "yes", "y", "выполнить", "отправить", "send"}:
             pending_smart_actions.pop(sender_id, None)
             await execute_smart_action(event, sender_id, dict(pending_smart.get("action") or {}), confirmed=True)
             return
-        if cleaned in {"0", "РЅРµС‚", "no", "n", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
+        if cleaned in {"0", "нет", "no", "n", "отмена", "cancel", "/cancel"}:
             pending_smart_actions.pop(sender_id, None)
-            await safe_event_reply(event, "РЈРјРЅРѕРµ РґРµР№СЃС‚РІРёРµ РѕС‚РјРµРЅРµРЅРѕ.")
+            await safe_event_reply(event, "Умное действие отменено.")
             return
         if incoming_text:
             pending_smart_actions.pop(sender_id, None)
             await handle_smart_request(event, sender_id, incoming_text, source="text correction")
             return
-        await safe_event_reply(event, "РџРѕРґС‚РІРµСЂРґРё РґРµР№СЃС‚РІРёРµ: `1 РІС‹РїРѕР»РЅРёС‚СЊ` РёР»Рё `0 РѕС‚РјРµРЅР°`.")
+        await safe_event_reply(event, "Подтверди действие: `1 выполнить` или `0 отмена`.")
         return
 
     pending_wizard = pending_wizard_requests.get(sender_id)
@@ -12300,7 +12387,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РћС‚РїСЂР°РІРєР° РѕС‚РјРµРЅРµРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                        extra_lines=["Отправка отменена пользователем"],
                         done=True,
                     )
                 )
@@ -12314,7 +12401,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                             7,
                             user_id=pending_wizard_user_id,
                             target=wizard_target,
-                            extra_lines=["РћС‚РїСЂР°РІР»СЏСЋ РїРѕРґРіРѕС‚РѕРІР»РµРЅРЅСѓСЋ РєР°СЂС‚РѕС‡РєСѓ Р±РµР· РґРѕРїРѕР»РЅРµРЅРёСЏ"],
+                            extra_lines=["Отправляю подготовленную карточку без дополнения"],
                         )
                     )
                     await send_to_wizard_target(str(pending_wizard.get("final_text") or pending_wizard["base_text"]))
@@ -12326,7 +12413,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                             7,
                             user_id=pending_wizard_user_id,
                             target=wizard_target,
-                            extra_lines=["РљР°СЂС‚РѕС‡РєР° РѕС‚РїСЂР°РІР»РµРЅР°"],
+                            extra_lines=["Карточка отправлена"],
                             done=True,
                         )
                     )
@@ -12339,11 +12426,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                             7,
                             user_id=pending_wizard_user_id,
                             target=wizard_target,
-                            extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РєР°СЂС‚РѕС‡РєСѓ", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                            extra_lines=["Не удалось отправить карточку", "Подробности записаны в лог"],
                             failed=True,
                         )
                     )
-                    await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РІ wizard. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ Р»РѕРіРµ.")
+                    await safe_event_reply(event, "Не удалось отправить в wizard. Подробности в логе.")
                 return
             if choice == "add_text":
                 pending_wizard["stage"] = "await_extra_text"
@@ -12355,9 +12442,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
                         extra_lines=[
-                            "РћР¶РёРґР°СЋ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Р№ С‚РµРєСЃС‚",
-                            "РЎР»РµРґСѓСЋС‰РµРµ СЃРѕРѕР±С‰РµРЅРёРµ Р±СѓРґРµС‚ РґРѕР±Р°РІР»РµРЅРѕ Рє РєР°СЂС‚РѕС‡РєРµ",
-                            "Р”Р»СЏ РѕС‚РјРµРЅС‹ РѕС‚РїСЂР°РІСЊС‚Рµ 0",
+                            "Ожидаю дополнительный текст",
+                            "Следующее сообщение будет добавлено к карточке",
+                            "Для отмены отправьте 0",
                         ],
                     )
                 )
@@ -12369,7 +12456,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     6,
                     user_id=pending_wizard_user_id,
                     target=wizard_target,
-                    extra_lines=["РќРµ РїРѕРЅСЏР» РѕС‚РІРµС‚. РќР°РїРёС€РёС‚Рµ 1, 2 РёР»Рё 0"],
+                    extra_lines=["Не понял ответ. Напишите 1, 2 или 0"],
                 )
             )
             return
@@ -12384,7 +12471,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РћС‚РїСЂР°РІРєР° РѕС‚РјРµРЅРµРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                        extra_lines=["Отправка отменена пользователем"],
                         done=True,
                     )
                 )
@@ -12394,7 +12481,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             full_text = "\n\n".join(
                 (
                     str(pending_wizard["base_text"]),
-                    f"Р”РѕРїРѕР»РЅРµРЅРёРµ:\n{extra_text}",
+                    f"Дополнение:\n{extra_text}",
                 )
             )
             pending_wizard["extra_text"] = extra_text
@@ -12408,19 +12495,19 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     user_id=pending_wizard_user_id,
                     target=wizard_target,
                     extra_lines=[
-                        "Р”РѕРїРѕР»РЅРµРЅРёРµ РґРѕР±Р°РІР»РµРЅРѕ",
-                        "РџСЂРѕРІРµСЂСЊ РёС‚РѕРіРѕРІС‹Р№ С‚РµРєСЃС‚",
-                        "РћС‚РІРµС‚СЊ: 1 - РѕС‚РїСЂР°РІРёС‚СЊ, 2 - РёР·РјРµРЅРёС‚СЊ РґРѕРїРёСЃРєСѓ, 0 - РѕС‚РјРµРЅР°",
+                        "Дополнение добавлено",
+                        "Проверь итоговый текст",
+                        "Ответь: 1 - отправить, 2 - изменить дописку, 0 - отмена",
                     ],
                 )
             )
-            await safe_event_reply(event, f"РС‚РѕРіРѕРІС‹Р№ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ wizard:\n\n{full_text}")
+            await safe_event_reply(event, f"тоговый предпросмотр wizard:\n\n{full_text}")
             await safe_event_reply(
                 event,
-                "РћС‚РїСЂР°РІР»СЏС‚СЊ СЌС‚РѕС‚ РІР°СЂРёР°РЅС‚?",
+                "Отправлять этот вариант?",
                 buttons=[
-                    [Button.text("1 РѕС‚РїСЂР°РІРёС‚СЊ"), Button.text("2 РёР·РјРµРЅРёС‚СЊ РґРѕРїРёСЃРєСѓ")],
-                    [Button.text("0 РѕС‚РјРµРЅР°")],
+                    [Button.text("1 отправить"), Button.text("2 изменить дописку")],
+                    [Button.text("0 отмена")],
                 ],
             )
             return
@@ -12436,7 +12523,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РћС‚РїСЂР°РІРєР° РѕС‚РјРµРЅРµРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                        extra_lines=["Отправка отменена пользователем"],
                         done=True,
                     )
                 )
@@ -12451,9 +12538,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
                         extra_lines=[
-                            "РћР¶РёРґР°СЋ РЅРѕРІС‹Р№ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Р№ С‚РµРєСЃС‚",
-                            "РЎР»РµРґСѓСЋС‰РµРµ СЃРѕРѕР±С‰РµРЅРёРµ Р·Р°РјРµРЅРёС‚ РїСЂРѕС€Р»СѓСЋ РґРѕРїРёСЃРєСѓ",
-                            "Р”Р»СЏ РѕС‚РјРµРЅС‹ РѕС‚РїСЂР°РІСЊС‚Рµ 0",
+                            "Ожидаю новый дополнительный текст",
+                            "Следующее сообщение заменит прошлую дописку",
+                            "Для отмены отправьте 0",
                         ],
                     )
                 )
@@ -12466,7 +12553,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РќРµ РїРѕРЅСЏР» РѕС‚РІРµС‚. РќР°РїРёС€РёС‚Рµ 1, 2 РёР»Рё 0"],
+                        extra_lines=["Не понял ответ. Напишите 1, 2 или 0"],
                     )
                 )
                 return
@@ -12480,9 +12567,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
                         extra_lines=[
-                            "РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РїРѕР»СѓС‡РµРЅРѕ",
-                            f"Р”Р»РёРЅР° РёС‚РѕРіРѕРІРѕРіРѕ С‚РµРєСЃС‚Р°: {len(str(pending_wizard.get('final_text') or ''))} СЃРёРјРІРѕР»РѕРІ",
-                            "РћС‚РїСЂР°РІР»СЏСЋ РІ wizard",
+                            "Подтверждение получено",
+                            f"Длина итогового текста: {len(str(pending_wizard.get('final_text') or ''))} символов",
+                            "Отправляю в wizard",
                         ],
                     )
                 )
@@ -12495,7 +12582,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         7,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РљР°СЂС‚РѕС‡РєР° РѕС‚РїСЂР°РІР»РµРЅР° РїРѕСЃР»Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ"],
+                        extra_lines=["Карточка отправлена после подтверждения"],
                         done=True,
                     )
                 )
@@ -12508,23 +12595,23 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         7,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РєР°СЂС‚РѕС‡РєСѓ СЃ РґРѕРїРѕР»РЅРµРЅРёРµРј", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                        extra_lines=["Не удалось отправить карточку с дополнением", "Подробности записаны в лог"],
                         failed=True,
                     )
                 )
-                await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РІ wizard. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ Р»РѕРіРµ.")
+                await safe_event_reply(event, "Не удалось отправить в wizard. Подробности в логе.")
             return
 
     pending_mail2 = pending_mail2_requests.get(sender_id)
     if pending_mail2:
-        if incoming_text.strip().casefold() in {"0", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
+        if incoming_text.strip().casefold() in {"0", "отмена", "cancel", "/cancel"}:
             pending_mail2_requests.pop(sender_id, None)
             status_message = pending_mail2.get("status_message")
             cancel_text = build_process_status(
-                "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+                "Mail2 без подписки",
                 MAIL2_STEPS,
                 3,
-                extra_lines=["Р Р°СЃСЃС‹Р»РєР° РѕС‚РјРµРЅРµРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                extra_lines=["Рассылка отменена пользователем"],
                 done=True,
             )
             if status_message:
@@ -12535,7 +12622,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
         message_text = incoming_text.strip()
         if not message_text:
-            await safe_event_reply(event, "РџСЂРёС€Р»Рё С‚РµРєСЃС‚ РґР»СЏ /mail2 РёР»Рё `0 РѕС‚РјРµРЅР°`.")
+            await safe_event_reply(event, "Пришли текст для /mail2 или `0 отмена`.")
             return
 
         pending_mail2_requests.pop(sender_id, None)
@@ -12560,14 +12647,14 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             logging.exception("Mail2 failed after pending text sender_id=%s", sender_id)
             await update_pending_mail2_status(
                 build_process_status(
-                    "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+                    "Mail2 без подписки",
                     MAIL2_STEPS,
                     len(MAIL2_STEPS),
-                    extra_lines=["Р Р°СЃСЃС‹Р»РєР° Р·Р°РІРµСЂС€РёР»Р°СЃСЊ РѕС€РёР±РєРѕР№", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Рассылка завершилась ошибкой", "Подробности записаны в лог"],
                     failed=True,
                 )
             )
-            await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ /mail2. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.")
+            await safe_event_reply(event, "Не удалось выполнить /mail2. Подробности записаны в лог.")
         finally:
             active_mail2_cancel_event = None
             schedule_scan_auto_resume(scan_interruption)
@@ -12576,14 +12663,14 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     pending_gpt = pending_gpt_requests.get(sender_id)
     if pending_gpt:
         log_action_event("route", sender_id=sender_id, route="pending_gpt", text=incoming_text)
-        if incoming_text.strip().casefold() in {"0", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
+        if incoming_text.strip().casefold() in {"0", "отмена", "cancel", "/cancel"}:
             pending_gpt_requests.pop(sender_id, None)
             status_message = pending_gpt.get("status_message")
             cancel_text = build_process_status(
                 "KBR_GPT",
                 GPT_STEPS,
                 1,
-                extra_lines=["Р—Р°РїСЂРѕСЃ РѕС‚РјРµРЅРµРЅ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                extra_lines=["Запрос отменен пользователем"],
                 done=True,
             )
             if status_message:
@@ -12594,7 +12681,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
         prompt = incoming_text.strip()
         if not prompt:
-            await safe_event_reply(event, "РџСЂРёС€Р»Рё РІРѕРїСЂРѕСЃ РґР»СЏ `/gpt` РёР»Рё `0 РѕС‚РјРµРЅР°`.")
+            await safe_event_reply(event, "Пришли вопрос для `/gpt` или `0 отмена`.")
             return
 
         pending_gpt_requests.pop(sender_id, None)
@@ -12661,12 +12748,12 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         status_message = await safe_event_reply(
             event,
             build_process_status(
-                "Р“РѕР»РѕСЃРѕРІРѕР№ РїРѕРјРѕС‰РЅРёРє",
+                "Голосовой помощник",
                 SMART_STEPS,
                 2,
                 extra_lines=[
-                    f"РњРѕРґРµР»СЊ СЂР°СЃРїРѕР·РЅР°РІР°РЅРёСЏ: {settings.openai_transcribe_model}",
-                    "РЎРєР°С‡РёРІР°СЋ Рё СЂР°СЃРїРѕР·РЅР°СЋ РіРѕР»РѕСЃРѕРІРѕРµ",
+                    f"Модель распознавания: {settings.openai_transcribe_model}",
+                    "Скачиваю и распознаю голосовое",
                 ],
             ),
         )
@@ -12675,15 +12762,15 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             await edit_status_message(
                 status_message,
                 build_process_status(
-                    "Р“РѕР»РѕСЃРѕРІРѕР№ РїРѕРјРѕС‰РЅРёРє",
+                    "Голосовой помощник",
                     SMART_STEPS,
                     3,
-                    extra_lines=[f"Р Р°СЃРїРѕР·РЅР°РЅРѕ: {transcript[:500]}"],
+                    extra_lines=[f"Распознано: {transcript[:500]}"],
                     done=True,
                 ),
                 force=True,
             )
-            await safe_event_reply(event, f"Р Р°СЃРїРѕР·РЅР°Р» РіРѕР»РѕСЃ:\n\n{transcript}")
+            await safe_event_reply(event, f"Распознал голос:\n\n{transcript}")
             await handle_smart_request(event, sender_id, transcript, source="voice")
         except Exception:
             logging.exception("Voice smart request failed sender_id=%s", sender_id)
@@ -12691,15 +12778,15 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             await edit_status_message(
                 status_message,
                 build_process_status(
-                    "Р“РѕР»РѕСЃРѕРІРѕР№ РїРѕРјРѕС‰РЅРёРє",
+                    "Голосовой помощник",
                     SMART_STEPS,
                     2,
-                    extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°СЃРїРѕР·РЅР°С‚СЊ РіРѕР»РѕСЃРѕРІРѕРµ", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Не удалось распознать голосовое", "Подробности записаны в лог"],
                     failed=True,
                 ),
                 force=True,
             )
-            await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°СЃРїРѕР·РЅР°С‚СЊ РіРѕР»РѕСЃРѕРІРѕРµ. РџРѕРїСЂРѕР±СѓР№ РµС‰Рµ СЂР°Р· РёР»Рё РѕС‚РїСЂР°РІСЊ С‚РµРєСЃС‚РѕРј.")
+            await safe_event_reply(event, "Не удалось распознать голосовое. Попробуй еще раз или отправь текстом.")
         return
 
     if is_command_menu_command(event.raw_text or ""):
@@ -12740,7 +12827,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     if is_status_command(event.raw_text or ""):
         log_action_event("route", sender_id=sender_id, route="status")
-        await safe_event_reply(event, "[STATUS] РЎРѕР±РёСЂР°СЋ dashboard РёР· SQL Р±Р°Р·С‹...")
+        await safe_event_reply(event, "[STATUS] Собираю dashboard из SQL базы...")
         await send_status_dashboard_from_database(event)
         return
 
@@ -12773,9 +12860,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     GPT_STEPS,
                     1,
                     extra_lines=[
-                        f"РњРѕРґРµР»СЊ: {settings.openai_model}",
-                        "Р–РґСѓ РІРѕРїСЂРѕСЃ СЃР»РµРґСѓСЋС‰РёРј СЃРѕРѕР±С‰РµРЅРёРµРј",
-                        "Р”Р»СЏ РѕС‚РјРµРЅС‹ РѕС‚РїСЂР°РІСЊ 0",
+                        f"Модель: {settings.openai_model}",
+                        "Жду вопрос следующим сообщением",
+                        "Для отмены отправь 0",
                     ],
                 ),
             )
@@ -12784,7 +12871,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 "status_message": status_message,
                 "created_at": now_timestamp(),
             }
-            await safe_event_reply(event, "РќР°РїРёС€Рё РІРѕРїСЂРѕСЃ РґР»СЏ KBR_GPT СЃР»РµРґСѓСЋС‰РёРј СЃРѕРѕР±С‰РµРЅРёРµРј.")
+            await safe_event_reply(event, "Напиши вопрос для KBR_GPT следующим сообщением.")
             return
         await handle_gpt_prompt(event, sender_id, gpt_command.prompt, compact_status=True)
         return
@@ -12809,10 +12896,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     if scan_menu_action in {"pause", "pause_results"}:
         if active_scan_cancel_event and not active_scan_cancel_event.is_set():
             if active_scan_owner_id is not None and event.sender_id != active_scan_owner_id:
-                await safe_event_reply(event, "РџРѕСЃС‚Р°РІРёС‚СЊ scan РЅР° РїР°СѓР·Сѓ РјРѕР¶РµС‚ С‚РѕР»СЊРєРѕ С‚РѕС‚, РєС‚Рѕ РµРіРѕ Р·Р°РїСѓСЃС‚РёР».")
+                await safe_event_reply(event, "Поставить scan на паузу может только тот, кто его запустил.")
                 return
             active_scan_cancel_event.set()
-            reply_text = "РџР°СѓР·Р° scan РїСЂРёРЅСЏС‚Р°. Р—Р°РІРµСЂС€Сѓ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё СЃРѕС…СЂР°РЅСЋ РїСЂРѕРіСЂРµСЃСЃ."
+            reply_text = "Пауза scan принята. Завершу текущего пользователя и сохраню прогресс."
             if scan_menu_action == "pause_results":
                 reply_text = f"{reply_text}\n\n{build_scan_results_text()}"
             await safe_event_reply(event, reply_text)
@@ -12821,23 +12908,23 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 await safe_event_reply(event, build_scan_results_text())
                 await send_latest_dashboard_to_chat(event)
             else:
-                await safe_event_reply(event, "Scan СЃРµР№С‡Р°СЃ РЅРµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ. Р”Р»СЏ РІС‹Р±РѕСЂР° РѕС‚РїСЂР°РІСЊ `scan`.")
+                await safe_event_reply(event, "Scan сейчас не выполняется. Для выбора отправь `scan`.")
         return
 
     if scan_menu_action == "reset":
         if active_scan_cancel_event and not active_scan_cancel_event.is_set():
             if active_scan_owner_id is not None and event.sender_id != active_scan_owner_id:
-                await safe_event_reply(event, "РЎР±СЂРѕСЃРёС‚СЊ Р°РєС‚РёРІРЅС‹Р№ scan РјРѕР¶РµС‚ С‚РѕР»СЊРєРѕ С‚РѕС‚, РєС‚Рѕ РµРіРѕ Р·Р°РїСѓСЃС‚РёР».")
+                await safe_event_reply(event, "Сбросить активный scan может только тот, кто его запустил.")
                 return
             active_scan_reset_requested = True
             active_scan_cancel_event.set()
             clear_scan_checkpoint()
             reset_scan_database()
-            await safe_event_reply(event, "РЎР±СЂРѕСЃ scan РїСЂРёРЅСЏС‚. РћСЃС‚Р°РЅР°РІР»РёРІР°СЋ С‚РµРєСѓС‰РёР№ РѕР±С…РѕРґ Рё РѕС‡РёС‰Р°СЋ СЃРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ Рё SQL Р±Р°Р·Сѓ.")
+            await safe_event_reply(event, "Сброс scan принят. Останавливаю текущий обход и очищаю сохраненный прогресс и SQL базу.")
         else:
             clear_scan_checkpoint()
             reset_scan_database()
-            await safe_event_reply(event, "РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ scan Рё SQL Р±Р°Р·Р° РѕС‡РёС‰РµРЅС‹. РЎС‚Р°СЂС‹Рµ РіРѕС‚РѕРІС‹Рµ РѕС‚С‡РµС‚С‹ РѕСЃС‚Р°РІР»РµРЅС‹.")
+            await safe_event_reply(event, "Сохраненный прогресс scan и SQL база очищены. Старые готовые отчеты оставлены.")
         return
 
     mail2_text = parse_mail2_command(event.raw_text or "")
@@ -12847,12 +12934,12 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             status_message = await safe_event_reply(
                 event,
                 build_process_status(
-                    "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+                    "Mail2 без подписки",
                     MAIL2_STEPS,
                     3,
                     extra_lines=[
-                        "Р–РґСѓ С‚РµРєСЃС‚ СЂР°СЃСЃС‹Р»РєРё СЃР»РµРґСѓСЋС‰РёРј СЃРѕРѕР±С‰РµРЅРёРµРј",
-                        "Р”Р»СЏ РѕС‚РјРµРЅС‹ РѕС‚РїСЂР°РІСЊ: 0 РѕС‚РјРµРЅР°",
+                        "Жду текст рассылки следующим сообщением",
+                        "Для отмены отправь: 0 отмена",
                     ],
                 ),
             )
@@ -12862,7 +12949,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             }
             await safe_event_reply(
                 event,
-                "РџСЂРёС€Р»Рё С‚РµРєСЃС‚, РєРѕС‚РѕСЂС‹Р№ РЅСѓР¶РЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ РІСЃРµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЏРј Р±РµР· РїРѕРґРїРёСЃРєРё РёР· Р±Р°Р·С‹.\n\nРћС‚РјРµРЅР°: `0 РѕС‚РјРµРЅР°`",
+                "Пришли текст, который нужно отправить всем пользователям без подписки из базы.\n\nОтмена: `0 отмена`",
             )
             return
 
@@ -12870,10 +12957,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         status_message = await safe_event_reply(
             event,
             build_process_status(
-                "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+                "Mail2 без подписки",
                 MAIL2_STEPS,
                 1,
-                extra_lines=[f"РўРµРєСЃС‚: {len(mail2_text)} СЃРёРјРІРѕР»РѕРІ"],
+                extra_lines=[f"Текст: {len(mail2_text)} символов"],
             ),
         )
 
@@ -12893,14 +12980,14 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             logging.exception("Mail2 command failed sender_id=%s", sender_id)
             await update_mail2_status(
                 build_process_status(
-                    "Mail2 Р±РµР· РїРѕРґРїРёСЃРєРё",
+                    "Mail2 без подписки",
                     MAIL2_STEPS,
                     len(MAIL2_STEPS),
-                    extra_lines=["Р Р°СЃСЃС‹Р»РєР° Р·Р°РІРµСЂС€РёР»Р°СЃСЊ РѕС€РёР±РєРѕР№", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Рассылка завершилась ошибкой", "Подробности записаны в лог"],
                     failed=True,
                 )
             )
-            await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ /mail2. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.")
+            await safe_event_reply(event, "Не удалось выполнить /mail2. Подробности записаны в лог.")
         finally:
             active_mail2_cancel_event = None
             schedule_scan_auto_resume(scan_interruption)
@@ -12925,9 +13012,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 1,
                 user_id=user_id,
                 extra_lines=[
-                    f"РџСЂРѕРјРѕРєРѕРґ: {promo_code}",
-                    f"Р‘СЋРґР¶РµС‚: {settings.promo_budget_rub}",
-                    f"РЎСѓРјРјР°: {settings.promo_amount_rub}",
+                    f"Промокод: {promo_code}",
+                    f"Бюджет: {settings.promo_budget_rub}",
+                    f"Сумма: {settings.promo_amount_rub}",
                 ],
             ),
         )
@@ -12949,7 +13036,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     PROMO_STEPS,
                     8,
                     user_id=user_id,
-                    extra_lines=["РџСЂРѕРјРѕРєРѕРґ СЃРѕР·РґР°РЅ", "РћС‚РїСЂР°РІР»СЏСЋ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ С‡РµСЂРµР· mail"],
+                    extra_lines=["Промокод создан", "Отправляю пользователю через mail"],
                 )
             )
             mail_result = await send_mail_to_user_in_admin_bot(
@@ -12964,8 +13051,8 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     len(PROMO_STEPS),
                     user_id=user_id,
                     extra_lines=[
-                        f"РџСЂРѕРјРѕРєРѕРґ: {promo_code}",
-                        "РџСЂРѕРјРѕРєРѕРґ СЃРѕР·РґР°РЅ Рё РѕС‚РїСЂР°РІР»РµРЅ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                        f"Промокод: {promo_code}",
+                        "Промокод создан и отправлен пользователю",
                     ],
                     done=True,
                 )
@@ -12979,11 +13066,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     PROMO_STEPS,
                     len(PROMO_STEPS),
                     user_id=user_id,
-                    extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РёР»Рё РѕС‚РїСЂР°РІРёС‚СЊ РїСЂРѕРјРѕРєРѕРґ", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Не удалось создать или отправить промокод", "Подробности записаны в лог"],
                     failed=True,
                 )
             )
-            await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ promo. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.")
+            await safe_event_reply(event, "Не удалось выполнить promo. Подробности записаны в лог.")
         finally:
             schedule_scan_auto_resume(scan_interruption)
         return
@@ -12995,11 +13082,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         status_message = await safe_event_reply(
             event,
             build_process_status(
-                "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                "Mail пользователю",
                 MAIL_STEPS,
                 1,
                 user_id=user_id,
-                extra_lines=[f"РђРґРјРёРЅ-Р±РѕС‚: @{settings.admin_bot_username}", f"РўРµРєСЃС‚: {len(message_text)} СЃРёРјРІРѕР»РѕРІ"],
+                extra_lines=[f"Админ-бот: @{settings.admin_bot_username}", f"Текст: {len(message_text)} символов"],
             )
         )
 
@@ -13016,11 +13103,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             )
             await update_mail_status(
                 build_process_status(
-                    "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                    "Mail пользователю",
                     MAIL_STEPS,
                     len(MAIL_STEPS),
                     user_id=user_id,
-                    extra_lines=["РџРёСЃСЊРјРѕ РѕС‚РїСЂР°РІР»РµРЅРѕ С‡РµСЂРµР· Р°РґРјРёРЅ-Р±РѕС‚", "РС‚РѕРі РѕС‚РїСЂР°РІР»РµРЅ РѕС‚РґРµР»СЊРЅС‹Рј СЃРѕРѕР±С‰РµРЅРёРµРј"],
+                    extra_lines=["Письмо отправлено через админ-бот", "тог отправлен отдельным сообщением"],
                     done=True,
                 )
             )
@@ -13029,11 +13116,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             logging.exception("Admin mail failed for user_id=%s", user_id)
             await update_mail_status(
                 build_process_status(
-                    "Mail РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ",
+                    "Mail пользователю",
                     MAIL_STEPS,
                     len(MAIL_STEPS),
                     user_id=user_id,
-                    extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РІРµСЂС€РёС‚СЊ РѕС‚РїСЂР°РІРєСѓ", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Не удалось завершить отправку", "Подробности записаны в лог"],
                     failed=True,
                 )
             )
@@ -13063,7 +13150,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 1,
                 user_id=wizard_user_id,
                 target=wizard_target,
-                extra_lines=[f"РђРґРјРёРЅ-Р±РѕС‚: @{settings.admin_bot_username}"],
+                extra_lines=[f"Админ-бот: @{settings.admin_bot_username}"],
             )
         )
 
@@ -13109,11 +13196,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     5,
                     user_id=wizard_user_id,
                     target=wizard_target,
-                    extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ РєР°СЂС‚РѕС‡РєСѓ", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Не удалось подготовить карточку", "Подробности записаны в лог"],
                     failed=True,
                 )
             )
-            await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ РґР»СЏ wizard. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ Р»РѕРіРµ.")
+            await safe_event_reply(event, "Не удалось подготовить сообщение для wizard. Подробности в логе.")
         finally:
             schedule_scan_auto_resume(scan_interruption)
         return
@@ -13130,16 +13217,16 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         )
         await request_mail2_stop_for_priority_command(event, f"scan {scan_action}")
         if active_scan_cancel_event and not active_scan_cancel_event.is_set():
-            await safe_event_reply(event, "Scan СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ. РњРѕР¶РЅРѕ РїРѕСЃС‚Р°РІРёС‚СЊ РЅР° РїР°СѓР·Сѓ: `scan pause`.")
+            await safe_event_reply(event, "Scan уже выполняется. Можно поставить на паузу: `scan pause`.")
             return
 
         if scan_action == "new":
             clear_scan_checkpoint()
             reset_scan_database()
         start_text = (
-            "Р—Р°РїСѓСЃРєР°СЋ РЅРѕРІС‹Р№ scan СЃ РїРµСЂРІРѕР№ СЃС‚СЂР°РЅРёС†С‹."
+            "Запускаю новый scan с первой страницы."
             if scan_action == "new"
-            else "РџСЂРѕРґРѕР»Р¶Р°СЋ scan СЃ СЃРѕС…СЂР°РЅРµРЅРЅРѕРіРѕ РјРµСЃС‚Р°. Р•СЃР»Рё checkpoint РїСѓСЃС‚РѕР№, РЅР°С‡РЅСѓ СЃ РїРµСЂРІРѕР№ СЃС‚СЂР°РЅРёС†С‹."
+            else "Продолжаю scan с сохраненного места. Если checkpoint пустой, начну с первой страницы."
         )
         active_scan_cancel_event = asyncio.Event()
         active_scan_owner_id = event.sender_id
@@ -13154,10 +13241,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         progress_message = await safe_event_reply(
             event,
             build_scan_status(
-                f"{start_text} Р“РѕС‚РѕРІР»СЋ Р°РґРјРёРЅ-Р±РѕС‚ Рє РѕР±С…РѕРґСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.",
+                f"{start_text} Готовлю админ-бот к обходу пользователей.",
                 checkpoint_text=format_scan_checkpoint_text(),
             ),
-            buttons=[[Button.inline("РџР°СѓР·Р° scan", data=SCAN_CANCEL_CALLBACK_DATA)]],
+            buttons=[[Button.inline("Пауза scan", data=SCAN_CANCEL_CALLBACK_DATA)]],
         )
 
         async def update_scan_progress(
@@ -13167,7 +13254,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             failed: bool = False,
             paused: bool = False,
         ) -> None:
-            buttons = None if done or failed or paused else [[Button.inline("РџР°СѓР·Р° scan", data=SCAN_CANCEL_CALLBACK_DATA)]]
+            buttons = None if done or failed or paused else [[Button.inline("Пауза scan", data=SCAN_CANCEL_CALLBACK_DATA)]]
             await edit_status_message(
                 progress_message,
                 build_scan_status(
@@ -13187,17 +13274,17 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 progress_interval_seconds=progress_interval_seconds,
                 cancel_event=active_scan_cancel_event,
             )
-            if "РЅР° РїР°СѓР·Рµ" in result.casefold():
-                await update_scan_progress("Scan РЅР° РїР°СѓР·Рµ. РџСЂРѕРіСЂРµСЃСЃ СЃРѕС…СЂР°РЅРµРЅ, С‡Р°СЃС‚РёС‡РЅС‹Р№ РѕС‚С‡РµС‚ РѕС‚РїСЂР°РІР»РµРЅ РЅРёР¶Рµ.", paused=True)
-            elif "СЃР±СЂРѕС€РµРЅ" in result.casefold():
-                await update_scan_progress("Scan СЃР±СЂРѕС€РµРЅ. РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ РѕС‡РёС‰РµРЅ.", done=True)
+            if "на паузе" in result.casefold():
+                await update_scan_progress("Scan на паузе. Прогресс сохранен, частичный отчет отправлен ниже.", paused=True)
+            elif "сброшен" in result.casefold():
+                await update_scan_progress("Scan сброшен. Сохраненный прогресс очищен.", done=True)
             else:
-                await update_scan_progress("Scan Р·Р°РІРµСЂС€РµРЅ. РС‚РѕРіРѕРІС‹Р№ РѕС‚С‡РµС‚ РіРѕС‚РѕРІ Рё РѕС‚РїСЂР°РІР»РµРЅ РЅРёР¶Рµ.", done=True)
+                await update_scan_progress("Scan завершен. тоговый отчет готов и отправлен ниже.", done=True)
             await safe_event_reply(event, result)
             await send_latest_dashboard_to_chat(event)
         except Exception:
             logging.exception("Admin scan failed")
-            await update_scan_progress("Scan Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.", failed=True)
+            await update_scan_progress("Scan завершился с ошибкой. Подробности записаны в лог.", failed=True)
             await safe_event_reply(event, "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u044c scan. \u041f\u043e\u0434\u0440\u043e\u0431\u043d\u043e\u0441\u0442\u0438 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u044b \u0432 \u043b\u043e\u0433.")
         finally:
             active_scan_cancel_event = None
@@ -13221,11 +13308,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         status_message = await safe_event_reply(
             event,
             build_process_status(
-                "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                "Info пользователя",
                 INFO_STEPS,
                 1,
                 user_id=user_id,
-                extra_lines=[f"РђРґРјРёРЅ-Р±РѕС‚: @{settings.admin_bot_username}"],
+                extra_lines=[f"Админ-бот: @{settings.admin_bot_username}"],
             )
         )
 
@@ -13237,11 +13324,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             if info_lookup.use_database:
                 await update_info_status(
                     build_process_status(
-                        "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                        "Info пользователя",
                         INFO_STEPS,
                         len(INFO_STEPS),
                         user_id=user_id,
-                        extra_lines=["Р§РёС‚Р°СЋ SQLite Р±Р°Р·Сѓ", "РђРґРјРёРЅ-Р±РѕС‚ РЅРµ С‚СЂРѕРіР°СЋ"],
+                        extra_lines=["Читаю SQLite базу", "Админ-бот не трогаю"],
                         done=True,
                     )
                 )
@@ -13249,7 +13336,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 if not record:
                     await safe_event_reply(
                         event,
-                        "Р’ Р±Р°Р·Рµ РЅРµС‚ С‚Р°РєРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ. Р—Р°РїСѓСЃС‚Рё `scan new` РёР»Рё РїРѕРїСЂРѕР±СѓР№ Р±РµР· `-b`, С‡С‚РѕР±С‹ РёСЃРєР°С‚СЊ С‡РµСЂРµР· Р°РґРјРёРЅ-Р±РѕС‚Р°.",
+                        "В базе нет такого пользователя. Запусти `scan new` или попробуй без `-b`, чтобы искать через админ-бота.",
                     )
                     return
                 result = format_subscription_info_from_record_html(record)
@@ -13262,11 +13349,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
             await update_info_status(
                 build_process_status(
-                    "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                    "Info пользователя",
                     INFO_STEPS,
                     len(INFO_STEPS),
                     user_id=user_id,
-                    extra_lines=["РџРѕР»РЅС‹Р№ РѕС‚С‡РµС‚ СЃРѕР±СЂР°РЅ", "РС‚РѕРі РѕС‚РїСЂР°РІР»РµРЅ РѕС‚РґРµР»СЊРЅС‹Рј СЃРѕРѕР±С‰РµРЅРёРµРј"],
+                    extra_lines=["Полный отчет собран", "тог отправлен отдельным сообщением"],
                     done=True,
                 )
             )
@@ -13275,11 +13362,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             logging.exception("Info failed for query=%s database=%s", user_id, info_lookup.use_database)
             await update_info_status(
                 build_process_status(
-                    "Info РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                    "Info пользователя",
                     INFO_STEPS,
                     len(INFO_STEPS),
                     user_id=user_id,
-                    extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ РїРѕР»РЅС‹Р№ РѕС‚С‡РµС‚", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Не удалось получить полный отчет", "Подробности записаны в лог"],
                     failed=True,
                 )
             )
@@ -13302,11 +13389,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         status_message = await safe_event_reply(
             event,
             build_process_status(
-                "РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                "Поиск пользователя",
                 SEARCH_STEPS,
                 1,
                 user_id=user_id,
-                extra_lines=[f"РђРґРјРёРЅ-Р±РѕС‚: @{settings.admin_bot_username}"],
+                extra_lines=[f"Админ-бот: @{settings.admin_bot_username}"],
             )
         )
 
@@ -13318,11 +13405,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             if help_lookup.use_database:
                 await update_help_status(
                     build_process_status(
-                        "РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                        "Поиск пользователя",
                         SEARCH_STEPS,
                         len(SEARCH_STEPS),
                         user_id=user_id,
-                        extra_lines=["Р§РёС‚Р°СЋ SQLite Р±Р°Р·Сѓ", "РђРґРјРёРЅ-Р±РѕС‚ РЅРµ С‚СЂРѕРіР°СЋ"],
+                        extra_lines=["Читаю SQLite базу", "Админ-бот не трогаю"],
                         done=True,
                     )
                 )
@@ -13330,7 +13417,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 if not record:
                     await safe_event_reply(
                         event,
-                        "Р’ Р±Р°Р·Рµ РЅРµС‚ С‚Р°РєРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ. Р—Р°РїСѓСЃС‚Рё `scan new` РёР»Рё РїРѕРїСЂРѕР±СѓР№ Р±РµР· `-b`, С‡С‚РѕР±С‹ РёСЃРєР°С‚СЊ С‡РµСЂРµР· Р°РґРјРёРЅ-Р±РѕС‚Р°.",
+                        "В базе нет такого пользователя. Запусти `scan new` или попробуй без `-b`, чтобы искать через админ-бота.",
                     )
                     return
                 result = format_user_summary_from_record(record)
@@ -13343,11 +13430,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 )
             await update_help_status(
                 build_process_status(
-                    "РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                    "Поиск пользователя",
                     SEARCH_STEPS,
                     len(SEARCH_STEPS),
                     user_id=user_id,
-                    extra_lines=["РљРѕСЂРѕС‚РєР°СЏ РєР°СЂС‚РѕС‡РєР° РіРѕС‚РѕРІР°", "РС‚РѕРі РѕС‚РїСЂР°РІР»РµРЅ РѕС‚РґРµР»СЊРЅС‹Рј СЃРѕРѕР±С‰РµРЅРёРµРј"],
+                    extra_lines=["Короткая карточка готова", "тог отправлен отдельным сообщением"],
                     done=True,
                 )
             )
@@ -13356,11 +13443,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             logging.exception("Help search failed for query=%s database=%s", user_id, help_lookup.use_database)
             await update_help_status(
                 build_process_status(
-                    "РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
+                    "Поиск пользователя",
                     SEARCH_STEPS,
                     len(SEARCH_STEPS),
                     user_id=user_id,
-                    extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°Р№С‚Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                    extra_lines=["Не удалось найти пользователя", "Подробности записаны в лог"],
                     failed=True,
                 )
             )
@@ -13386,23 +13473,23 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     event,
                     assistant_compact_reply(
                         "Короткий ответ не распознан.",
-                        "Используйте полную команду или сначала откройте нужный сценарий.",
+                        "спользуйте полную команду или сначала откройте нужный сценарий.",
                     ),
                 )
             return
         try:
             if await forward_problem_report_to_wizard(event, sender, event.raw_text or ""):
                 log_action_event("route", sender_id=sender_id, route="auto_problem_report", text=raw_text)
-                await safe_event_reply(event, "РџСЂРѕР±Р»РµРјСѓ РїСЂРёРЅСЏР». РљР°СЂС‚РѕС‡РєСѓ РѕС‚РїСЂР°РІРёР» РІ wizard РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё.")
+                await safe_event_reply(event, "Проблему принял. Карточку отправил в wizard для обработки.")
                 return
         except Exception:
             logging.exception("Failed to auto-forward problem report sender_id=%s", sender_id)
             await safe_event_reply(
                 event,
-                "РќРµ СѓРґР°Р»РѕСЃСЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РѕС‚РїСЂР°РІРёС‚СЊ РїСЂРѕР±Р»РµРјСѓ РІ wizard. РџРѕРїСЂРѕР±СѓР№ РµС‰Рµ СЂР°Р· РёР»Рё РѕС‚РїСЂР°РІСЊ /wizard <id>.",
+                "Не удалось автоматически отправить проблему в wizard. Попробуй еще раз или отправь /wizard <id>.",
             )
             return
-        if "scan" in lowered_text or "СЃРєР°РЅ" in lowered_text:
+        if "scan" in lowered_text or "скан" in lowered_text:
             log_action_event("route", sender_id=sender_id, route="scan_keyword")
             active_scan_menu_owner_id = event.sender_id
             await safe_event_reply(event, build_scan_menu_text_fast(), buttons=build_scan_menu_buttons())
