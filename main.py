@@ -507,6 +507,8 @@ pending_smart_actions: dict[int, dict[str, object]] = {}
 pending_support_requests: dict[int, dict[str, object]] = {}
 pending_direct_mail_requests: dict[int, dict[str, object]] = {}
 active_gpt_requests: dict[int, dict[str, object]] = {}
+gpt_waiting_request_ids: list[str] = []
+gpt_response_cache: dict[str, tuple[float, str]] = {}
 gpt_chat_sessions: dict[int, str] = {}
 gpt_request_lock = asyncio.Lock()
 ProgressCallback = Callable[[str], Awaitable[None]]
@@ -547,6 +549,9 @@ SCAN_CHECKPOINT_USER_INTERVAL = max(1, env_int("SCAN_CHECKPOINT_USER_INTERVAL", 
 SCAN_CHECKPOINT_MIN_INTERVAL_SECONDS = max(2.0, env_float("SCAN_CHECKPOINT_MIN_INTERVAL_SECONDS", 10.0))
 STATUS_COMPACT_MODE = env_bool("STATUS_COMPACT_MODE", True)
 ACTION_LOG_PREVIEW_LIMIT = max(120, env_int("ACTION_LOG_PREVIEW_LIMIT", 1200))
+GPT_CACHE_TTL_SECONDS = max(0.0, env_float("GPT_CACHE_TTL_SECONDS", 1800.0))
+GPT_CACHE_MAX_ITEMS = max(0, env_int("GPT_CACHE_MAX_ITEMS", 300))
+GPT_QUEUE_WAIT_SECONDS_PER_REQUEST = max(5.0, env_float("GPT_QUEUE_WAIT_SECONDS_PER_REQUEST", 20.0))
 
 
 class ScanCancelledError(Exception):
@@ -1086,7 +1091,7 @@ def build_process_status(
 ) -> str:
     title = sanitize_outgoing_text(title)
     steps = [sanitize_outgoing_text(step) for step in steps]
-    status = "ОШБКА" if failed else "ГОТОВО" if done else "В РАБОТЕ"
+    status = "ОШИБКА" if failed else "ГОТОВО" if done else "В РАБОТЕ"
     total_steps = max(len(steps), 1)
     current_step = max(1, min(active_step, total_steps))
     done_units = total_steps if done else max(current_step - 1 if failed else current_step, 0)
@@ -1179,7 +1184,7 @@ async def admin_flow_context(
 def is_final_status_text(text: str) -> bool:
     markers = (
         "СТАТУС: ГОТОВО",
-        "СТАТУС: ОШБКА",
+        "СТАТУС: ОШИБКА",
         "СТАТУС: ПАУЗА",
         "Заявка принята и передана в поддержку",
         "Заявку принял и передал в поддержку",
@@ -2501,13 +2506,13 @@ PROBLEM_REPORT_KEYWORDS = (
     "не приход",
     "завис",
     "сломан",
-    "РєР»СЋС‡",
+    "ключ",
     "подписк",
     "vpn",
 )
 
 SUPPORT_KEY_ISSUE_KEYWORDS = (
-    "РєР»СЋС‡",
+    "ключ",
     "key",
     "конфиг",
     "конфигурац",
@@ -2528,7 +2533,7 @@ SUPPORT_PAYMENT_ISSUE_KEYWORDS = (
 )
 
 SUPPORT_VAGUE_ISSUE_ROOTS = (
-    "РєР»СЋС‡",
+    "ключ",
     "проблем",
     "оплат",
     "платеж",
@@ -2707,6 +2712,68 @@ def support_intake_message() -> str:
             "Если вопрос общий, просто напишите его обычным сообщением.",
         ],
         "Если нужен человек, напишите: «позови оператора».",
+    )
+
+
+def assistant_capabilities_message() -> str:
+    return assistant_list_reply(
+        "Что я умею:",
+        [
+            "Помочь подключить VPN и найти ID в разделе «Профиль».",
+            "Разобрать проблему с ключом, оплатой, скоростью или подключением.",
+            "Если вопрос простой, отвечаю сразу без ожидания KBR_GPT.",
+            "Если нужна поддержка, подготовлю обращение или дам контакт оператора.",
+            "Для запросников доступны команды: пользователи, подписки, wizard, рассылки, промокоды, scan, логи и dashboard.",
+        ],
+        "Можно писать обычными словами, например: «покажи подписки юзера 1232» или «напиши пользователю 1231 привет».",
+    )
+
+
+def payment_help_message() -> str:
+    return assistant_list_reply(
+        "Если платеж не прошел:",
+        [
+            "1) Проверьте, списались ли деньги в банке.",
+            "2) Если деньги списались, подождите несколько минут.",
+            "3) Пришлите ID из «Профиль», сумму и примерное время оплаты.",
+        ],
+        "Я проверю данные и передам обращение в поддержку, если оплата не подтянулась.",
+    )
+
+
+def key_problem_help_message() -> str:
+    return assistant_list_reply(
+        "Если ключ не работает:",
+        [
+            "1) Пришлите ID из раздела «Профиль».",
+            "2) Напишите, что именно происходит: не подключается, нет интернета, ошибка приложения или низкая скорость.",
+            "3) Если подписок несколько, уточните, с какой проблема.",
+        ],
+        "После этого я смогу проверить подписку и составить точное обращение.",
+    )
+
+
+def speed_problem_help_message() -> str:
+    return assistant_list_reply(
+        "Если VPN работает медленно:",
+        [
+            "1) Переподключите VPN.",
+            "2) Попробуйте другую сеть: Wi-Fi или мобильный интернет.",
+            "3) Пришлите ID из «Профиль», город/оператора и где именно низкая скорость.",
+        ],
+        "Если проблема подтвердится, передам данные в поддержку.",
+    )
+
+
+def subscription_help_message() -> str:
+    return assistant_list_reply(
+        "Как проверить подписку:",
+        [
+            "1) Откройте VPN_KBR_BOT.",
+            "2) Перейдите в «Профиль».",
+            "3) Там видны ваш ID, подписки и сроки.",
+        ],
+        "Если хотите, пришлите свой ID, и я помогу разобраться по вашему профилю.",
     )
 
 
@@ -4476,8 +4543,113 @@ def unknown_slash_command_message() -> str:
     )
 
 
-def gpt_queue_message() -> str:
-    return assistant_compact_reply("Запрос в очереди.", "Как только освобожусь, сразу начну готовить ответ.")
+def gpt_queue_message(position: int = 1, estimated_wait_seconds: float = 0.0) -> str:
+    position = max(1, int(position or 1))
+    wait_seconds = max(0, int(round(estimated_wait_seconds or 0)))
+    detail = f"Позиция: {position}."
+    if wait_seconds > 0:
+        detail += f" Примерное ожидание: {wait_seconds} сек."
+    detail += " Запрос выполнится автоматически."
+    return assistant_compact_reply("Запрос в очереди.", detail)
+
+
+def normalize_gpt_cache_key(prompt: str) -> str:
+    cleaned = re.sub(r"\s+", " ", sanitize_outgoing_text(prompt).strip().casefold())
+    return cleaned[:500]
+
+
+def get_cached_gpt_answer(prompt: str) -> str | None:
+    if GPT_CACHE_TTL_SECONDS <= 0 or GPT_CACHE_MAX_ITEMS <= 0:
+        return None
+    key = normalize_gpt_cache_key(prompt)
+    if not key:
+        return None
+    cached = gpt_response_cache.get(key)
+    if not cached:
+        return None
+    created_at, answer = cached
+    if time.monotonic() - created_at > GPT_CACHE_TTL_SECONDS:
+        gpt_response_cache.pop(key, None)
+        return None
+    return answer
+
+
+def store_cached_gpt_answer(prompt: str, answer: str) -> None:
+    if GPT_CACHE_TTL_SECONDS <= 0 or GPT_CACHE_MAX_ITEMS <= 0:
+        return
+    key = normalize_gpt_cache_key(prompt)
+    if not key:
+        return
+    gpt_response_cache[key] = (time.monotonic(), sanitize_outgoing_text(answer).strip())
+    while len(gpt_response_cache) > GPT_CACHE_MAX_ITEMS:
+        oldest_key = min(gpt_response_cache, key=lambda cache_key: gpt_response_cache[cache_key][0])
+        gpt_response_cache.pop(oldest_key, None)
+
+
+def local_gpt_answer(prompt: str) -> str | None:
+    cleaned = sanitize_outgoing_text(prompt).strip()
+    lowered = cleaned.casefold()
+    if not cleaned:
+        return None
+
+    intent = detect_non_requester_intent(cleaned)
+    if any(phrase in lowered for phrase in ("что ты умеешь", "что умеешь", "команды", "как пользоваться", "помощь", "help")):
+        return assistant_capabilities_message()
+    if intent == "operator":
+        return support_operator_contact_text()
+    if intent == "vpn_setup_help":
+        return vpn_setup_help_message()
+    if intent == "profile_id_help":
+        return profile_id_help_message()
+    if any(word in lowered for word in ("оплата", "оплатил", "платеж", "платёж", "деньги", "чек", "не прошла оплата")):
+        return payment_help_message()
+    if any(phrase in lowered for phrase in ("ключ не работает", "не работает ключ", "нет интернета", "не подключается", "vpn не работает", "впн не работает")):
+        return key_problem_help_message()
+    if any(word in lowered for word in ("медленно", "скорость", "тормозит", "пинг", "лагает")):
+        return speed_problem_help_message()
+    if any(word in lowered for word in ("подписка", "подписку", "продлить", "истекает", "закончилась")):
+        return subscription_help_message()
+    if any(phrase in lowered for phrase in ("админ сайт", "админка", "dashboard", "дашборд", "панель")):
+        return assistant_compact_reply(
+            "Админ-панель открывается командой `/adminsite`.",
+            "Там можно смотреть пользователей, подписки, статистику, логи и выполнять действия.",
+        )
+    if any(phrase in lowered for phrase in ("как отправить сообщение", "написать пользователю", "отправить пользователю")):
+        return assistant_compact_reply(
+            "Сообщение пользователю можно отправить так:",
+            "`/send 1231 текст сообщения` или обычными словами: «напиши пользователю 1231 привет».",
+        )
+    if any(phrase in lowered for phrase in ("как отправить в wizard", "отправить в wizard", "отправь в визард", "отправь в визадр")):
+        return assistant_compact_reply(
+            "Карточка в wizard отправляется так:",
+            "`/wizard 1231` или обычными словами: «отправь в wizard юзера 1231 с проблемой не работает ключ».",
+        )
+    if any(phrase in lowered for phrase in ("промокод", "промо", "купон")):
+        return assistant_compact_reply(
+            "Промокод можно создать командой `/coupon 1231`.",
+            "Бот создаст код вида `1231nPromo`, дождется подтверждения и отправит его пользователю.",
+        )
+    if any(phrase in lowered for phrase in ("scan", "скан", "сканирование")):
+        return assistant_compact_reply(
+            "Scan управляется из меню `scan`.",
+            "Доступно: новый scan, продолжить, пауза, сброс и просмотр результатов.",
+        )
+    if intent == "thanks":
+        return support_thanks_message()
+
+    words_count = len(re.findall(r"\S+", lowered))
+    if intent == "greeting":
+        return requester_greeting_message()
+    if words_count <= 5 and any(phrase in lowered for phrase in ("как дела", "как ты", "что нового")):
+        return assistant_compact_reply("Все хорошо, спасибо.", "Чем могу помочь?")
+    if words_count <= 4 and lowered in {"нормально", "норм", "хорошо", "понял", "ясно", "ок", "окей"}:
+        return assistant_compact_reply("Отлично.", "Если понадобится помощь, напишите вопрос.")
+    if words_count <= 4 and lowered in {"ну", "не понял", "что дальше", "дальше"}:
+        return assistant_compact_reply(
+            "Могу помочь.",
+            "Напишите вопрос полностью или пришлите ID из раздела «Профиль», если проблема по VPN.",
+        )
+    return None
 
 
 def parse_scan_command(text: str) -> str | None:
@@ -4713,7 +4885,7 @@ def is_navigation_button_text(text: str) -> bool:
         "\u0432\u043f\u0435\u0440\u0435\u0434",
         "\u043e\u0442\u043c\u0435\u043d\u0438\u0442\u044c",
     )
-    return any(word and word in lowered for word in words) or text.strip() in {"вћЎ", "вћЎпёЏ", "В»", ">>", "вЏ­"}
+    return any(word and word in lowered for word in words) or text.strip() in {"➡", "➡️", "»", ">>", "⏭"}
 
 
 def extract_user_buttons(message) -> list[dict[str, int | str]]:
@@ -4741,7 +4913,7 @@ def extract_all_buttons(message) -> list[dict[str, int | str]]:
 
 
 def get_back_page_button(message) -> dict[str, int | str] | None:
-    candidates = {"в¬…", "в¬…пёЏ", "В«", "<<", "вЏ®"}
+    candidates = {"⬅", "⬅️", "«", "<<", "⏮"}
     tokens = (
         settings.back_button_text.casefold(),
         settings.cancel_button_text.casefold(),
@@ -4771,7 +4943,7 @@ def score_users_menu_button(text: str) -> int:
     score = 0
     if any(token in lowered for token in ("польз", "user", "users", "клиент", "абонент", "участ")):
         score += 30
-    if any(symbol in text for symbol in ("рџ¤", "рџҐ", "рџ§", "рџ™Ќ")):
+    if any(symbol in text for symbol in ("👤", "👥", "🧑", "🙍")):
         score += 10
     if re.search(r"\d{1,20}", text):
         score += 2
@@ -4799,7 +4971,7 @@ def get_statistics_menu_button(message) -> dict[str, int | str] | None:
         score = 0
         if "стат" in lowered or "stat" in lowered or "аналит" in lowered:
             score += 40
-        if any(symbol in text for symbol in ("рџ“Љ", "рџ“€", "рџ“‰", "рџ§ѕ")):
+        if any(symbol in text for symbol in ("📊", "📈", "📉", "🧾")):
             score += 10
         if is_navigation_button_text(text):
             score -= 100
@@ -11814,16 +11986,36 @@ async def handle_gpt_prompt(
         await safe_event_reply(event, assistant_compact_reply("Напишите вопрос.", "Я сразу начну готовить ответ."))
         return
 
-    if sender_id in active_gpt_requests:
-        log_action_event("gpt_request_rejected_busy", sender_id=sender_id, chat_id=getattr(event, "chat_id", None))
-        busy_text = assistant_compact_reply(
-            "Предыдущий запрос ещё в работе.",
-            "Дождитесь ответа на него, потом отправьте следующий вопрос.",
+    local_answer = local_gpt_answer(prompt)
+    if local_answer:
+        log_action_event(
+            "gpt_request_local_answer",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            prompt=prompt,
         )
         if status_message:
-            await edit_status_message(status_message, busy_text, force=True)
+            edited = await edit_status_message(status_message, local_answer, force=True)
+            if not edited:
+                await safe_event_reply(event, local_answer)
         else:
-            await safe_event_reply(event, busy_text)
+            await safe_event_reply(event, local_answer)
+        return
+
+    cached_answer = get_cached_gpt_answer(prompt)
+    if cached_answer:
+        log_action_event(
+            "gpt_request_cache_hit",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            prompt=prompt,
+        )
+        if status_message:
+            edited = await edit_status_message(status_message, cached_answer, force=True)
+            if not edited:
+                await safe_event_reply(event, cached_answer)
+        else:
+            await safe_event_reply(event, cached_answer)
         return
 
     if status_message is None:
@@ -11893,33 +12085,54 @@ async def handle_gpt_prompt(
         return
 
     previous_response_id = gpt_chat_sessions.get(sender_id)
+    request_id = uuid.uuid4().hex
     if gpt_request_lock.locked():
+        gpt_waiting_request_ids.append(request_id)
+        queue_position = len(gpt_waiting_request_ids)
+        estimated_wait = queue_position * GPT_QUEUE_WAIT_SECONDS_PER_REQUEST
+        pending_gpt_requests[sender_id] = {
+            "request_id": request_id,
+            "stage": "queue",
+            "created_at": now_timestamp(),
+            "position": queue_position,
+            "prompt": prompt[:200],
+        }
         log_action_event(
             "gpt_request_queued",
             sender_id=sender_id,
             chat_id=getattr(event, "chat_id", None),
             previous_response=bool(previous_response_id),
+            request_id=request_id,
+            position=queue_position,
+            estimated_wait_seconds=int(round(estimated_wait)),
         )
         if compact_status:
-            await update_gpt_status(gpt_queue_message(), force=True)
+            await update_gpt_status(gpt_queue_message(queue_position, estimated_wait), force=True)
         else:
             await update_gpt_status(
                 build_process_status(
                     "KBR_GPT",
                     GPT_STEPS,
                     1,
-                    extra_lines=["Запрос поставлен в очередь", "Жду освобождения текущего ответа"],
+                    extra_lines=[
+                        f"Запрос поставлен в очередь: позиция {queue_position}",
+                        f"Примерное ожидание: {int(round(estimated_wait))} сек",
+                    ],
                 ),
                 force=True,
             )
 
     async with gpt_request_lock:
+        if request_id in gpt_waiting_request_ids:
+            gpt_waiting_request_ids.remove(request_id)
+        pending_gpt_requests.pop(sender_id, None)
         request_state = {
             "stage": "request",
             "user_id": "-",
             "created_at": now_timestamp(),
             "canceled": False,
             "suppress_output": False,
+            "request_id": request_id,
         }
         active_gpt_requests[sender_id] = request_state
         log_action_event(
@@ -12059,6 +12272,7 @@ async def handle_gpt_prompt(
                 response_id=response_id,
                 answer_length=len(answer_text),
             )
+            store_cached_gpt_answer(prompt, answer_text)
             if compact_status:
                 await update_gpt_status(assistant_compact_reply("Ответ готов.", "Отправляю его в чат."), force=True)
             else:
@@ -12195,7 +12409,11 @@ async def handle_gpt_prompt(
                 "gpt_request_finish",
                 sender_id=sender_id,
                 chat_id=getattr(event, "chat_id", None),
+                request_id=request_id,
             )
+            if request_id in gpt_waiting_request_ids:
+                gpt_waiting_request_ids.remove(request_id)
+            pending_gpt_requests.pop(sender_id, None)
             active_gpt_requests.pop(sender_id, None)
 
 
@@ -12247,8 +12465,9 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
         changed = count > 0
         await event.answer(f"Mail pending очищено: {count}.", alert=False)
     elif data == POC_CLEAR_GPT_PENDING_CALLBACK_DATA:
-        count = len(pending_gpt_requests)
+        count = len(pending_gpt_requests) + len(gpt_waiting_request_ids)
         pending_gpt_requests.clear()
+        gpt_waiting_request_ids.clear()
         changed = count > 0
         await event.answer(f"GPT pending очищено: {count}.", alert=False)
     elif data == b"poc:clear_smart_pending":
@@ -12262,12 +12481,14 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
             + len(pending_mail2_requests)
             + len(pending_direct_mail_requests)
             + len(pending_gpt_requests)
+            + len(gpt_waiting_request_ids)
             + len(pending_smart_actions)
         )
         pending_wizard_requests.clear()
         pending_mail2_requests.clear()
         pending_direct_mail_requests.clear()
         pending_gpt_requests.clear()
+        gpt_waiting_request_ids.clear()
         pending_smart_actions.clear()
         changed = count > 0
         await event.answer(f"Pending очищено: {count}.", alert=False)
