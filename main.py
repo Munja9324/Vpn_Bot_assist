@@ -743,10 +743,67 @@ SMART_STEPS = [
 SUPPORT_OPERATOR_USERNAME = (os.getenv("SUPPORT_OPERATOR_USERNAME", "Aloneinthepluto").strip().lstrip("@") or "Aloneinthepluto")
 VIRTUAL_ASSISTANT_NAME = "VPN_KBR"
 VIRTUAL_ASSISTANT_INTRO = f"Я виртуальный помощник {VIRTUAL_ASSISTANT_NAME}."
+MOJIBAKE_MARKERS = (
+    "Рџ",
+    "РЎ",
+    "Рў",
+    "РЏ",
+    "Р§",
+    "Рќ",
+    "Рђ",
+    "РЇ",
+    "СЂ",
+    "СЃ",
+    "С‚",
+    "СЏ",
+    "вЂ",
+)
+
+
+def cyrillic_letters_count(text: str) -> int:
+    return sum(1 for char in text if ("А" <= char <= "я") or char in {"Ё", "ё"})
+
+
+def mojibake_score(text: str) -> int:
+    return sum(text.count(marker) for marker in MOJIBAKE_MARKERS)
+
+
+def looks_like_mojibake_text(text: str) -> bool:
+    sample = str(text or "")
+    return mojibake_score(sample) >= 2 or "Р§РµРј" in sample or "вЂ”" in sample
+
+
+def repair_mojibake_text(text: str) -> str:
+    original = str(text or "")
+    if not original or not looks_like_mojibake_text(original):
+        return original
+
+    candidates = [original]
+    for encoding in ("cp1251", "latin1"):
+        try:
+            candidate = original.encode(encoding, errors="ignore").decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+        if candidate:
+            candidates.append(candidate)
+
+    best = original
+    best_value = (cyrillic_letters_count(original) * 2) - (mojibake_score(original) * 5)
+    for candidate in candidates[1:]:
+        value = (cyrillic_letters_count(candidate) * 2) - (mojibake_score(candidate) * 5)
+        if value > best_value:
+            best = candidate
+            best_value = value
+    return best
+
+
+def sanitize_outgoing_text(text: str) -> str:
+    repaired = repair_mojibake_text(str(text or ""))
+    return repaired.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def assistant_user_message(text: str) -> str:
-    body = (text or "").strip()
+    body = sanitize_outgoing_text(text).strip()
     if not body:
         return VIRTUAL_ASSISTANT_INTRO
     if body.startswith(VIRTUAL_ASSISTANT_INTRO):
@@ -798,6 +855,14 @@ def gpt_retry_message(wait_seconds: float) -> str:
     )
 
 
+def gpt_timeout_wait_message(wait_seconds: float) -> str:
+    seconds = max(1, int(round(wait_seconds)))
+    return assistant_compact_reply(
+        "Ожидание KBR_GPT.",
+        f"Таймаут ответа. Повторю запрос через {seconds} сек.",
+    )
+
+
 def gpt_unavailable_message() -> str:
     return assistant_compact_reply("Сервис не настроен.", "Ответить сейчас не смогу.")
 
@@ -815,15 +880,23 @@ def classify_gpt_failure_reason(error_text: str) -> str:
         return "missing_key"
     if "rate limit" in lowered or "too many requests" in lowered or "api error 429" in lowered:
         return "rate_limit"
+    if "only accessible over https" in lowered or ("http error 403" in lowered and "openai" in lowered):
+        return "proxy_https"
     if "tcp_connect_failed" in lowered:
         return "tcp_blocked"
     if "getaddrinfo failed" in lowered or "name or service not known" in lowered or "temporary failure in name resolution" in lowered:
         return "dns"
+    if "remote end closed connection without response" in lowered:
+        return "connection"
     if "openai connection error" in lowered or "urlopen error" in lowered:
         return "network"
     if "timed out" in lowered or "timeout" in lowered:
         return "timeout"
     return "unknown"
+
+
+def is_timeout_error_text(error_text: str) -> bool:
+    return classify_gpt_failure_reason(error_text) == "timeout"
 
 
 def gpt_failed_message(error_text: str = "") -> str:
@@ -838,19 +911,29 @@ def gpt_failed_message(error_text: str = "") -> str:
             "KBR_GPT временно перегружен.",
             "Сейчас уперлись в лимит запросов. Попробуйте чуть позже.",
         )
+    if reason == "proxy_https":
+        return assistant_compact_reply(
+            "Ошибка соединения KBR_GPT.",
+            "Запрос дошел до OpenAI, но прокси или маршрут вернул ошибку HTTPS. Проверьте xray и OPENAI_PROXY_URL.",
+        )
     if reason == "dns":
         return assistant_compact_reply(
-            "KBR_GPT временно недоступен.",
+            "Ошибка соединения KBR_GPT.",
             "Сейчас проблема с DNS или доступом к сети на сервере.",
         )
     if reason == "tcp_blocked":
         return assistant_compact_reply(
-            "KBR_GPT временно недоступен.",
+            "Ошибка соединения KBR_GPT.",
             "DNS работает, но сервер не может открыть HTTPS-соединение с OpenAI. Проверьте xray или прокси.",
+        )
+    if reason == "connection":
+        return assistant_compact_reply(
+            "Ошибка соединения KBR_GPT.",
+            "Соединение с OpenAI оборвалось во время ответа. Попробуйте повторить запрос через несколько секунд.",
         )
     if reason == "network":
         return assistant_compact_reply(
-            "KBR_GPT временно недоступен.",
+            "Ошибка соединения KBR_GPT.",
             "Сейчас проблема с подключением сервера к OpenAI.",
         )
     if reason == "timeout":
@@ -858,7 +941,7 @@ def gpt_failed_message(error_text: str = "") -> str:
             "KBR_GPT отвечает слишком долго.",
             "Попробуйте повторить запрос чуть позже.",
         )
-    return assistant_compact_reply("Ответ пока не получен.", "Попробуйте повторить запрос чуть позже.")
+    return assistant_compact_reply("Ошибка KBR_GPT.", "Подробности записаны в лог. Попробуйте повторить запрос чуть позже.")
 
 
 def gpt_escalated_message() -> str:
@@ -938,6 +1021,8 @@ def build_process_status(
     done: bool = False,
     failed: bool = False,
 ) -> str:
+    title = sanitize_outgoing_text(title)
+    steps = [sanitize_outgoing_text(step) for step in steps]
     status = "ОШИБКА" if failed else "ГОТОВО" if done else "В РАБОТЕ"
     total_steps = max(len(steps), 1)
     current_step = max(1, min(active_step, total_steps))
@@ -959,8 +1044,8 @@ def build_process_status(
         step_text = steps[current_step - 1] if steps else title
         lines.append(f"Действие: {step_text}")
         if extra_lines:
-            lines.extend(str(line) for line in extra_lines if str(line).strip())
-    return "\n".join(lines)
+            lines.extend(sanitize_outgoing_text(str(line)) for line in extra_lines if str(line).strip())
+    return sanitize_outgoing_text("\n".join(lines))
 
 
 def active_admin_flow_text() -> str:
@@ -1098,6 +1183,7 @@ def extract_scan_position(text: str) -> tuple[int, int] | None:
 async def edit_status_message(message, text: str, *, buttons=None, parse_mode=None, force: bool = False) -> bool:
     if not message:
         return False
+    text = sanitize_outgoing_text(text)
     key = int(getattr(message, "id", 0) or id(message))
     now_monotonic = loop.time()
     last_at, last_text = status_edit_state.get(key, (0.0, ""))
@@ -1161,7 +1247,9 @@ async def edit_status_message(message, text: str, *, buttons=None, parse_mode=No
 
 
 async def safe_event_reply(event, *args, **kwargs):
-    text_arg = args[0] if args and isinstance(args[0], str) else ""
+    text_arg = sanitize_outgoing_text(args[0]) if args and isinstance(args[0], str) else ""
+    if args and isinstance(args[0], str):
+        args = (text_arg, *args[1:])
     if args and isinstance(args[0], str) and len(args[0]) > TELEGRAM_SAFE_TEXT_LIMIT and "file" not in kwargs:
         log_action_event(
             "reply",
@@ -1324,6 +1412,7 @@ def startup_cleanup() -> dict[str, int]:
 
 
 async def reply_with_text_file(event, text: str, **kwargs):
+    text = sanitize_outgoing_text(text)
     file_kwargs = dict(kwargs)
     file_kwargs.pop("buttons", None)
     file_kwargs.pop("parse_mode", None)
@@ -1991,9 +2080,9 @@ def extract_openai_response_text(response_data: dict) -> str:
     return "\n\n".join(chunks).strip()
 
 
-def openai_urlopen(request: Request):
+def openai_urlopen(request: Request, *, use_proxy: bool = True):
     proxy_url = settings.openai_proxy_url.strip()
-    if proxy_url:
+    if use_proxy and proxy_url:
         normalized_proxy_url = proxy_url if "://" in proxy_url else f"http://{proxy_url}"
         opener = build_opener(
             ProxyHandler(
@@ -2004,7 +2093,8 @@ def openai_urlopen(request: Request):
             )
         )
         return opener.open(request, timeout=settings.openai_timeout_seconds)
-    return urlopen(request, timeout=settings.openai_timeout_seconds)
+    opener = build_opener(ProxyHandler({}))
+    return opener.open(request, timeout=settings.openai_timeout_seconds)
 
 
 OPENAI_MAX_RETRY_ATTEMPTS = 3
@@ -2012,6 +2102,8 @@ OPENAI_MAX_RETRY_DELAY_SECONDS = 90.0
 OPENAI_MIN_RETRY_DELAY_SECONDS = 1.0
 GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS = 120.0
 GPT_RATE_LIMIT_FALLBACK_DELAY_SECONDS = 10.0
+GPT_TIMEOUT_RETRY_WINDOW_SECONDS = 120.0
+GPT_TIMEOUT_RETRY_DELAY_SECONDS = 15.0
 
 
 def parse_openai_retry_delay(error: HTTPError, error_message: str, attempt: int) -> float:
@@ -2092,25 +2184,34 @@ def is_rate_limit_error_text(error_text: str) -> bool:
     return "rate limit" in text or "too many requests" in text or "api error 429" in text
 
 
+def is_openai_https_proxy_error(error_code: int, error_text: str) -> bool:
+    lowered = str(error_text or "").casefold()
+    return error_code == 403 and "only accessible over https" in lowered
+
+
 def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
 
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = Request(
-        f"{settings.openai_base_url}/responses",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {settings.openai_api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+
+    def make_request() -> Request:
+        return Request(
+            f"{settings.openai_base_url}/responses",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
     response_data: dict[str, object] = {}
     last_error_text = ""
+    direct_fallback_attempted = False
     for attempt in range(OPENAI_MAX_RETRY_ATTEMPTS):
         try:
-            with openai_urlopen(request) as response:
+            with openai_urlopen(make_request()) as response:
                 response_data = json.loads(response.read().decode("utf-8", errors="replace"))
             break
         except HTTPError as error:
@@ -2121,6 +2222,40 @@ def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
             except Exception:
                 error_message = error_body or str(error)
             last_error_text = f"OpenAI API error {error.code}: {error_message[:500]}"
+
+            if settings.openai_proxy_url.strip() and not direct_fallback_attempted and is_openai_https_proxy_error(error.code, error_message):
+                logging.warning("OpenAI proxy returned HTTPS 403, retrying direct without proxy")
+                direct_fallback_attempted = True
+                try:
+                    with openai_urlopen(make_request(), use_proxy=False) as response:
+                        response_data = json.loads(response.read().decode("utf-8", errors="replace"))
+                    break
+                except HTTPError as direct_error:
+                    direct_error_body = direct_error.read().decode("utf-8", errors="replace")
+                    try:
+                        direct_error_data = json.loads(direct_error_body)
+                        direct_error_message = str((direct_error_data.get("error") or {}).get("message") or direct_error_body)
+                    except Exception:
+                        direct_error_message = direct_error_body or str(direct_error)
+                    last_error_text = f"OpenAI direct fallback error {direct_error.code}: {direct_error_message[:500]}"
+                    error = direct_error
+                    error_message = direct_error_message
+                except URLError as direct_error:
+                    connectivity = diagnose_openai_connectivity()
+                    last_error_text = f"OpenAI direct fallback connection error: {direct_error.reason}; {connectivity}"
+                    has_next_attempt = attempt + 1 < OPENAI_MAX_RETRY_ATTEMPTS
+                    if has_next_attempt:
+                        wait_seconds = min(OPENAI_MAX_RETRY_DELAY_SECONDS, OPENAI_MIN_RETRY_DELAY_SECONDS * (2 ** attempt))
+                        logging.warning(
+                            "OpenAI direct fallback connection problem, retry in %.1fs (%s/%s): %s",
+                            wait_seconds,
+                            attempt + 1,
+                            OPENAI_MAX_RETRY_ATTEMPTS,
+                            last_error_text,
+                        )
+                        time.sleep(wait_seconds)
+                        continue
+                    raise RuntimeError(last_error_text) from direct_error
 
             is_retryable = error.code == 429 or error.code in {408, 500, 502, 503, 504}
             has_next_attempt = attempt + 1 < OPENAI_MAX_RETRY_ATTEMPTS
@@ -3425,6 +3560,9 @@ def parse_json_object(text: str) -> dict:
 
 
 def classify_smart_request_text(text: str) -> dict:
+    direct_action = detect_direct_smart_action(text)
+    if direct_action is not None:
+        return direct_action
     payload: dict[str, object] = {
         "model": settings.openai_model,
         "instructions": SMART_CONTROLLER_INSTRUCTIONS,
@@ -3505,6 +3643,8 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
         (r"^(?:статус|карточка)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_summary"),
         (r"^(?:подписки|subs|инфо|информация)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_subs"),
         (r"^(?:wizard|визард)\s+(?P<query>\d{1,20})\s*$", "wizard"),
+        (r"^(?:покажи|найди|открой)?\s*(?:подписк(?:у|и)?|subs|инфо(?:рмацию)?)\s+(?:пользователя|пользаку|юзера|user)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_subs"),
+        (r"^(?:покажи|найди|открой)?\s*(?:подписк(?:у|и)?|subs|инфо(?:рмацию)?)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_subs"),
     )
     for pattern, action_name in user_lookup_patterns:
         match = re.match(pattern, raw_text, flags=re.IGNORECASE)
@@ -3524,6 +3664,8 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
 
     mail_patterns = (
         r"^(?:отправ(?:ь|ить)|пошли|напиши)\s+(?:сообщение|письмо|mail)\s+(?:пользователю|юзеру|user)\s+(?P<user_id>\d{1,20})\s*(?:с\s+текстом)?\s*[,:\-]?\s*(?P<text>.+)$",
+        r"^(?:отправ(?:ь|ить)|пошли|напиши)\s+(?:пользователю|юзеру|user)\s+(?P<user_id>\d{1,20})\s*(?:с\s+текстом)?\s*[,:\-]?\s*(?P<text>.+)$",
+        r"^(?:напиши|отправ(?:ь|ить)|пошли)\s+(?:юзеру|пользователю|user)\s+(?P<user_id>\d{1,20})\s+(?P<text>.+)$",
         r"^(?:отправ(?:ь|ить)|пошли)\s+(?P<user_id>\d{1,20})\s*(?:с\s+текстом)?\s*[,:\-]?\s*(?P<text>.+)$",
     )
     for pattern in mail_patterns:
@@ -3583,6 +3725,31 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
             "lines": 0,
             "confidence": 0.97,
             "explanation": "Локально распознан запрос промокода.",
+        }
+
+    wizard_patterns = (
+        r"^(?:отправ(?:ь|ить)|сделай|создай|подготовь)\s+(?:в\s+)?(?:wizard|визард|визадр)\s+(?:юзера|пользователя|user)?\s*(?P<user_id>\d{1,20})\s*(?P<text>.*)$",
+        r"^(?:wizard|визард|визадр)\s+(?:юзера|пользователя|user)?\s*(?P<user_id>\d{1,20})\s*(?P<text>.*)$",
+    )
+    for pattern in wizard_patterns:
+        match = re.match(pattern, raw_text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        user_id = str(match.group("user_id") or "").strip()
+        extra_text = str(match.group("text") or "").strip(" \t\r\n,;:-")
+        if not user_id:
+            continue
+        if extra_text.casefold().startswith("с проблем"):
+            extra_text = extra_text[10:].strip(" \t\r\n,;:-")
+        return {
+            "action": "wizard",
+            "query": user_id,
+            "user_id": user_id,
+            "text": extra_text,
+            "use_database": False,
+            "lines": 0,
+            "confidence": 0.99,
+            "explanation": "Локально распознан запрос отправки карточки в wizard.",
         }
 
     return None
@@ -4137,8 +4304,6 @@ def current_pending_workflow_name(sender_id: int) -> str:
         return "smart"
     if sender_id in pending_support_requests:
         return "support"
-    if sender_id in active_gpt_requests:
-        return "gpt"
     return ""
 
 
@@ -11564,6 +11729,18 @@ async def handle_gpt_prompt(
         await safe_event_reply(event, assistant_compact_reply("Напишите вопрос.", "Я сразу начну готовить ответ."))
         return
 
+    if sender_id in active_gpt_requests:
+        log_action_event("gpt_request_rejected_busy", sender_id=sender_id, chat_id=getattr(event, "chat_id", None))
+        busy_text = assistant_compact_reply(
+            "Предыдущий запрос ещё в работе.",
+            "Дождитесь ответа на него, потом отправьте следующий вопрос.",
+        )
+        if status_message:
+            await edit_status_message(status_message, busy_text, force=True)
+        else:
+            await safe_event_reply(event, busy_text)
+        return
+
     if status_message is None:
         if compact_status:
             status_message = await safe_event_reply(event, gpt_processing_message())
@@ -11586,17 +11763,6 @@ async def handle_gpt_prompt(
                 await edit_status_message(status_message, text, force=force)
         else:
             await safe_event_reply(event, text)
-
-    if sender_id in active_gpt_requests:
-        log_action_event("gpt_request_rejected_busy", sender_id=sender_id, chat_id=getattr(event, "chat_id", None))
-        await update_gpt_status(
-            assistant_compact_reply(
-                "Предыдущий запрос ещё в работе.",
-                "Дождитесь ответа на него, потом отправьте следующий вопрос.",
-            ),
-            force=True,
-        )
-        return
 
     if not settings.openai_api_key:
         logging.warning(
@@ -11680,6 +11846,46 @@ async def handle_gpt_prompt(
         rate_limit_deadline = time.monotonic() + GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS
         rate_limit_wait_total = 0.0
         rate_limit_retries = 0
+        timeout_retry_deadline = time.monotonic() + GPT_TIMEOUT_RETRY_WINDOW_SECONDS
+        timeout_wait_total = 0.0
+        timeout_retries = 0
+
+        async def wait_with_countdown(wait_seconds: float, *, reason: str) -> bool:
+            remaining_seconds = max(1, int(round(wait_seconds)))
+            while remaining_seconds > 0:
+                if request_state.get("canceled") or request_state.get("suppress_output"):
+                    return False
+                if compact_status:
+                    if reason == "timeout":
+                        await update_gpt_status(gpt_timeout_wait_message(remaining_seconds), force=True)
+                    else:
+                        await update_gpt_status(gpt_retry_message(remaining_seconds), force=True)
+                else:
+                    extra_lines = [
+                        (
+                            f"Таймаут ответа, повтор через {remaining_seconds} сек"
+                            if reason == "timeout"
+                            else f"Лимит запросов, повтор через {remaining_seconds} сек"
+                        ),
+                        (
+                            f"Попытка timeout-повтора: {timeout_retries}"
+                            if reason == "timeout"
+                            else f"Попытка: {rate_limit_retries}"
+                        ),
+                    ]
+                    await update_gpt_status(
+                        build_process_status(
+                            "KBR_GPT",
+                            GPT_STEPS,
+                            2,
+                            extra_lines=extra_lines,
+                        ),
+                        force=True,
+                    )
+                await asyncio.sleep(1)
+                remaining_seconds -= 1
+            return True
+
         try:
             if compact_status:
                 await update_gpt_status(gpt_processing_message())
@@ -11701,41 +11907,49 @@ async def handle_gpt_prompt(
                     break
                 except Exception as retry_error:
                     error_text = str(retry_error)
-                    if not is_rate_limit_error_text(error_text):
-                        raise
-                    now_monotonic = time.monotonic()
-                    remaining = rate_limit_deadline - now_monotonic
-                    if remaining <= 0:
-                        raise RuntimeError(
-                            f"KBR_GPT_RATE_LIMIT_TIMEOUT after {int(rate_limit_wait_total)}s: {error_text[:300]}"
-                        ) from retry_error
-                    wait_seconds = min(parse_retry_seconds_from_error_text(error_text), remaining)
-                    rate_limit_retries += 1
-                    rate_limit_wait_total += wait_seconds
-                    log_action_event(
-                        "gpt_request_retry",
-                        sender_id=sender_id,
-                        chat_id=getattr(event, "chat_id", None),
-                        retry_number=rate_limit_retries,
-                        wait_seconds=int(round(wait_seconds)),
-                        error=error_text,
-                    )
-                    if compact_status:
-                        await update_gpt_status(gpt_retry_message(wait_seconds), force=True)
-                    else:
-                        await update_gpt_status(
-                            build_process_status(
-                                "KBR_GPT",
-                                GPT_STEPS,
-                                2,
-                                extra_lines=[
-                                    f"Р›РёРјРёС‚ Р·Р°РїСЂРѕСЃРѕРІ, РїРѕРІС‚РѕСЂ С‡РµСЂРµР· {int(round(wait_seconds))} СЃРµРє",
-                                    f"РџРѕРїС‹С‚РєР°: {rate_limit_retries}",
-                                ],
-                            ),
-                            force=True,
+                    if is_rate_limit_error_text(error_text):
+                        now_monotonic = time.monotonic()
+                        remaining = rate_limit_deadline - now_monotonic
+                        if remaining <= 0:
+                            raise RuntimeError(
+                                f"KBR_GPT_RATE_LIMIT_TIMEOUT after {int(rate_limit_wait_total)}s: {error_text[:300]}"
+                            ) from retry_error
+                        wait_seconds = min(parse_retry_seconds_from_error_text(error_text), remaining)
+                        rate_limit_retries += 1
+                        rate_limit_wait_total += wait_seconds
+                        log_action_event(
+                            "gpt_request_retry",
+                            sender_id=sender_id,
+                            chat_id=getattr(event, "chat_id", None),
+                            retry_number=rate_limit_retries,
+                            wait_seconds=int(round(wait_seconds)),
+                            error=error_text,
                         )
-                    await asyncio.sleep(max(1.0, wait_seconds))
+                        if not await wait_with_countdown(wait_seconds, reason="rate_limit"):
+                            return
+                        continue
+                    if is_timeout_error_text(error_text):
+                        now_monotonic = time.monotonic()
+                        remaining = timeout_retry_deadline - now_monotonic
+                        if remaining <= 0:
+                            raise RuntimeError(
+                                f"KBR_GPT_TIMEOUT_RETRY_EXHAUSTED after {int(timeout_wait_total)}s: {error_text[:300]}"
+                            ) from retry_error
+                        wait_seconds = min(GPT_TIMEOUT_RETRY_DELAY_SECONDS, remaining)
+                        timeout_retries += 1
+                        timeout_wait_total += wait_seconds
+                        log_action_event(
+                            "gpt_request_timeout_retry",
+                            sender_id=sender_id,
+                            chat_id=getattr(event, "chat_id", None),
+                            retry_number=timeout_retries,
+                            wait_seconds=int(round(wait_seconds)),
+                            error=error_text,
+                        )
+                        if not await wait_with_countdown(wait_seconds, reason="timeout"):
+                            return
+                        continue
+                    raise
             if request_state.get("canceled") or request_state.get("suppress_output"):
                 logging.info(
                     "KBR_GPT output suppressed sender_id=%s reason=%s",
@@ -11783,14 +11997,20 @@ async def handle_gpt_prompt(
             is_rate_limit_timeout = "KBR_GPT_RATE_LIMIT_TIMEOUT" in error_text or (
                 is_rate_limit_error_text(error_text) and rate_limit_wait_total >= GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS
             )
+            is_timeout_retry_exhausted = "KBR_GPT_TIMEOUT_RETRY_EXHAUSTED" in error_text or (
+                is_timeout_error_text(error_text) and timeout_wait_total >= GPT_TIMEOUT_RETRY_WINDOW_SECONDS
+            )
             log_action_event(
                 "gpt_request_error",
                 sender_id=sender_id,
                 chat_id=getattr(event, "chat_id", None),
                 error=error_text,
                 rate_limit_timeout=is_rate_limit_timeout,
+                timeout_retry_exhausted=is_timeout_retry_exhausted,
                 retries=rate_limit_retries,
                 waited_seconds=int(rate_limit_wait_total),
+                timeout_retries=timeout_retries,
+                timeout_waited_seconds=int(timeout_wait_total),
             )
             if request_state.get("canceled") or request_state.get("suppress_output"):
                 logging.info(
@@ -11819,6 +12039,8 @@ async def handle_gpt_prompt(
                         "error_text": error_text[:500],
                         "waited_seconds": int(rate_limit_wait_total),
                         "retries": int(rate_limit_retries),
+                        "timeout_waited_seconds": int(timeout_wait_total),
+                        "timeout_retries": int(timeout_retries),
                     },
                 )
             except Exception:
@@ -11880,7 +12102,7 @@ async def handle_gpt_prompt(
                         ),
                     )
                 else:
-                    await safe_event_reply(event, "KBR_GPT СЃРµР№С‡Р°СЃ РЅРµ РѕС‚РІРµС‚РёР». РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.")
+                    await safe_event_reply(event, gpt_failed_message(error_text))
         finally:
             log_action_event(
                 "gpt_request_finish",
@@ -13193,6 +13415,17 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 "created_at": now_timestamp(),
             }
             await safe_event_reply(event, requester_mail_text_prompt(direct_mail_user_id))
+            return
+        direct_smart_action = detect_direct_smart_action(raw_text)
+        if direct_smart_action is not None and str(direct_smart_action.get("action") or "") != "chat":
+            log_action_event(
+                "route",
+                sender_id=sender_id,
+                route="direct_smart_local",
+                action=str(direct_smart_action.get("action") or ""),
+                text=raw_text,
+            )
+            await execute_smart_action(event, sender_id, direct_smart_action)
             return
         requester_text_intent = detect_non_requester_intent(raw_text)
         if requester_text_intent == "greeting":
