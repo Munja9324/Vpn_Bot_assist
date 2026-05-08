@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from dotenv import load_dotenv
 from telethon.errors import FloodWaitError, MediaCaptionTooLongError, MessageNotModifiedError, MessageTooLongError
@@ -52,6 +52,7 @@ class Settings:
     openai_api_key: str
     openai_model: str
     openai_base_url: str
+    openai_proxy_url: str
     openai_timeout_seconds: float
     openai_max_output_tokens: int
     openai_reasoning_effort: str
@@ -346,6 +347,7 @@ def load_settings() -> Settings:
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini",
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
         or "https://api.openai.com/v1",
+        openai_proxy_url=os.getenv("OPENAI_PROXY_URL", "").strip(),
         openai_timeout_seconds=normalized_positive_float(
             "OPENAI_TIMEOUT_SECONDS",
             60.0,
@@ -1635,6 +1637,22 @@ def extract_openai_response_text(response_data: dict) -> str:
     return "\n\n".join(chunks).strip()
 
 
+def openai_urlopen(request: Request):
+    proxy_url = settings.openai_proxy_url.strip()
+    if proxy_url:
+        normalized_proxy_url = proxy_url if "://" in proxy_url else f"http://{proxy_url}"
+        opener = build_opener(
+            ProxyHandler(
+                {
+                    "http": normalized_proxy_url,
+                    "https": normalized_proxy_url,
+                }
+            )
+        )
+        return opener.open(request, timeout=settings.openai_timeout_seconds)
+    return urlopen(request, timeout=settings.openai_timeout_seconds)
+
+
 def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
@@ -1650,7 +1668,7 @@ def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=settings.openai_timeout_seconds) as response:
+        with openai_urlopen(request) as response:
             response_data = json.loads(response.read().decode("utf-8", errors="replace"))
     except HTTPError as error:
         error_body = error.read().decode("utf-8", errors="replace")
@@ -1736,7 +1754,7 @@ def call_openai_transcription(audio_path: Path) -> str:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=settings.openai_timeout_seconds) as response:
+        with openai_urlopen(request) as response:
             response_data = json.loads(response.read().decode("utf-8", errors="replace"))
     except HTTPError as error:
         error_body = error.read().decode("utf-8", errors="replace")
@@ -6048,7 +6066,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
     }}
     .tab-panel {{ display: none; }}
     .tab-panel.active {{ display: block; }}
-    .toolbar {{ display: grid; grid-template-columns: minmax(180px, 1fr) 170px 170px; gap: 10px; margin: 10px 0 12px; }}
+    .toolbar {{ display: grid; grid-template-columns: minmax(180px, 1fr) repeat(5, minmax(130px, 170px)); gap: 10px; margin: 10px 0 12px; }}
     .toolbar input, .toolbar select {{
       width: 100%;
       border: 1px solid var(--border);
@@ -6065,6 +6083,12 @@ def build_scan_dashboard_html(stats: dict) -> str:
     .status-pill.active {{ color: var(--good); border-color: rgba(52,211,153,.45); }}
     .table-scroll {{ overflow: auto; border: 1px solid var(--border); border-radius: 8px; }}
     .table-scroll table {{ min-width: 860px; }}
+    .admin-kpis {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }}
+    .admin-kpi {{ border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(255,255,255,.03); }}
+    .admin-kpi b {{ display: block; font-size: 22px; line-height: 1.1; margin-top: 4px; }}
+    .pager {{ display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; flex-wrap: wrap; }}
+    .pager-btn {{ border: 1px solid var(--border); background: rgba(255,255,255,.04); color: var(--text); border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit; }}
+    .pager-btn[disabled] {{ opacity: .45; cursor: default; }}
     .muted {{ color: var(--muted); }}
     @media (max-width: 980px) {{
       .admin-shell {{ grid-template-columns: 1fr; }}
@@ -6250,6 +6274,13 @@ def build_scan_dashboard_html(stats: dict) -> str:
                 <option value="new">Новые регистрации</option>
                 <option value="id">ID по возрастанию</option>
               </select>
+              <select id="adminLocation"><option value="all">Р›РѕРєР°С†РёРё: РІСЃРµ</option></select>
+              <select id="adminRegMonth"><option value="all">Р РµРіРёСЃС‚СЂР°С†РёСЏ: РІСЃРµ</option></select>
+              <select id="adminPageSize">
+                <option value="25">25 / СЃС‚СЂ.</option>
+                <option value="50">50 / СЃС‚СЂ.</option>
+                <option value="100">100 / СЃС‚СЂ.</option>
+              </select>
             </div>
             <div class="filter-row">
               <button class="filter-btn active" data-status="all">Все</button>
@@ -6260,6 +6291,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
               <button class="filter-btn" data-status="active">Активные</button>
             </div>
             <div class="muted" id="adminCount"></div>
+            <div class="admin-kpis" id="adminKpis"></div>
             <div class="table-scroll">
               <table>
                 <thead>
@@ -6269,6 +6301,11 @@ def build_scan_dashboard_html(stats: dict) -> str:
                 </thead>
                 <tbody id="adminUsersBody"></tbody>
               </table>
+            </div>
+            <div class="pager">
+              <button class="pager-btn" id="adminPrev">РќР°Р·Р°Рґ</button>
+              <div class="muted" id="adminPageInfo"></div>
+              <button class="pager-btn" id="adminNext">Р”Р°Р»РµРµ</button>
             </div>
           </section>
           <section class="tab-panel" data-panel="attention">
@@ -6324,6 +6361,14 @@ def build_scan_dashboard_html(stats: dict) -> str:
       const search = document.getElementById("adminSearch");
       const status = document.getElementById("adminStatus");
       const sort = document.getElementById("adminSort");
+      const locationFilter = document.getElementById("adminLocation");
+      const regMonthFilter = document.getElementById("adminRegMonth");
+      const pageSizeSelect = document.getElementById("adminPageSize");
+      const kpis = document.getElementById("adminKpis");
+      const pageInfo = document.getElementById("adminPageInfo");
+      const prevButton = document.getElementById("adminPrev");
+      const nextButton = document.getElementById("adminNext");
+      let currentPage = 1;
       const statusLabels = {{
         active: "Активные",
         expiring_7: "Истекают за 7 дней",
@@ -6342,6 +6387,27 @@ def build_scan_dashboard_html(stats: dict) -> str:
         return Number.isFinite(parsed) ? parsed : 0;
       }}
 
+      function registrationMonth(value) {{
+        const text = String(value || "").trim();
+        return /^\\d{{4}}-\\d{{2}}/.test(text) ? text.slice(0, 7) : "";
+      }}
+
+      function fillDynamicFilters() {{
+        const locations = new Set();
+        const months = new Set();
+        adminUsers.forEach(row => {{
+          String(row.locations || "").split(",").map(item => item.trim()).filter(Boolean).forEach(item => locations.add(item));
+          const month = registrationMonth(row.registration_date);
+          if (month) months.add(month);
+        }});
+        [...locations].sort((a, b) => a.localeCompare(b)).forEach(location => {{
+          locationFilter.insertAdjacentHTML("beforeend", `<option value="${{escapeText(location)}}">${{escapeText(location)}}</option>`);
+        }});
+        [...months].sort().reverse().forEach(month => {{
+          regMonthFilter.insertAdjacentHTML("beforeend", `<option value="${{month}}">${{month}}</option>`);
+        }});
+      }}
+
       function sortedRows(rows) {{
         const mode = sort.value;
         return [...rows].sort((a, b) => {{
@@ -6356,10 +6422,14 @@ def build_scan_dashboard_html(stats: dict) -> str:
       function filteredRows() {{
         const q = search.value.trim().toLowerCase();
         const selectedStatus = status.value;
+        const selectedLocation = locationFilter.value;
+        const selectedMonth = regMonthFilter.value;
         return sortedRows(adminUsers.filter(row => {{
           const statusOk = selectedStatus === "all" || row.status === selectedStatus;
           const searchOk = !q || String(row.search || "").toLowerCase().includes(q);
-          return statusOk && searchOk;
+          const locationOk = selectedLocation === "all" || String(row.locations || "").split(",").map(item => item.trim()).includes(selectedLocation);
+          const monthOk = selectedMonth === "all" || registrationMonth(row.registration_date) === selectedMonth;
+          return statusOk && searchOk && locationOk && monthOk;
         }}));
       }}
 
@@ -6377,6 +6447,44 @@ def build_scan_dashboard_html(stats: dict) -> str:
             <td><span class="status-pill ${{escapeText(row.status)}}">${{escapeText(row.status_label)}}</span></td>
           </tr>
         `).join("") || "<tr><td colspan='7'>Нет данных</td></tr>";
+      }}
+
+      function renderKpis(rows) {{
+        const total = rows.length;
+        const paid = rows.filter(row => Number(row.subscriptions || 0) > 0).length;
+        const urgent = rows.filter(row => row.status === "expired" || row.status === "expiring_7").length;
+        const noSubs = rows.filter(row => row.status === "no_subs").length;
+        kpis.innerHTML = `
+          <div class="admin-kpi"><span class="muted">РќР°Р№РґРµРЅРѕ</span><b>${{total}}</b></div>
+          <div class="admin-kpi"><span class="muted">РЎ РїРѕРґРїРёСЃРєРѕР№</span><b>${{paid}}</b></div>
+          <div class="admin-kpi"><span class="muted">РЎСЂРѕС‡РЅС‹Рµ</span><b>${{urgent}}</b></div>
+          <div class="admin-kpi"><span class="muted">Р‘РµР· РїРѕРґРїРёСЃРєРё</span><b>${{noSubs}}</b></div>
+        `;
+      }}
+
+      function renderUsersEnhanced() {{
+        const rows = filteredRows();
+        const pageSize = Math.max(1, Number.parseInt(pageSizeSelect.value || "25", 10) || 25);
+        const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+        currentPage = Math.max(1, Math.min(currentPage, totalPages));
+        const start = (currentPage - 1) * pageSize;
+        const pageRows = rows.slice(start, start + pageSize);
+        count.textContent = `РџРѕРєР°Р·Р°РЅРѕ ${{rows.length}} РёР· ${{adminUsers.length}} РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№`;
+        pageInfo.textContent = `РЎС‚СЂР°РЅРёС†Р° ${{currentPage}} РёР· ${{totalPages}}`;
+        prevButton.disabled = currentPage <= 1;
+        nextButton.disabled = currentPage >= totalPages;
+        renderKpis(rows);
+        body.innerHTML = pageRows.map(row => `
+          <tr>
+            <td>${{escapeText(row.user_id)}}</td>
+            <td>${{row.username ? "@" + escapeText(row.username) : "<span class='muted'>РЅРµС‚</span>"}}</td>
+            <td>${{escapeText(row.registration_date || "-")}}</td>
+            <td>${{escapeText(row.subscriptions)}}</td>
+            <td>${{escapeText(row.locations || "-")}}</td>
+            <td>${{escapeText(row.nearest_expiration || "-")}} ${{row.days_left !== "" ? "(" + escapeText(row.days_left) + " РґРЅ.)" : ""}}</td>
+            <td><span class="status-pill ${{escapeText(row.status)}}">${{escapeText(row.status_label)}}</span></td>
+          </tr>
+        `).join("") || "<tr><td colspan='7'>РќРµС‚ РґР°РЅРЅС‹С…</td></tr>";
       }}
 
       function renderAttention() {{
@@ -6413,13 +6521,24 @@ def build_scan_dashboard_html(stats: dict) -> str:
           document.querySelectorAll(".filter-btn").forEach(item => item.classList.remove("active"));
           button.classList.add("active");
           status.value = button.dataset.status;
-          renderUsers();
+          resetToFirstPageAndRender();
         }});
       }});
-      search.addEventListener("input", renderUsers);
-      status.addEventListener("change", renderUsers);
-      sort.addEventListener("change", renderUsers);
-      renderUsers();
+      function resetToFirstPageAndRender() {{
+        currentPage = 1;
+        renderUsersEnhanced();
+      }}
+
+      search.addEventListener("input", resetToFirstPageAndRender);
+      status.addEventListener("change", resetToFirstPageAndRender);
+      sort.addEventListener("change", resetToFirstPageAndRender);
+      locationFilter.addEventListener("change", resetToFirstPageAndRender);
+      regMonthFilter.addEventListener("change", resetToFirstPageAndRender);
+      pageSizeSelect.addEventListener("change", resetToFirstPageAndRender);
+      prevButton.addEventListener("click", () => {{ currentPage -= 1; renderUsersEnhanced(); }});
+      nextButton.addEventListener("click", () => {{ currentPage += 1; renderUsersEnhanced(); }});
+      fillDynamicFilters();
+      renderUsersEnhanced();
       renderAttention();
       renderSegments();
     </script>
