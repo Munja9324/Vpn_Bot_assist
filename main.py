@@ -546,6 +546,7 @@ MAX_SCAN_ACTION_DELAY_SECONDS = 2.5
 SCAN_CHECKPOINT_USER_INTERVAL = max(1, env_int("SCAN_CHECKPOINT_USER_INTERVAL", 6))
 SCAN_CHECKPOINT_MIN_INTERVAL_SECONDS = max(2.0, env_float("SCAN_CHECKPOINT_MIN_INTERVAL_SECONDS", 10.0))
 STATUS_COMPACT_MODE = env_bool("STATUS_COMPACT_MODE", True)
+ACTION_LOG_PREVIEW_LIMIT = max(120, env_int("ACTION_LOG_PREVIEW_LIMIT", 1200))
 
 
 class ScanCancelledError(Exception):
@@ -600,6 +601,47 @@ def animated_symbol(kind: str) -> str:
         "pause": "PAUSE",
     }
     return f"[{symbols.get(kind, symbols['scan'])}]"
+
+
+def action_log_path() -> Path:
+    log_path = application_log_path()
+    suffix = log_path.suffix or ".log"
+    return log_path.with_name(f"{log_path.stem}-actions{suffix}.jsonl")
+
+
+def action_log_preview(value: object, *, limit: int = ACTION_LOG_PREVIEW_LIMIT) -> object:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...<trimmed>"
+
+
+def append_action_log(entry: dict[str, object]) -> None:
+    path = action_log_path()
+    if path.parent != Path("."):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def log_action_event(kind: str, **fields: object) -> None:
+    entry: dict[str, object] = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "kind": kind,
+    }
+    for key, value in fields.items():
+        if isinstance(value, (str, bytes)):
+            entry[key] = action_log_preview(value.decode("utf-8", "replace") if isinstance(value, bytes) else value)
+        elif isinstance(value, (int, float, bool)) or value is None:
+            entry[key] = value
+        else:
+            entry[key] = action_log_preview(value)
+    try:
+        append_action_log(entry)
+    except Exception:
+        logging.exception("Failed to write action log kind=%s", kind)
 
 
 def decorate_status_title(title: str, *, done: bool = False, failed: bool = False, paused: bool = False) -> str:
@@ -1070,41 +1112,131 @@ async def edit_status_message(message, text: str, *, buttons=None, parse_mode=No
     try:
         await message.edit(text, buttons=buttons, parse_mode=parse_mode)
         status_edit_state[key] = (loop.time(), text)
+        log_action_event(
+            "status_edit",
+            message_id=getattr(message, "id", None),
+            text=text,
+            parse_mode=parse_mode,
+            buttons=bool(buttons),
+            result="edited",
+        )
         return True
     except MessageNotModifiedError:
         status_edit_state[key] = (loop.time(), text)
+        log_action_event(
+            "status_edit",
+            message_id=getattr(message, "id", None),
+            text=text,
+            parse_mode=parse_mode,
+            buttons=bool(buttons),
+            result="not_modified",
+        )
         return True
     except FloodWaitError as error:
         wait_seconds = int(getattr(error, "seconds", 1) or 1)
         note_floodwait(wait_seconds)
         status_edit_state[key] = (loop.time() + wait_seconds, text)
         logging.warning("FloodWait on status edit: skipping edits for %ss", wait_seconds)
+        log_action_event(
+            "status_edit",
+            message_id=getattr(message, "id", None),
+            text=text,
+            parse_mode=parse_mode,
+            buttons=bool(buttons),
+            result="floodwait",
+            wait_seconds=wait_seconds,
+        )
         return False
     except Exception:
         logging.exception("Failed to edit status message")
+        log_action_event(
+            "status_edit",
+            message_id=getattr(message, "id", None),
+            text=text,
+            parse_mode=parse_mode,
+            buttons=bool(buttons),
+            result="error",
+        )
         return False
 
 
 async def safe_event_reply(event, *args, **kwargs):
+    text_arg = args[0] if args and isinstance(args[0], str) else ""
     if args and isinstance(args[0], str) and len(args[0]) > TELEGRAM_SAFE_TEXT_LIMIT and "file" not in kwargs:
+        log_action_event(
+            "reply",
+            chat_id=getattr(event, "chat_id", None),
+            sender_id=getattr(event, "sender_id", None),
+            text=text_arg,
+            parse_mode=kwargs.get("parse_mode"),
+            buttons=bool(kwargs.get("buttons")),
+            result="reply_as_file",
+        )
         return await reply_with_text_file(event, args[0], **kwargs)
 
     try:
         sent = await event.reply(*args, **kwargs)
+        log_action_event(
+            "reply",
+            chat_id=getattr(event, "chat_id", None),
+            sender_id=getattr(event, "sender_id", None),
+            text=text_arg,
+            parse_mode=kwargs.get("parse_mode"),
+            buttons=bool(kwargs.get("buttons")),
+            result="sent",
+            reply_message_id=getattr(sent, "id", None),
+        )
         return sent
     except MessageTooLongError:
         if args and isinstance(args[0], str):
             logging.warning("Reply text is too long; sending it as a txt file")
+            log_action_event(
+                "reply",
+                chat_id=getattr(event, "chat_id", None),
+                sender_id=getattr(event, "sender_id", None),
+                text=text_arg,
+                parse_mode=kwargs.get("parse_mode"),
+                buttons=bool(kwargs.get("buttons")),
+                result="too_long_reply_as_file",
+            )
             return await reply_with_text_file(event, args[0], **kwargs)
         logging.exception("Failed to send reply: message is too long")
+        log_action_event(
+            "reply",
+            chat_id=getattr(event, "chat_id", None),
+            sender_id=getattr(event, "sender_id", None),
+            text=text_arg,
+            parse_mode=kwargs.get("parse_mode"),
+            buttons=bool(kwargs.get("buttons")),
+            result="too_long_error",
+        )
         return None
     except FloodWaitError as error:
         wait_seconds = int(getattr(error, "seconds", 1) or 1)
         note_floodwait(wait_seconds)
         logging.warning("FloodWait on reply: message suppressed for %ss", wait_seconds)
+        log_action_event(
+            "reply",
+            chat_id=getattr(event, "chat_id", None),
+            sender_id=getattr(event, "sender_id", None),
+            text=text_arg,
+            parse_mode=kwargs.get("parse_mode"),
+            buttons=bool(kwargs.get("buttons")),
+            result="floodwait",
+            wait_seconds=wait_seconds,
+        )
         return None
     except Exception:
         logging.exception("Failed to send reply")
+        log_action_event(
+            "reply",
+            chat_id=getattr(event, "chat_id", None),
+            sender_id=getattr(event, "sender_id", None),
+            text=text_arg,
+            parse_mode=kwargs.get("parse_mode"),
+            buttons=bool(kwargs.get("buttons")),
+            result="error",
+        )
         return None
 
 
@@ -3090,14 +3222,26 @@ async def handle_non_requester_message(event, sender, sender_id: int, incoming_t
         sender_username(sender),
         incoming_text,
     )
+    log_action_event(
+        "non_requester_message",
+        sender_id=sender_id,
+        chat_id=getattr(event, "chat_id", None),
+        username=sender_username(sender),
+        text=incoming_text,
+        is_voice=is_voice_or_audio_message(event),
+    )
     if is_operator_request_text(incoming_text):
+        log_action_event("non_requester_route", sender_id=sender_id, route="operator_contact")
         await safe_event_reply(event, support_operator_contact_text())
         return True
     if await handle_pending_support_request(event, sender, sender_id, incoming_text):
+        log_action_event("non_requester_route", sender_id=sender_id, route="pending_support")
         return True
     if is_voice_or_audio_message(event):
+        log_action_event("non_requester_route", sender_id=sender_id, route="voice")
         await handle_non_requester_voice_message(event, sender, sender_id, incoming_text)
         return True
+    log_action_event("non_requester_route", sender_id=sender_id, route="text")
     await handle_non_requester_text_message(event, sender, sender_id, incoming_text)
     return True
 
@@ -3456,6 +3600,12 @@ class TextCommandEvent:
 
 
 async def execute_text_command(event, command_text: str) -> None:
+    log_action_event(
+        "execute_text_command",
+        sender_id=getattr(event, "sender_id", None),
+        chat_id=getattr(event, "chat_id", None),
+        command_text=command_text,
+    )
     await handle_private_message(TextCommandEvent(event, command_text))
 
 
@@ -3547,6 +3697,16 @@ async def apply_wizard_note_after_command(event, sender_id: int, note: str) -> N
 async def execute_smart_action(event, sender_id: int, action: dict, *, confirmed: bool = False, status_message=None) -> None:
     action_name = str(action.get("action") or "chat").strip()
     original_text = str(action.get("text") or "").strip()
+    log_action_event(
+        "smart_action",
+        sender_id=sender_id,
+        chat_id=getattr(event, "chat_id", None),
+        action=action_name,
+        confirmed=confirmed,
+        original_text=original_text,
+        query=str(action.get("query") or ""),
+        user_id=str(action.get("user_id") or ""),
+    )
     if action_name == "chat":
         await handle_gpt_prompt(
             event,
@@ -3577,6 +3737,14 @@ async def execute_smart_action(event, sender_id: int, action: dict, *, confirmed
             "command_text": command_text,
             "created_at": now_timestamp(),
         }
+        log_action_event(
+            "smart_action_pending_confirm",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            action=action_name,
+            command_text=command_text,
+            title=title,
+        )
         details = [
             "РЇ РїРѕРЅСЏР» С‚Р°Рє:",
             title,
@@ -3600,7 +3768,21 @@ async def execute_smart_action(event, sender_id: int, action: dict, *, confirmed
 
 
 async def handle_smart_request(event, sender_id: int, request_text: str, *, source: str, compact_status: bool = False) -> None:
+    log_action_event(
+        "smart_request_start",
+        sender_id=sender_id,
+        chat_id=getattr(event, "chat_id", None),
+        source=source,
+        compact_status=compact_status,
+        request_text=request_text,
+    )
     if not settings.smart_controller_enabled:
+        log_action_event(
+            "smart_request_bypass",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            reason="smart_controller_disabled",
+        )
         await handle_gpt_prompt(event, sender_id, request_text, compact_status=True, reveal_unavailable=False)
         return
     if compact_status:
@@ -3621,6 +3803,16 @@ async def handle_smart_request(event, sender_id: int, request_text: str, *, sour
     try:
         action = await classify_smart_request(request_text)
         action_name = str(action.get("action") or "chat").strip()
+        log_action_event(
+            "smart_request_classified",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            action=action_name,
+            explanation=str(action.get("explanation") or ""),
+            query=str(action.get("query") or ""),
+            user_id=str(action.get("user_id") or ""),
+            text=str(action.get("text") or ""),
+        )
         if compact_status:
             explanation = str(action.get("explanation") or "").strip()
             if action_name == "chat":
@@ -3663,6 +3855,14 @@ async def handle_smart_request(event, sender_id: int, request_text: str, *, sour
                 str(error)[:300],
                 fallback_action.get("action"),
             )
+            log_action_event(
+                "smart_request_fallback",
+                sender_id=sender_id,
+                chat_id=getattr(event, "chat_id", None),
+                source=source,
+                error=str(error),
+                fallback_action=str(fallback_action.get("action") or ""),
+            )
             await edit_status_message(
                 status_message,
                 assistant_compact_reply(
@@ -3674,6 +3874,13 @@ async def handle_smart_request(event, sender_id: int, request_text: str, *, sour
             await execute_smart_action(event, sender_id, fallback_action, status_message=status_message)
             return
         logging.exception("Smart request failed sender_id=%s source=%s", sender_id, source)
+        log_action_event(
+            "smart_request_error",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            source=source,
+            error=str(error),
+        )
         await edit_status_message(
             status_message,
             assistant_compact_reply(
@@ -11334,7 +11541,16 @@ async def handle_gpt_prompt(
     compact_status: bool = False,
     reveal_unavailable: bool = True,
 ) -> None:
+    log_action_event(
+        "gpt_request_start",
+        sender_id=sender_id,
+        chat_id=getattr(event, "chat_id", None),
+        compact_status=compact_status,
+        reveal_unavailable=reveal_unavailable,
+        prompt=prompt,
+    )
     if not prompt.strip():
+        log_action_event("gpt_request_empty", sender_id=sender_id, chat_id=getattr(event, "chat_id", None))
         await safe_event_reply(event, assistant_compact_reply("Напишите вопрос.", "Я сразу начну готовить ответ."))
         return
 
@@ -11362,6 +11578,7 @@ async def handle_gpt_prompt(
             await safe_event_reply(event, text)
 
     if sender_id in active_gpt_requests:
+        log_action_event("gpt_request_rejected_busy", sender_id=sender_id, chat_id=getattr(event, "chat_id", None))
         await update_gpt_status(
             assistant_compact_reply(
                 "Предыдущий запрос ещё в работе.",
@@ -11377,6 +11594,12 @@ async def handle_gpt_prompt(
             sender_id,
             compact_status,
             reveal_unavailable,
+        )
+        log_action_event(
+            "gpt_request_unavailable",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            reason="missing_openai_api_key",
         )
         try:
             sender = await event.get_sender()
@@ -11410,6 +11633,12 @@ async def handle_gpt_prompt(
 
     previous_response_id = gpt_chat_sessions.get(sender_id)
     if gpt_request_lock.locked():
+        log_action_event(
+            "gpt_request_queued",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            previous_response=bool(previous_response_id),
+        )
         if compact_status:
             await update_gpt_status(gpt_queue_message(), force=True)
         else:
@@ -11432,6 +11661,12 @@ async def handle_gpt_prompt(
             "suppress_output": False,
         }
         active_gpt_requests[sender_id] = request_state
+        log_action_event(
+            "gpt_request_active",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            previous_response=bool(previous_response_id),
+        )
         rate_limit_deadline = time.monotonic() + GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS
         rate_limit_wait_total = 0.0
         rate_limit_retries = 0
@@ -11467,6 +11702,14 @@ async def handle_gpt_prompt(
                     wait_seconds = min(parse_retry_seconds_from_error_text(error_text), remaining)
                     rate_limit_retries += 1
                     rate_limit_wait_total += wait_seconds
+                    log_action_event(
+                        "gpt_request_retry",
+                        sender_id=sender_id,
+                        chat_id=getattr(event, "chat_id", None),
+                        retry_number=rate_limit_retries,
+                        wait_seconds=int(round(wait_seconds)),
+                        error=error_text,
+                    )
                     if compact_status:
                         await update_gpt_status(gpt_retry_message(wait_seconds), force=True)
                     else:
@@ -11489,9 +11732,22 @@ async def handle_gpt_prompt(
                     sender_id,
                     request_state.get("reason") or "",
                 )
+                log_action_event(
+                    "gpt_request_suppressed",
+                    sender_id=sender_id,
+                    chat_id=getattr(event, "chat_id", None),
+                    reason=str(request_state.get("reason") or ""),
+                )
                 return
             if response_id:
                 gpt_chat_sessions[sender_id] = response_id
+            log_action_event(
+                "gpt_request_success",
+                sender_id=sender_id,
+                chat_id=getattr(event, "chat_id", None),
+                response_id=response_id,
+                answer_length=len(answer_text),
+            )
             if compact_status:
                 await update_gpt_status(assistant_compact_reply("Ответ готов.", "Отправляю его в чат."), force=True)
             else:
@@ -11517,12 +11773,28 @@ async def handle_gpt_prompt(
             is_rate_limit_timeout = "KBR_GPT_RATE_LIMIT_TIMEOUT" in error_text or (
                 is_rate_limit_error_text(error_text) and rate_limit_wait_total >= GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS
             )
+            log_action_event(
+                "gpt_request_error",
+                sender_id=sender_id,
+                chat_id=getattr(event, "chat_id", None),
+                error=error_text,
+                rate_limit_timeout=is_rate_limit_timeout,
+                retries=rate_limit_retries,
+                waited_seconds=int(rate_limit_wait_total),
+            )
             if request_state.get("canceled") or request_state.get("suppress_output"):
                 logging.info(
                     "KBR_GPT error suppressed sender_id=%s reason=%s error=%s",
                     sender_id,
                     request_state.get("reason") or "",
                     error_text[:300],
+                )
+                log_action_event(
+                    "gpt_request_error_suppressed",
+                    sender_id=sender_id,
+                    chat_id=getattr(event, "chat_id", None),
+                    reason=str(request_state.get("reason") or ""),
+                    error=error_text,
                 )
                 return
             try:
@@ -11600,6 +11872,11 @@ async def handle_gpt_prompt(
                 else:
                     await safe_event_reply(event, "KBR_GPT СЃРµР№С‡Р°СЃ РЅРµ РѕС‚РІРµС‚РёР». РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.")
         finally:
+            log_action_event(
+                "gpt_request_finish",
+                sender_id=sender_id,
+                chat_id=getattr(event, "chat_id", None),
+            )
             active_gpt_requests.pop(sender_id, None)
 
 
@@ -11716,18 +11993,32 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         return
     sender_id = int(event.sender_id or 0)
     incoming_text = (event.raw_text or "").strip()
+    requester_allowed = is_requester_allowed(sender_id, sender)
+    log_action_event(
+        "incoming_message",
+        sender_id=sender_id,
+        chat_id=getattr(event, "chat_id", None),
+        username=sender_username(sender),
+        full_name=sender_full_name(sender),
+        is_requester=requester_allowed,
+        is_voice=is_voice_or_audio_message(event),
+        text=incoming_text,
+    )
     roots_command = is_roots_command(incoming_text)
     roots_empty = requester_count() == 0
-    if roots_command and (roots_empty or is_requester_allowed(sender_id, sender)):
+    if roots_command and (roots_empty or requester_allowed):
+        log_action_event("route", sender_id=sender_id, route="roots_command", text=incoming_text)
         await handle_roots_command(event, sender)
         return
 
-    if not is_requester_allowed(sender_id, sender):
+    if not requester_allowed:
+        log_action_event("route", sender_id=sender_id, route="non_requester", text=incoming_text)
         await handle_non_requester_message(event, sender, sender_id, incoming_text)
         return
 
     incoming_is_explicit_command = is_explicit_requester_command_input(incoming_text, sender_id)
     if incoming_is_explicit_command:
+        log_action_event("route", sender_id=sender_id, route="explicit_requester_command", text=incoming_text)
         pending_smart_actions.pop(sender_id, None)
         pending_gpt_requests.pop(sender_id, None)
         if mark_active_gpt_request(sender_id, suppress_output=True, reason="interrupted_by_command"):
@@ -11735,6 +12026,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     pending_smart = pending_smart_actions.get(sender_id)
     if pending_smart:
+        log_action_event("route", sender_id=sender_id, route="pending_smart", text=incoming_text)
         cleaned = incoming_text.strip().casefold()
         if cleaned in {"1", "РґР°", "yes", "y", "РІС‹РїРѕР»РЅРёС‚СЊ", "РѕС‚РїСЂР°РІРёС‚СЊ", "send"}:
             pending_smart_actions.pop(sender_id, None)
@@ -11753,6 +12045,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     pending_wizard = pending_wizard_requests.get(sender_id)
     if pending_wizard:
+        log_action_event("route", sender_id=sender_id, route="pending_wizard", stage=str(pending_wizard.get("stage") or ""), text=incoming_text)
         stage = str(pending_wizard.get("stage") or "")
         pending_wizard_user_id = str(pending_wizard.get("user_id") or "")
         wizard_target = f"@{settings.wizard_target_username.lstrip('@')}"
@@ -12050,6 +12343,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     pending_gpt = pending_gpt_requests.get(sender_id)
     if pending_gpt:
+        log_action_event("route", sender_id=sender_id, route="pending_gpt", text=incoming_text)
         if incoming_text.strip().casefold() in {"0", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
             pending_gpt_requests.pop(sender_id, None)
             status_message = pending_gpt.get("status_message")
@@ -12083,6 +12377,13 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     pending_direct_mail = pending_direct_mail_requests.get(sender_id)
     if pending_direct_mail:
+        log_action_event(
+            "route",
+            sender_id=sender_id,
+            route="pending_direct_mail",
+            user_id=str(pending_direct_mail.get("user_id") or ""),
+            text=incoming_text,
+        )
         direct_mail_user_id = str(pending_direct_mail.get("user_id") or "").strip()
         plain_text = incoming_text.strip()
         if plain_text.casefold() in {"0", "отмена", "cancel", "/cancel"}:
@@ -12114,6 +12415,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     active_command_name = current_command_execution_name(sender_id)
     if active_command_name:
+        log_action_event("route", sender_id=sender_id, route="active_command_guard", command_name=active_command_name, text=incoming_text)
         if is_voice_or_audio_message(event):
             await safe_event_reply(event, command_reply_guard_message(active_command_name))
             return
@@ -12123,6 +12425,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             return
 
     if is_voice_or_audio_message(event):
+        log_action_event("route", sender_id=sender_id, route="requester_voice", text=incoming_text)
         status_message = await safe_event_reply(
             event,
             build_process_status(
@@ -12168,45 +12471,55 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         return
 
     if is_command_menu_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="command_menu")
         await safe_event_reply(event, build_command_menu_text(), buttons=build_command_menu_buttons())
         return
 
     if is_requester_capabilities_question(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="requester_capabilities")
         await safe_event_reply(event, build_requester_capabilities_text(), buttons=build_command_menu_buttons())
         return
 
     if is_version_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="version")
         await safe_event_reply(event, build_runtime_version_text())
         return
 
     if is_diagnostics_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="diagnostics")
         await safe_event_reply(event, build_diagnostics_text())
         return
 
     unresolved_command = parse_unresolved_command(event.raw_text or "")
     if unresolved_command and await handle_unresolved_command_event(event, unresolved_command):
+        log_action_event("route", sender_id=sender_id, route="unresolved", command=unresolved_command)
         return
 
     if is_poc_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="poc")
         await safe_event_reply(event, build_poc_text(), buttons=build_poc_buttons())
         return
 
     logs_lines = parse_logs_command(event.raw_text or "")
     if logs_lines is not None:
+        log_action_event("route", sender_id=sender_id, route="logs", lines=logs_lines)
         await safe_event_reply(event, build_recent_logs_text(logs_lines))
         return
 
     if is_status_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="status")
         await safe_event_reply(event, "[STATUS] РЎРѕР±РёСЂР°СЋ dashboard РёР· SQL Р±Р°Р·С‹...")
         await send_status_dashboard_from_database(event)
         return
 
     if is_admin_site_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="adminsite")
         await send_live_admin_dashboard_link(event)
         return
 
     gpt_command = parse_gpt_command(event.raw_text or "")
     if gpt_command:
+        log_action_event("route", sender_id=sender_id, route="gpt_command", action=gpt_command.action, prompt=gpt_command.prompt)
         if gpt_command.action == "reset":
             gpt_chat_sessions.pop(sender_id, None)
             pending_gpt_requests.pop(sender_id, None)
@@ -12249,11 +12562,13 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         allow_numeric=active_scan_menu_owner_id == event.sender_id,
     )
     if scan_menu_action == "menu":
+        log_action_event("route", sender_id=sender_id, route="scan_menu")
         active_scan_menu_owner_id = event.sender_id
         await safe_event_reply(event, build_scan_menu_text_fast(), buttons=build_scan_menu_buttons())
         return
 
     if scan_menu_action == "results":
+        log_action_event("route", sender_id=sender_id, route="scan_results")
         active_scan_menu_owner_id = event.sender_id
         await safe_event_reply(event, build_scan_results_text())
         await send_latest_dashboard_to_chat(event)
@@ -12295,6 +12610,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     mail2_text = parse_mail2_command(event.raw_text or "")
     if mail2_text is not None:
+        log_action_event("route", sender_id=sender_id, route="mail2", has_text=bool(mail2_text))
         if not mail2_text:
             status_message = await safe_event_reply(
                 event,
@@ -12360,6 +12676,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     promo_command = parse_promo_command(event.raw_text or "")
     if promo_command:
+        log_action_event("route", sender_id=sender_id, route="promo", user_id=str(promo_command[0]), promo_code=str(promo_command[1]))
         user_id, promo_code, promo_mail_text = promo_command
         logging.info(
             "Received promo command user_id=%s promo_code=%s from chat_id=%s sender_id=%s",
@@ -12571,6 +12888,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     scan_action = scan_menu_action or parse_scan_command(event.raw_text or "")
     if scan_action in {"new", "continue"}:
+        log_action_event("route", sender_id=sender_id, route="scan_run", action=scan_action)
         active_scan_menu_owner_id = event.sender_id
         logging.info(
             "Received scan command action=%s from chat_id=%s sender_id=%s",
@@ -12659,6 +12977,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     info_lookup = parse_info_command(event.raw_text or "")
     if info_lookup:
+        log_action_event("route", sender_id=sender_id, route="info", query=info_lookup.query, use_database=info_lookup.use_database)
         user_id = info_lookup.query
         logging.info(
             "Received info command query=%s database=%s from chat_id=%s sender_id=%s",
@@ -12739,6 +13058,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
 
     help_lookup = parse_help_command(event.raw_text or "")
     if help_lookup:
+        log_action_event("route", sender_id=sender_id, route="help", query=help_lookup.query, use_database=help_lookup.use_database)
         user_id = help_lookup.query
         logging.info(
             "Received help command query=%s database=%s from chat_id=%s sender_id=%s",
@@ -12821,9 +13141,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         raw_text = (event.raw_text or "").strip()
         lowered_text = (event.raw_text or "").casefold()
         if raw_text.startswith("/"):
+            log_action_event("route", sender_id=sender_id, route="unknown_slash_command", text=raw_text)
             await safe_event_reply(event, unknown_slash_command_message())
             return
         if is_control_reply_text(raw_text):
+            log_action_event("route", sender_id=sender_id, route="control_reply_without_context", text=raw_text)
             workflow_name = current_pending_workflow_name(sender_id)
             if workflow_name:
                 await safe_event_reply(event, command_reply_guard_message(workflow_name))
@@ -12838,6 +13160,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             return
         try:
             if await forward_problem_report_to_wizard(event, sender, event.raw_text or ""):
+                log_action_event("route", sender_id=sender_id, route="auto_problem_report", text=raw_text)
                 await safe_event_reply(event, "РџСЂРѕР±Р»РµРјСѓ РїСЂРёРЅСЏР». РљР°СЂС‚РѕС‡РєСѓ РѕС‚РїСЂР°РІРёР» РІ wizard РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё.")
                 return
         except Exception:
@@ -12848,11 +13171,13 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             )
             return
         if "scan" in lowered_text or "СЃРєР°РЅ" in lowered_text:
+            log_action_event("route", sender_id=sender_id, route="scan_keyword")
             active_scan_menu_owner_id = event.sender_id
             await safe_event_reply(event, build_scan_menu_text_fast(), buttons=build_scan_menu_buttons())
             return
         direct_mail_user_id = parse_requester_mail_target_only(raw_text)
         if direct_mail_user_id:
+            log_action_event("route", sender_id=sender_id, route="direct_mail_prompt", user_id=direct_mail_user_id)
             pending_direct_mail_requests[sender_id] = {
                 "user_id": direct_mail_user_id,
                 "created_at": now_timestamp(),
@@ -12861,20 +13186,26 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             return
         requester_text_intent = detect_non_requester_intent(raw_text)
         if requester_text_intent == "greeting":
+            log_action_event("route", sender_id=sender_id, route="requester_greeting")
             await safe_event_reply(event, requester_greeting_message())
             return
         if requester_text_intent == "thanks":
+            log_action_event("route", sender_id=sender_id, route="requester_thanks")
             await safe_event_reply(event, support_thanks_message())
             return
         if requester_text_intent == "vpn_setup_help":
+            log_action_event("route", sender_id=sender_id, route="vpn_setup_help")
             await safe_event_reply(event, vpn_setup_help_message())
             return
         if requester_text_intent == "profile_id_help":
+            log_action_event("route", sender_id=sender_id, route="profile_id_help")
             await safe_event_reply(event, profile_id_help_message())
             return
         if looks_like_requester_action_text(raw_text):
+            log_action_event("route", sender_id=sender_id, route="smart_request", text=raw_text)
             await handle_smart_request(event, sender_id, event.raw_text or "", source="text", compact_status=True)
             return
+        log_action_event("route", sender_id=sender_id, route="requester_gpt_fallback", text=raw_text)
         await handle_gpt_prompt(
             event,
             sender_id,
