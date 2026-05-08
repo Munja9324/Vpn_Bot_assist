@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -232,18 +233,6 @@ def sanitize_hex_color(value: str, default: str) -> str:
     if re.fullmatch(r"#?[0-9a-fA-F]{6}", raw):
         return "#" + raw.lstrip("#")
     return default
-
-
-def fix_mojibake(text: str) -> str:
-    if not text:
-        return text
-    if "Р" not in text and "С" not in text:
-        return text
-    try:
-        fixed = text.encode("cp1251").decode("utf-8")
-    except Exception:
-        return text
-    return fixed if fixed else text
 
 
 def session_file_path(session_name: str) -> Path:
@@ -514,8 +503,10 @@ pending_wizard_requests: dict[int, dict[str, object]] = {}
 pending_mail2_requests: dict[int, dict[str, object]] = {}
 pending_gpt_requests: dict[int, dict[str, object]] = {}
 pending_smart_actions: dict[int, dict[str, object]] = {}
+pending_support_requests: dict[int, dict[str, object]] = {}
 active_gpt_requests: dict[int, dict[str, object]] = {}
 gpt_chat_sessions: dict[int, str] = {}
+gpt_request_lock = asyncio.Lock()
 ProgressCallback = Callable[[str], Awaitable[None]]
 logging_is_configured = False
 runtime_version_logged = False
@@ -523,6 +514,9 @@ startup_cleanup_done = False
 dashboard_http_server: ThreadingHTTPServer | None = None
 dashboard_http_thread: threading.Thread | None = None
 dashboard_intro_template_cache: tuple[Path, float, str] | None = None
+dashboard_action_jobs: dict[str, dict[str, object]] = {}
+dashboard_action_jobs_lock = threading.Lock()
+DASHBOARD_ACTION_JOBS_LIMIT = 300
 STATUS_EDIT_MIN_INTERVAL_SECONDS = max(0.25, env_float("STATUS_EDIT_MIN_INTERVAL_SECONDS", 0.7))
 status_edit_state: dict[int, tuple[float, str]] = {}
 ADMIN_CONVERSATION_MAX_MESSAGES = max(5000, env_int("ADMIN_CONVERSATION_MAX_MESSAGES", 120000))
@@ -549,6 +543,7 @@ FORECAST_WINBACK_RATE_EXPIRED = env_float("FORECAST_WINBACK_RATE_EXPIRED", 0.18)
 MAX_SCAN_ACTION_DELAY_SECONDS = 2.5
 SCAN_CHECKPOINT_USER_INTERVAL = max(1, env_int("SCAN_CHECKPOINT_USER_INTERVAL", 6))
 SCAN_CHECKPOINT_MIN_INTERVAL_SECONDS = max(2.0, env_float("SCAN_CHECKPOINT_MIN_INTERVAL_SECONDS", 10.0))
+STATUS_COMPACT_MODE = env_bool("STATUS_COMPACT_MODE", True)
 
 
 class ScanCancelledError(Exception):
@@ -639,12 +634,6 @@ def note_success_action() -> None:
     active_scan_action_delay_seconds = max(base, active_scan_action_delay_seconds - 0.03)
 
 
-KEYWORD_REPLIES = {
-    "\u043f\u0440\u0438\u0432\u0435\u0442": "\u041f\u0440\u0438\u0432\u0435\u0442! \u042f \u0441\u0435\u0439\u0447\u0430\u0441 \u0437\u0430\u043d\u044f\u0442, \u043e\u0442\u0432\u0435\u0447\u0443 \u0447\u0443\u0442\u044c \u043f\u043e\u0437\u0436\u0435.",
-    "\u0437\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439\u0442\u0435": "\u0417\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439\u0442\u0435! \u0421\u0435\u0439\u0447\u0430\u0441 \u043d\u0435 \u043c\u043e\u0433\u0443 \u043e\u0442\u0432\u0435\u0442\u0438\u0442\u044c, \u043d\u0430\u043f\u0438\u0448\u0443 \u043f\u043e\u0437\u0436\u0435.",
-    "\u0446\u0435\u043d\u0430": "\u041d\u0430\u043f\u0438\u0448\u0438\u0442\u0435, \u043f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430, \u0447\u0442\u043e \u0438\u043c\u0435\u043d\u043d\u043e \u0432\u0430\u0441 \u0438\u043d\u0442\u0435\u0440\u0435\u0441\u0443\u0435\u0442. \u042f \u043e\u0442\u0432\u0435\u0447\u0443 \u043f\u043e\u0437\u0436\u0435.",
-}
-
 SEARCH_STEPS = [
     "Подключаюсь к админ-боту",
     "Открываю раздел пользователей",
@@ -696,21 +685,95 @@ WIZARD_STEPS = [
 ]
 GPT_STEPS = [
     "Проверяю настройки OpenAI",
-    "Отправляю вопрос в ChatGPT",
+    "Отправляю вопрос в KBR_GPT",
     "Читаю ответ модели",
     "Отправляю ответ в чат",
 ]
 SMART_STEPS = [
     "Принимаю запрос",
     "Распознаю голос",
-    "Понимаю намерение через ChatGPT",
+    "Понимаю намерение через KBR_GPT",
     "Запускаю нужное действие",
 ]
 
-REQUESTER_DENY_MESSAGE = (
-    "Этот аккаунт не предназначен для получения сообшений, это сообщение "
-    "сгенерировано автоматически, отвечать на него не нужно"
+SUPPORT_OPERATOR_USERNAME = (os.getenv("SUPPORT_OPERATOR_USERNAME", "Aloneinthepluto").strip().lstrip("@") or "Aloneinthepluto")
+VIRTUAL_ASSISTANT_NAME = "VPN_KBR"
+VIRTUAL_ASSISTANT_INTRO = f"Я виртуальный помощник {VIRTUAL_ASSISTANT_NAME}."
+
+
+def assistant_user_message(text: str) -> str:
+    body = (text or "").strip()
+    if not body:
+        return VIRTUAL_ASSISTANT_INTRO
+    if body.startswith(VIRTUAL_ASSISTANT_INTRO):
+        return body
+    return f"{VIRTUAL_ASSISTANT_INTRO}\n{body}"
+
+
+def assistant_compact_reply(headline: str, detail: str = "") -> str:
+    lines = [str(headline or "").strip()]
+    detail_text = str(detail or "").strip()
+    if detail_text:
+        lines.append(detail_text)
+    return assistant_user_message("\n".join(line for line in lines if line))
+
+
+def assistant_list_reply(headline: str, items: list[str], closing: str = "") -> str:
+    lines = [str(headline or "").strip()]
+    lines.extend(str(item).strip() for item in items if str(item).strip())
+    closing_text = str(closing or "").strip()
+    if closing_text:
+        lines.append(closing_text)
+    return assistant_user_message("\n".join(line for line in lines if line))
+
+
+# Compact, calm user-facing replies inspired by mature support flows.
+SUPPORT_TICKET_ACCEPTED_MESSAGE = assistant_compact_reply(
+    "Спасибо, обращение принято.",
+    "Я передал его в поддержку.",
 )
+
+
+def support_processing_message() -> str:
+    return assistant_compact_reply("Принял запрос.", "Проверяю данные.")
+
+
+def support_voice_processing_message() -> str:
+    return assistant_compact_reply("Принял голосовое сообщение.", "Перевожу его в текст.")
+
+
+def gpt_processing_message() -> str:
+    return assistant_compact_reply("Принял вопрос.", "Готовлю ответ.")
+
+
+def gpt_retry_message(wait_seconds: float) -> str:
+    seconds = max(1, int(round(wait_seconds)))
+    return assistant_compact_reply(
+        "Сервис сейчас занят.",
+        f"Продолжаю попытки. Это может занять около {seconds} сек.",
+    )
+
+
+def gpt_unavailable_message() -> str:
+    return assistant_compact_reply("Сервис временно недоступен.", "Попробуйте чуть позже.")
+
+
+def gpt_failed_message() -> str:
+    return assistant_compact_reply("Не удалось сразу ответить.", "Попробуйте повторить запрос чуть позже.")
+
+
+def gpt_escalated_message() -> str:
+    return assistant_compact_reply(
+        "Не удалось быстро получить ответ.",
+        f"Передал вопрос в поддержку. Если нужно срочно, напишите @{SUPPORT_OPERATOR_USERNAME}.",
+    )
+
+
+def support_thanks_message() -> str:
+    return assistant_compact_reply(
+        "Пожалуйста.",
+        "Если будет нужно, помогу с VPN, оплатой или любым общим вопросом.",
+    )
 
 
 def make_progress_bar(done_units: int, total_units: int, width: int = 16) -> tuple[str, int]:
@@ -721,48 +784,6 @@ def make_progress_bar(done_units: int, total_units: int, width: int = 16) -> tup
     percent = int(round((done_units / total_units) * 100))
     filled = int(round((done_units / total_units) * width))
     return f"[{'█' * filled}{'·' * (width - filled)}]", percent
-
-
-def build_process_status(
-    title: str,
-    steps: list[str],
-    active_step: int,
-    *,
-    user_id: str | None = None,
-    target: str | None = None,
-    extra_lines: list[str] | None = None,
-    done: bool = False,
-    failed: bool = False,
-) -> str:
-    if failed:
-        status = "ошибка"
-    elif done:
-        status = "завершено"
-    else:
-        status = "выполняется"
-
-    total_steps = max(len(steps), 1)
-    current_step = max(1, min(active_step, total_steps))
-    done_units = total_steps if done else max(current_step - 1 if failed else current_step, 0)
-    bar, percent = make_progress_bar(done_units, total_steps, width=0)
-    step_text = steps[current_step - 1] if steps else title
-    title_text = decorate_status_title(title, done=done, failed=failed)
-    status_icon = animated_symbol("error" if failed else "done" if done else "waiting")
-
-    lines = [
-        title_text,
-        f"{bar} {percent}%",
-        f"{status_icon} Статус: {status}",
-        f"STEP {current_step}/{total_steps}: {step_text}",
-    ]
-    if user_id:
-        lines.append(f"ID пользователя: {user_id}")
-    if target:
-        lines.append(f"Получатель: {target}")
-    if extra_lines:
-        lines.extend(str(line) for line in extra_lines if str(line).strip())
-
-    return "\n".join(lines)
 
 
 async def emit_process_progress(
@@ -791,6 +812,42 @@ async def emit_process_progress(
             failed=failed,
         )
     )
+
+
+def build_process_status(
+    title: str,
+    steps: list[str],
+    active_step: int,
+    *,
+    user_id: str | None = None,
+    target: str | None = None,
+    extra_lines: list[str] | None = None,
+    done: bool = False,
+    failed: bool = False,
+) -> str:
+    status = "ОШИБКА" if failed else "ГОТОВО" if done else "В РАБОТЕ"
+    total_steps = max(len(steps), 1)
+    current_step = max(1, min(active_step, total_steps))
+    done_units = total_steps if done else max(current_step - 1 if failed else current_step, 0)
+    bar, percent = make_progress_bar(done_units, total_steps, width=0)
+    title_text = decorate_status_title(title, done=done, failed=failed)
+
+    lines = [
+        title_text,
+        f"{bar} {percent}% | ШАГ {current_step}/{total_steps}",
+        f"СТАТУС: {status}",
+    ]
+    if user_id:
+        lines.append(f"ID: {user_id}")
+    if target:
+        lines.append(f"Кому: {target}")
+
+    if not STATUS_COMPACT_MODE:
+        step_text = steps[current_step - 1] if steps else title
+        lines.append(f"Действие: {step_text}")
+        if extra_lines:
+            lines.extend(str(line) for line in extra_lines if str(line).strip())
+    return "\n".join(lines)
 
 
 def active_admin_flow_text() -> str:
@@ -860,14 +917,50 @@ async def admin_flow_context(
 
 def is_final_status_text(text: str) -> bool:
     markers = (
-        "Статус: завершено",
-        "Статус: ошибка",
-        "Статус: пауза",
+        "СТАТУС: ГОТОВО",
+        "СТАТУС: ОШИБКА",
+        "СТАТУС: ПАУЗА",
+        "Заявка принята и передана в поддержку",
+        "Заявку принял и передал в поддержку",
+        "Спасибо, обращение принято",
+        "Я передал его в поддержку",
+        "Готово. Отправляю ответ",
+        "Ответ готов.",
+        "Не удалось быстро получить ответ.",
+        "Не удалось",
         "Scan завершен",
         "Scan на паузе",
         "Scan сброшен",
     )
     return any(marker in text for marker in markers)
+
+
+def is_status_like_text(text: str) -> bool:
+    cleaned = str(text or "")
+    if not cleaned.strip():
+        return False
+    markers = (
+        "СТАТУС:",
+        "Статус:",
+        "ШАГ ",
+        "STEP ",
+        "Scan пользователей",
+        "[STATUS]",
+        "ожидайте",
+        "подождите",
+        "Пожалуйста, немного подождите",
+        "Принял запрос.",
+        "Принял голосовое сообщение.",
+        "Принял вопрос.",
+        "Сервис сейчас занят.",
+        "Ответ готов.",
+        "Собираю dashboard",
+        "Заявка принята и передана в поддержку",
+        "Заявку принял и передал в поддержку",
+        "Спасибо, обращение принято.",
+        "Запрос поддержки отменен",
+    )
+    return any(marker in cleaned for marker in markers)
 
 
 def extract_scan_position(text: str) -> tuple[int, int] | None:
@@ -889,9 +982,9 @@ def extract_scan_position(text: str) -> tuple[int, int] | None:
     return None
 
 
-async def edit_status_message(message, text: str, *, buttons=None, parse_mode=None, force: bool = False) -> None:
+async def edit_status_message(message, text: str, *, buttons=None, parse_mode=None, force: bool = False) -> bool:
     if not message:
-        return
+        return False
     key = int(getattr(message, "id", 0) or id(message))
     now_monotonic = loop.time()
     last_at, last_text = status_edit_state.get(key, (0.0, ""))
@@ -906,22 +999,28 @@ async def edit_status_message(message, text: str, *, buttons=None, parse_mode=No
     try:
         await message.edit(text, buttons=buttons, parse_mode=parse_mode)
         status_edit_state[key] = (loop.time(), text)
+        return True
     except MessageNotModifiedError:
         status_edit_state[key] = (loop.time(), text)
+        return True
     except FloodWaitError as error:
         wait_seconds = int(getattr(error, "seconds", 1) or 1)
         note_floodwait(wait_seconds)
         status_edit_state[key] = (loop.time() + wait_seconds, text)
         logging.warning("FloodWait on status edit: skipping edits for %ss", wait_seconds)
+        return False
     except Exception:
         logging.exception("Failed to edit status message")
+        return False
 
 
 async def safe_event_reply(event, *args, **kwargs):
     if args and isinstance(args[0], str) and len(args[0]) > TELEGRAM_SAFE_TEXT_LIMIT and "file" not in kwargs:
         return await reply_with_text_file(event, args[0], **kwargs)
+
     try:
-        return await event.reply(*args, **kwargs)
+        sent = await event.reply(*args, **kwargs)
+        return sent
     except MessageTooLongError:
         if args and isinstance(args[0], str):
             logging.warning("Reply text is too long; sending it as a txt file")
@@ -1254,7 +1353,7 @@ def format_duration(seconds: float | int | None) -> str:
 
 
 def prune_expired_pending_requests() -> dict[str, int]:
-    removed = {"wizard": 0, "mail2": 0, "gpt": 0, "smart": 0}
+    removed = {"wizard": 0, "mail2": 0, "gpt": 0, "smart": 0, "support": 0}
     for sender_id, data in list(pending_wizard_requests.items()):
         age = pending_request_age_seconds(data)
         if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
@@ -1275,13 +1374,19 @@ def prune_expired_pending_requests() -> dict[str, int]:
         if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
             pending_smart_actions.pop(sender_id, None)
             removed["smart"] += 1
-    if removed["wizard"] or removed["mail2"] or removed["gpt"] or removed["smart"]:
+    for sender_id, data in list(pending_support_requests.items()):
+        age = pending_request_age_seconds(data)
+        if age is not None and age > PENDING_REQUEST_TTL_SECONDS:
+            pending_support_requests.pop(sender_id, None)
+            removed["support"] += 1
+    if removed["wizard"] or removed["mail2"] or removed["gpt"] or removed["smart"] or removed["support"]:
         logging.info(
-            "Pruned expired pending requests wizard=%s mail2=%s gpt=%s smart=%s ttl=%ss",
+            "Pruned expired pending requests wizard=%s mail2=%s gpt=%s smart=%s support=%s ttl=%ss",
             removed["wizard"],
             removed["mail2"],
             removed["gpt"],
             removed["smart"],
+            removed["support"],
             PENDING_REQUEST_TTL_SECONDS,
         )
     return removed
@@ -1491,14 +1596,6 @@ def log_runtime_version() -> None:
     runtime_version_logged = True
 
 
-def pick_reply(text: str) -> str:
-    lowered = text.lower()
-    for keyword, reply in KEYWORD_REPLIES.items():
-        if keyword in lowered:
-            return reply
-    return settings.default_reply
-
-
 def extract_user_id(text: str) -> str | None:
     cleaned = text.strip()
     if re.fullmatch(r"\d{1,20}", cleaned):
@@ -1653,6 +1750,64 @@ def openai_urlopen(request: Request):
     return urlopen(request, timeout=settings.openai_timeout_seconds)
 
 
+OPENAI_MAX_RETRY_ATTEMPTS = 3
+OPENAI_MAX_RETRY_DELAY_SECONDS = 90.0
+OPENAI_MIN_RETRY_DELAY_SECONDS = 1.0
+GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS = 120.0
+GPT_RATE_LIMIT_FALLBACK_DELAY_SECONDS = 10.0
+
+
+def parse_openai_retry_delay(error: HTTPError, error_message: str, attempt: int) -> float:
+    retry_after = ""
+    try:
+        retry_after = str(error.headers.get("Retry-After") or "").strip()
+    except Exception:
+        retry_after = ""
+
+    if retry_after:
+        try:
+            parsed = float(retry_after)
+            if parsed > 0:
+                return max(OPENAI_MIN_RETRY_DELAY_SECONDS, min(parsed, OPENAI_MAX_RETRY_DELAY_SECONDS))
+        except ValueError:
+            pass
+
+    text = (error_message or "").casefold()
+    match = re.search(r"try again in\s+(\d+(?:\.\d+)?)s", text)
+    if not match:
+        match = re.search(r"in\s+(\d+(?:\.\d+)?)\s+seconds?", text)
+    if match:
+        try:
+            parsed = float(match.group(1))
+            if parsed > 0:
+                return max(OPENAI_MIN_RETRY_DELAY_SECONDS, min(parsed, OPENAI_MAX_RETRY_DELAY_SECONDS))
+        except ValueError:
+            pass
+
+    fallback = min(OPENAI_MAX_RETRY_DELAY_SECONDS, OPENAI_MIN_RETRY_DELAY_SECONDS * (2 ** attempt))
+    return max(OPENAI_MIN_RETRY_DELAY_SECONDS, fallback)
+
+
+def parse_retry_seconds_from_error_text(error_text: str, default_seconds: float = GPT_RATE_LIMIT_FALLBACK_DELAY_SECONDS) -> float:
+    text = str(error_text or "").casefold()
+    match = re.search(r"try again in\s+(\d+(?:\.\d+)?)s", text)
+    if not match:
+        match = re.search(r"in\s+(\d+(?:\.\d+)?)\s+seconds?", text)
+    if match:
+        try:
+            parsed = float(match.group(1))
+            if parsed > 0:
+                return max(OPENAI_MIN_RETRY_DELAY_SECONDS, min(parsed, OPENAI_MAX_RETRY_DELAY_SECONDS))
+        except ValueError:
+            pass
+    return max(OPENAI_MIN_RETRY_DELAY_SECONDS, min(default_seconds, OPENAI_MAX_RETRY_DELAY_SECONDS))
+
+
+def is_rate_limit_error_text(error_text: str) -> bool:
+    text = str(error_text or "").casefold()
+    return "rate limit" in text or "too many requests" in text or "api error 429" in text
+
+
 def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
@@ -1667,19 +1822,53 @@ def call_openai_response_payload(payload: dict[str, object]) -> tuple[str, str]:
         },
         method="POST",
     )
-    try:
-        with openai_urlopen(request) as response:
-            response_data = json.loads(response.read().decode("utf-8", errors="replace"))
-    except HTTPError as error:
-        error_body = error.read().decode("utf-8", errors="replace")
+    response_data: dict[str, object] = {}
+    last_error_text = ""
+    for attempt in range(OPENAI_MAX_RETRY_ATTEMPTS):
         try:
-            error_data = json.loads(error_body)
-            error_message = str((error_data.get("error") or {}).get("message") or error_body)
-        except Exception:
-            error_message = error_body or str(error)
-        raise RuntimeError(f"OpenAI API error {error.code}: {error_message[:500]}") from error
-    except URLError as error:
-        raise RuntimeError(f"OpenAI connection error: {error.reason}") from error
+            with openai_urlopen(request) as response:
+                response_data = json.loads(response.read().decode("utf-8", errors="replace"))
+            break
+        except HTTPError as error:
+            error_body = error.read().decode("utf-8", errors="replace")
+            try:
+                error_data = json.loads(error_body)
+                error_message = str((error_data.get("error") or {}).get("message") or error_body)
+            except Exception:
+                error_message = error_body or str(error)
+            last_error_text = f"OpenAI API error {error.code}: {error_message[:500]}"
+
+            is_retryable = error.code == 429 or error.code in {408, 500, 502, 503, 504}
+            has_next_attempt = attempt + 1 < OPENAI_MAX_RETRY_ATTEMPTS
+            if is_retryable and has_next_attempt:
+                wait_seconds = parse_openai_retry_delay(error, error_message, attempt)
+                logging.warning(
+                    "OpenAI temporary error %s, retry in %.1fs (%s/%s)",
+                    error.code,
+                    wait_seconds,
+                    attempt + 1,
+                    OPENAI_MAX_RETRY_ATTEMPTS,
+                )
+                time.sleep(wait_seconds)
+                continue
+            raise RuntimeError(last_error_text) from error
+        except URLError as error:
+            last_error_text = f"OpenAI connection error: {error.reason}"
+            has_next_attempt = attempt + 1 < OPENAI_MAX_RETRY_ATTEMPTS
+            if has_next_attempt:
+                wait_seconds = min(OPENAI_MAX_RETRY_DELAY_SECONDS, OPENAI_MIN_RETRY_DELAY_SECONDS * (2 ** attempt))
+                logging.warning(
+                    "OpenAI connection problem, retry in %.1fs (%s/%s): %s",
+                    wait_seconds,
+                    attempt + 1,
+                    OPENAI_MAX_RETRY_ATTEMPTS,
+                    error.reason,
+                )
+                time.sleep(wait_seconds)
+                continue
+            raise RuntimeError(last_error_text) from error
+    else:
+        raise RuntimeError(last_error_text or "OpenAI request failed after retries")
 
     response_text = extract_openai_response_text(response_data)
     response_id = str(response_data.get("id") or "").strip()
@@ -1792,6 +1981,705 @@ def is_voice_or_audio_message(event: events.NewMessage.Event) -> bool:
     document = getattr(message, "document", None)
     mime_type = str(getattr(document, "mime_type", "") or "")
     return mime_type.startswith("audio/")
+
+
+PROBLEM_REPORT_KEYWORDS = (
+    "проблем",
+    "ошиб",
+    "не работает",
+    "не могу",
+    "не получается",
+    "не подключ",
+    "не откры",
+    "не заходит",
+    "не приход",
+    "завис",
+    "сломан",
+    "ключ",
+    "подписк",
+    "vpn",
+)
+
+SUPPORT_KEY_ISSUE_KEYWORDS = (
+    "ключ",
+    "key",
+    "конфиг",
+    "конфигурац",
+    "vpn не работает",
+    "не подключ",
+    "не откры",
+)
+
+SUPPORT_PAYMENT_ISSUE_KEYWORDS = (
+    "платеж",
+    "оплат",
+    "списал",
+    "списали",
+    "чек",
+    "не прошел платеж",
+    "не прошла оплата",
+    "транзакц",
+)
+
+SUPPORT_VAGUE_ISSUE_ROOTS = (
+    "ключ",
+    "проблем",
+    "оплат",
+    "платеж",
+    "подпис",
+    "vpn",
+    "впн",
+    "конфиг",
+    "ошиб",
+    "помог",
+    "неработ",
+)
+
+SUPPORT_DETAIL_HINT_ROOTS = (
+    "когда",
+    "после",
+    "ошиб",
+    "код",
+    "пишет",
+    "скрин",
+    "прилож",
+    "android",
+    "iphone",
+    "ios",
+    "windows",
+    "mac",
+    "pc",
+    "локац",
+    "сервер",
+    "оплатил",
+    "чек",
+    "транзак",
+    "таймаут",
+    "timeout",
+)
+
+NON_REQUESTER_GREETING_KEYWORDS = (
+    "привет",
+    "здравствуйте",
+    "добрый день",
+    "добрый вечер",
+    "салам",
+    "hello",
+    "hi",
+)
+
+NON_REQUESTER_THANKS_KEYWORDS = (
+    "спасибо",
+    "благодарю",
+    "thanks",
+    "thx",
+)
+
+NON_REQUESTER_VPN_SETUP_KEYWORDS = (
+    "как подключить vpn",
+    "как подключить впн",
+    "как настроить vpn",
+    "как настроить впн",
+    "как включить vpn",
+    "как включить впн",
+    "инструкция",
+    "инструкц",
+    "настройка vpn",
+    "настройка впн",
+    "подключение vpn",
+    "подключение впн",
+    "где инструкция",
+)
+
+NON_REQUESTER_PROFILE_ID_HELP_KEYWORDS = (
+    "как узнать id",
+    "где мой id",
+    "где узнать id",
+    "как посмотреть id",
+    "как найти id",
+    "свой id",
+    "мой id",
+    "id пользователя",
+    "id в профиле",
+)
+
+
+def looks_like_problem_report(text: str) -> bool:
+    cleaned = (text or "").strip().casefold()
+    if len(cleaned) < 6:
+        return False
+    return any(keyword in cleaned for keyword in PROBLEM_REPORT_KEYWORDS)
+
+
+def is_operator_request_text(text: str) -> bool:
+    cleaned = (text or "").strip().casefold()
+    if not cleaned:
+        return False
+    markers = (
+        "позови оператора",
+        "позовите оператора",
+        "нужен оператор",
+        "живой оператор",
+        "позови админа",
+        "свяжи с оператором",
+        "оператор",
+    )
+    return any(marker in cleaned for marker in markers)
+
+
+def support_operator_contact_text() -> str:
+    return assistant_compact_reply(
+        "Подключаю оператора поддержки.",
+        f"Если нужно срочно, напишите @{SUPPORT_OPERATOR_USERNAME}.",
+    )
+
+
+def is_vpn_setup_request_text(text: str) -> bool:
+    cleaned = (text or "").strip().casefold()
+    if not cleaned:
+        return False
+    return any(keyword in cleaned for keyword in NON_REQUESTER_VPN_SETUP_KEYWORDS)
+
+
+def is_profile_id_help_text(text: str) -> bool:
+    cleaned = (text or "").strip().casefold()
+    if not cleaned:
+        return False
+    return any(keyword in cleaned for keyword in NON_REQUESTER_PROFILE_ID_HELP_KEYWORDS)
+
+
+def vpn_setup_help_message() -> str:
+    return assistant_list_reply(
+        "Как подключить VPN:",
+        [
+            "1) Откройте VPN_KBR_BOT.",
+            "2) Перейдите в раздел с инструкцией по подключению.",
+            "3) Скопируйте ключ и откройте его в VPN-приложении.",
+            "4) Нажмите «Подключить».",
+        ],
+        "Если не получается, пришлите ID из «Профиль» и текст ошибки.",
+    )
+
+
+def profile_id_help_message() -> str:
+    return assistant_list_reply(
+        "Как узнать ID пользователя:",
+        [
+            "1) Откройте VPN_KBR_BOT.",
+            "2) Перейдите в раздел «Профиль».",
+            "3) Скопируйте ID пользователя и отправьте его сюда.",
+        ],
+        "Важно: нужен именно ID пользователя в боте, а не Telegram ID и не ID подписки.",
+    )
+
+
+def detect_non_requester_intent(text: str) -> str:
+    cleaned = (text or "").strip().casefold()
+    if not cleaned:
+        return "empty"
+    if is_operator_request_text(cleaned):
+        return "operator"
+    if is_vpn_setup_request_text(cleaned):
+        return "vpn_setup_help"
+    if is_profile_id_help_text(cleaned):
+        return "profile_id_help"
+    if detect_support_issue_types(cleaned) or looks_like_problem_report(cleaned):
+        return "support_issue"
+    words_count = len(re.findall(r"\S+", cleaned))
+    if words_count <= 3 and any(keyword in cleaned for keyword in NON_REQUESTER_GREETING_KEYWORDS):
+        return "greeting"
+    if words_count <= 4 and any(keyword in cleaned for keyword in NON_REQUESTER_THANKS_KEYWORDS):
+        return "thanks"
+    return "assistant_chat"
+
+
+def support_intake_message() -> str:
+    return assistant_list_reply(
+        "Чем могу помочь:",
+        [
+            "Если вопрос по VPN, пришлите ID из «Профиль» и коротко опишите проблему.",
+            "Если вопрос общий, просто напишите его обычным сообщением.",
+        ],
+        "Если нужен человек, напишите: «позови оператора».",
+    )
+
+
+def support_clarification_message() -> str:
+    return assistant_list_reply(
+        "Нужно немного больше деталей:",
+        [
+            "1) Что именно не работает.",
+            "2) Где это происходит: приложение и устройство.",
+            "3) Какой текст ошибки или что вы уже пробовали.",
+        ],
+        "Пример: ID 123456, ключ не подключается в v2ray на Android, ошибка timeout.",
+    )
+
+
+def support_payment_clarification_message() -> str:
+    return assistant_list_reply(
+        "Чтобы проверить оплату, пришлите:",
+        [
+            "1) ID из «Профиль».",
+            "2) Когда была оплата.",
+            "3) Сумму оплаты.",
+            "4) Чек или последние цифры платежа, если они есть.",
+        ],
+    )
+
+
+def support_issue_clarification_message(text: str) -> str:
+    issue_types = detect_support_issue_types(text)
+    if "проблема с оплатой/платежом" in issue_types:
+        return support_payment_clarification_message()
+    return support_clarification_message()
+
+
+def support_user_not_found_message(lookup: str) -> str:
+    lookup_text = str(lookup or "").strip() or "указанный ID"
+    return assistant_list_reply(
+        f"Пользователь `{lookup_text}` не найден в базе VPN_KBR.",
+        [
+            "Возможные причины:",
+            "1) Вы отправили Telegram ID, а не ID пользователя бота.",
+            "2) Вы отправили ID подписки, а не ID пользователя.",
+            "3) Профиль еще не попал в базу после последнего scan.",
+        ],
+        "Проверьте ID в разделе «Профиль» и отправьте его еще раз.",
+    )
+
+
+def is_support_issue_too_vague(text: str) -> bool:
+    cleaned = (text or "").strip().casefold()
+    if not cleaned:
+        return True
+    cleaned = re.sub(r"@[\w]{3,32}", " ", cleaned)
+    cleaned = re.sub(r"\b\d{4,20}\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return True
+
+    words = re.findall(r"[a-zа-яё0-9_]+", cleaned, flags=re.IGNORECASE)
+    meaningful_words = [word for word in words if len(word) >= 2 and not word.isdigit()]
+    if len(meaningful_words) <= 2:
+        return True
+
+    has_detail = any(root in cleaned for root in SUPPORT_DETAIL_HINT_ROOTS)
+    if len(meaningful_words) <= 4 and not has_detail:
+        return True
+
+    if all(any(word.startswith(root) for root in SUPPORT_VAGUE_ISSUE_ROOTS) for word in meaningful_words):
+        return True
+    return False
+
+
+def detect_support_issue_types(text: str) -> list[str]:
+    cleaned = (text or "").casefold()
+    issue_types: list[str] = []
+    if any(keyword in cleaned for keyword in SUPPORT_KEY_ISSUE_KEYWORDS):
+        issue_types.append("проблема с ключом/конфигом")
+    if any(keyword in cleaned for keyword in SUPPORT_PAYMENT_ISSUE_KEYWORDS):
+        issue_types.append("проблема с оплатой/платежом")
+    if not issue_types and looks_like_problem_report(text):
+        issue_types.append("общая техническая проблема")
+    return issue_types
+
+
+def unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = str(value or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    return result
+
+
+def extract_username_candidates_without_at(text: str) -> list[str]:
+    candidates: list[str] = []
+    for token in re.findall(r"\b[A-Za-z][A-Za-z0-9_]{2,31}\b", text or ""):
+        username = normalize_username(token)
+        if username:
+            candidates.append(username)
+    return unique_preserve_order(candidates)
+
+
+def support_lookup_candidates(text: str, sender) -> list[str]:
+    candidates: list[str] = []
+    direct = extract_problem_lookup(text)
+    if direct:
+        candidates.append(direct)
+    candidates.extend(extract_username_candidates_without_at(text))
+    sender_user = sender_username(sender)
+    if sender_user:
+        candidates.append(sender_user)
+        candidates.append(f"@{sender_user}")
+    sender_id = str(getattr(sender, "id", "") or "").strip()
+    if sender_id:
+        candidates.append(sender_id)
+    return unique_preserve_order(candidates)[:20]
+
+
+def resolve_support_record(text: str, sender) -> tuple[dict | None, str]:
+    for lookup in support_lookup_candidates(text, sender):
+        record = load_latest_record_by_lookup_from_database(lookup)
+        if record:
+            return record, lookup
+    return None, ""
+
+
+def support_pick_subscriptions(record: dict, text: str) -> list[dict]:
+    subscriptions = list(record.get("subscriptions") or [])
+    if not subscriptions:
+        return []
+    if len(subscriptions) == 1:
+        return subscriptions
+    cleaned = (text or "").strip()
+    lowered = cleaned.casefold()
+    if not lowered:
+        return []
+
+    if any(marker in lowered for marker in ("все", "обе", "оба", "all")):
+        return subscriptions
+
+    selected_indexes: set[int] = set()
+
+    for index, subscription in enumerate(subscriptions):
+        subscription_id = str(subscription.get("subscription_id") or "").strip()
+        if subscription_id and re.search(rf"\b{re.escape(subscription_id)}\b", cleaned):
+            selected_indexes.add(index)
+
+    numbers = re.findall(r"\b\d{1,20}\b", cleaned)
+    for number in numbers:
+        try:
+            value = int(number)
+        except ValueError:
+            continue
+        if 1 <= value <= len(subscriptions):
+            selected_indexes.add(value - 1)
+
+    for index, subscription in enumerate(subscriptions):
+        location = str(subscription.get("location") or "").strip()
+        button_text = str(subscription.get("button_text") or "").strip()
+        if location and location.casefold() in lowered:
+            selected_indexes.add(index)
+        if button_text and button_text.casefold() in lowered:
+            selected_indexes.add(index)
+
+    if not selected_indexes:
+        return []
+    return [subscriptions[index] for index in range(len(subscriptions)) if index in selected_indexes]
+
+
+def support_no_subscriptions_message() -> str:
+    return assistant_list_reply(
+        "По вашему профилю я не нашел активных подписок.",
+        [
+            "Проверьте раздел «Подписки» в боте.",
+            "Если оплата была недавно, пришлите ID из «Профиль» и время оплаты или чек.",
+        ],
+    )
+
+
+def support_subscriptions_question(record: dict) -> str:
+    subscriptions = list(record.get("subscriptions") or [])
+    if len(subscriptions) <= 1:
+        return ""
+    lines = [assistant_compact_reply("Нашел несколько подписок.", "Уточните, по какой именно возник вопрос:")]
+    for index, subscription in enumerate(subscriptions, start=1):
+        sub_id = str(subscription.get("subscription_id") or "").strip() or f"sub-{index}"
+        location = str(subscription.get("location") or "").strip()
+        label = str(subscription.get("button_text") or "").strip()
+        lines.append(
+            f"{index}) {sub_id}"
+            + (f" | {location}" if location else "")
+            + (f" | {label}" if label and label != location else "")
+        )
+    lines.append("Можно указать несколько: например `1 3` или `12345 98765`.")
+    lines.append("Если вопрос по всем подпискам, ответьте `все` или `обе`.")
+    return "\n".join(lines)
+
+
+def build_support_wizard_report(
+    *,
+    sender_id: int,
+    sender_username_value: str,
+    sender_full_name: str,
+    issue_text: str,
+    record: dict | None,
+    lookup_used: str,
+    selected_subscriptions: list[dict] | None,
+) -> str:
+    card_text = format_user_summary_from_record(record) if record else ""
+    selected_text = ""
+    selected_items = list(selected_subscriptions or [])
+    if selected_items:
+        selected_lines = ["Выбранные подписки:"]
+        for item in selected_items:
+            selected_lines.append(
+                f"- ID: {str(item.get('subscription_id') or '').strip() or '-'}"
+                f" | Локация: {str(item.get('location') or '').strip() or '-'}"
+                f" | Кнопка: {str(item.get('button_text') or '').strip() or '-'}"
+            )
+        selected_text = "\n".join(selected_lines)
+    report_lines = [
+        "Заявка поддержки VPN_KBR",
+        f"Время: {datetime.now().isoformat(timespec='seconds')}",
+        f"Отправитель Telegram ID: {sender_id}",
+        f"Отправитель username: @{sender_username_value}" if sender_username_value else "Отправитель username: нет",
+        f"Отправитель имя: {sender_full_name}" if sender_full_name else "Отправитель имя: нет",
+        f"Lookup: {lookup_used or 'не определен'}",
+        "",
+        "Текст обращения:",
+        issue_text.strip() or "[пусто]",
+    ]
+    if selected_text:
+        report_lines.extend(("", selected_text))
+    if card_text:
+        report_lines.extend(("", "Карточка пользователя:", card_text))
+    return "\n".join(report_lines)
+
+
+async def forward_support_issue_to_wizard(
+    *,
+    sender,
+    sender_id: int,
+    issue_text: str,
+    record: dict | None,
+    lookup_used: str,
+    selected_subscriptions: list[dict] | None,
+) -> None:
+    sender_username_value = sender_username(sender)
+    sender_full_name_value = sender_full_name(sender)
+    report_text = build_support_wizard_report(
+        sender_id=sender_id,
+        sender_username_value=sender_username_value,
+        sender_full_name=sender_full_name_value,
+        issue_text=issue_text,
+        record=record,
+        lookup_used=lookup_used,
+        selected_subscriptions=selected_subscriptions,
+    )
+    await send_to_wizard_target(report_text)
+
+
+async def update_or_reply_text(event, status_message, text: str, *, force: bool = True) -> None:
+    if status_message:
+        await edit_status_message(status_message, text, force=force)
+    else:
+        await safe_event_reply(event, text)
+
+
+async def handle_pending_support_request(event, sender, sender_id: int, incoming_text: str) -> bool:
+    pending_support = pending_support_requests.get(sender_id)
+    if not pending_support:
+        return False
+
+    lowered_reply = incoming_text.casefold()
+    if lowered_reply in {"0", "отмена", "cancel", "/cancel"}:
+        pending_support_requests.pop(sender_id, None)
+        await safe_event_reply(
+            event,
+            assistant_compact_reply("Запрос отменен.", "Пришлите новое описание, когда будете готовы."),
+        )
+        return True
+
+    pending_stage = str(pending_support.get("stage") or "await_subscription")
+    if pending_stage == "await_issue_details":
+        if is_support_issue_too_vague(incoming_text):
+            await safe_event_reply(
+                event,
+                support_issue_clarification_message(str(pending_support.get("issue_text") or incoming_text)),
+            )
+            return True
+        pending_support_requests.pop(sender_id, None)
+        await forward_support_issue_to_wizard(
+            sender=sender,
+            sender_id=sender_id,
+            issue_text=incoming_text,
+            record=dict(pending_support.get("record") or {}),
+            lookup_used=str(pending_support.get("lookup") or ""),
+            selected_subscriptions=(
+                list(pending_support.get("selected_subscriptions") or [])
+                if isinstance(pending_support.get("selected_subscriptions"), list)
+                else []
+            ),
+        )
+        await safe_event_reply(event, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+        return True
+
+    record = dict(pending_support.get("record") or {})
+    if not list(record.get("subscriptions") or []):
+        pending_support_requests.pop(sender_id, None)
+        await safe_event_reply(event, support_no_subscriptions_message())
+        return True
+
+    selected_subscriptions = support_pick_subscriptions(record, incoming_text)
+    if not selected_subscriptions:
+        await safe_event_reply(event, support_subscriptions_question(record))
+        return True
+
+    original_issue_text = str(pending_support.get("issue_text") or "")
+    if is_support_issue_too_vague(original_issue_text):
+        pending_support["stage"] = "await_issue_details"
+        pending_support["selected_subscriptions"] = selected_subscriptions
+        pending_support_requests[sender_id] = pending_support
+        await safe_event_reply(event, support_clarification_message())
+        return True
+
+    pending_support_requests.pop(sender_id, None)
+    await forward_support_issue_to_wizard(
+        sender=sender,
+        sender_id=sender_id,
+        issue_text=original_issue_text,
+        record=record,
+        lookup_used=str(pending_support.get("lookup") or ""),
+        selected_subscriptions=selected_subscriptions,
+    )
+    await safe_event_reply(event, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+    return True
+
+
+async def handle_support_issue_flow(
+    event,
+    sender,
+    sender_id: int,
+    issue_text: str,
+    *,
+    status_message=None,
+) -> None:
+    record, lookup_used = resolve_support_record(issue_text, sender)
+    if record:
+        subscriptions = list(record.get("subscriptions") or [])
+        if not subscriptions:
+            await update_or_reply_text(event, status_message, support_no_subscriptions_message())
+            return
+
+        selected_subscriptions = support_pick_subscriptions(record, issue_text)
+        if len(subscriptions) > 1 and not selected_subscriptions:
+            pending_support_requests[sender_id] = {
+                "record": record,
+                "lookup": lookup_used,
+                "issue_text": issue_text,
+                "stage": "await_subscription",
+                "created_at": now_timestamp(),
+            }
+            await update_or_reply_text(event, status_message, support_subscriptions_question(record))
+            return
+
+        if is_support_issue_too_vague(issue_text):
+            if selected_subscriptions:
+                pending_support_requests[sender_id] = {
+                    "record": record,
+                    "lookup": lookup_used,
+                    "selected_subscriptions": selected_subscriptions,
+                    "stage": "await_issue_details",
+                    "created_at": now_timestamp(),
+                }
+            await update_or_reply_text(event, status_message, support_issue_clarification_message(issue_text))
+            return
+
+        await forward_support_issue_to_wizard(
+            sender=sender,
+            sender_id=sender_id,
+            issue_text=issue_text,
+            record=record,
+            lookup_used=lookup_used,
+            selected_subscriptions=selected_subscriptions,
+        )
+        await update_or_reply_text(event, status_message, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+        return
+
+    lookup_guess = extract_problem_lookup(issue_text)
+    if lookup_guess:
+        if is_support_issue_too_vague(issue_text):
+            await update_or_reply_text(event, status_message, support_issue_clarification_message(issue_text))
+            return
+        await update_or_reply_text(event, status_message, support_user_not_found_message(lookup_guess))
+        return
+
+    await update_or_reply_text(event, status_message, support_intake_message())
+
+
+def extract_problem_lookup(text: str) -> str:
+    cleaned = str(text or "")
+    for match in re.finditer(r"(?<![A-Za-z0-9_])@([A-Za-z0-9_]{3,32})", cleaned):
+        username = normalize_username(match.group(1))
+        if username and username not in {
+            normalize_username(settings.admin_bot_username),
+            normalize_username(settings.wizard_target_username),
+        }:
+            return f"@{username}"
+    id_match = re.search(r"\b\d{1,20}\b", cleaned)
+    if id_match:
+        return id_match.group(0)
+    return ""
+
+
+def build_problem_report_text(
+    *,
+    sender_id: int,
+    sender_username_value: str,
+    sender_full_name: str,
+    user_lookup: str,
+    user_card: str,
+    problem_text: str,
+) -> str:
+    lines = [
+        "Проблема от пользователя",
+        f"Время: {datetime.now().isoformat(timespec='seconds')}",
+        f"Отправитель ID: {sender_id}",
+        f"Отправитель username: @{sender_username_value}" if sender_username_value else "Отправитель username: нет",
+        f"Отправитель имя: {sender_full_name}" if sender_full_name else "Отправитель имя: нет",
+        f"Поиск пользователя: {user_lookup or 'не указан'}",
+        "",
+        "Текст проблемы:",
+        problem_text.strip() or "[пусто]",
+    ]
+    if user_card:
+        lines.extend(("", "Карточка пользователя:", user_card))
+    return "\n".join(lines)
+
+
+async def forward_problem_report_to_wizard(event, sender, text: str) -> bool:
+    if not looks_like_problem_report(text):
+        return False
+
+    sender_id = int(event.sender_id or 0)
+    lookup = extract_problem_lookup(text)
+    if not lookup:
+        return False
+    user_card = ""
+    resolved_lookup = ""
+    if lookup:
+        record = load_latest_record_by_lookup_from_database(lookup)
+        if record:
+            user_card = format_user_summary_from_record(record)
+            resolved_lookup = str(record.get("user_id") or "").strip() or lookup
+        else:
+            resolved_lookup = lookup
+
+    sender_username_value = sender_username(sender)
+    sender_full_name_value = sender_full_name(sender)
+    report_text = build_problem_report_text(
+        sender_id=sender_id,
+        sender_username_value=sender_username_value,
+        sender_full_name=sender_full_name_value,
+        user_lookup=resolved_lookup or lookup,
+        user_card=user_card,
+        problem_text=text,
+    )
+
+    await send_to_wizard_target(report_text)
+    logging.info(
+        "Problem report forwarded to wizard sender_id=%s lookup=%s has_card=%s",
+        sender_id,
+        resolved_lookup or lookup,
+        bool(user_card),
+    )
+    return True
 
 
 SMART_ACTION_SCHEMA = {
@@ -1967,7 +2855,7 @@ def command_from_smart_action(action: dict) -> tuple[str, bool, str]:
     if name == "scan_reset":
         return "scan reset", True, "Сбросить scan"
     if name == "gpt_reset":
-        return "/gpt reset", False, "Очистить контекст ChatGPT"
+        return "/gpt reset", False, "Очистить контекст KBR_GPT"
     return "", False, ""
 
 
@@ -2072,7 +2960,7 @@ async def handle_smart_request(event, sender_id: int, request_text: str, *, sour
                 "Умный помощник",
                 SMART_STEPS,
                 len(SMART_STEPS),
-                extra_lines=["Не удалось разобрать как команду", "Отвечаю как обычный ChatGPT"],
+                extra_lines=["Не удалось разобрать как команду", "Отвечаю как обычный KBR_GPT"],
                 failed=True,
             ),
             force=True,
@@ -2124,6 +3012,16 @@ def is_status_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:dashboard|dash|status|report|дашборд|отчет|отчёт|статус)\s*$", text, flags=re.IGNORECASE))
 
 
+def is_admin_site_command(text: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*/?(?:adminsite|admin_site|liveadmin|adminpanel|админсайт|админ\s*сайт)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def is_version_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
 
@@ -2144,16 +3042,6 @@ def is_poc_command(text: str) -> bool:
 
 def is_roots_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?roots(?:\s+.*)?$", text or "", flags=re.IGNORECASE))
-
-
-def is_stop_scan_command(text: str) -> bool:
-    return bool(
-        re.match(
-            r"^\s*(?:/stopscan|stop\s+scan|stop\s+скан|стоп\s+скан|scan\s+pause|scan\s+stop)\s*$",
-            text,
-            flags=re.IGNORECASE,
-        )
-    )
 
 
 def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None:
@@ -2283,6 +3171,78 @@ def parse_wizard_reply_choice(text: str) -> str | None:
     return None
 
 
+def is_control_reply_text(text: str) -> bool:
+    cleaned = str(text or "").strip().casefold()
+    if not cleaned:
+        return False
+    if re.fullmatch(r"\d{1,3}", cleaned):
+        return True
+    return cleaned in {
+        "да",
+        "нет",
+        "yes",
+        "no",
+        "y",
+        "n",
+        "send",
+        "cancel",
+        "/cancel",
+        "отмена",
+        "выполнить",
+        "отправить",
+    }
+
+
+def current_pending_workflow_name(sender_id: int) -> str:
+    if sender_id in pending_wizard_requests:
+        return "wizard"
+    if sender_id in pending_mail2_requests:
+        return "mail2"
+    if sender_id in pending_gpt_requests:
+        return "gpt"
+    if sender_id in pending_smart_actions:
+        return "smart"
+    if sender_id in pending_support_requests:
+        return "support"
+    if sender_id in active_gpt_requests:
+        return "gpt"
+    return ""
+
+
+def current_command_execution_name(sender_id: int) -> str:
+    pending_name = current_pending_workflow_name(sender_id)
+    if pending_name:
+        return pending_name
+    if active_scan_cancel_event and not active_scan_cancel_event.is_set() and active_scan_owner_id == sender_id:
+        return "scan"
+    if active_mail2_cancel_event and not active_mail2_cancel_event.is_set():
+        return "mail2"
+    if active_admin_flow:
+        flow_user_id = str(active_admin_flow.get("user_id") or "").strip()
+        if flow_user_id and flow_user_id == str(sender_id):
+            return str(active_admin_flow.get("name") or "command")
+    return ""
+
+
+def command_reply_guard_message(workflow_name: str = "") -> str:
+    workflow_label = workflow_name.strip() or "текущей команды"
+    return assistant_compact_reply(
+        "Сейчас жду ответ для активной команды.",
+        f"Короткие ответы вроде `1`, `2`, `0`, `да`, `нет` обрабатываются только внутри {workflow_label}.",
+    )
+
+
+def unknown_slash_command_message() -> str:
+    return assistant_compact_reply(
+        "Неизвестная команда.",
+        "Напишите `menu`, чтобы увидеть доступные команды.",
+    )
+
+
+def gpt_queue_message() -> str:
+    return assistant_compact_reply("Запрос поставлен в очередь.", "Сначала закончу предыдущий ответ.")
+
+
 def parse_scan_command(text: str) -> str | None:
     return parse_scan_menu_action(text, allow_numeric=False)
 
@@ -2294,17 +3254,18 @@ def build_command_menu_text() -> str:
             "",
             "Главные команды:",
             "/dashboard - красивый отчет из SQLite базы по ссылке",
+            "/adminsite - открыть live admin сайт",
             "/processes - активные задачи: scan, mail2, wizard и ожидания",
             "/diag - диагностика бота, базы, scan и dashboard",
             "/tail [строк] - последние строки userbot.log",
             "/version - версия, commit и дата запуска",
             "",
-            "ChatGPT:",
-            "/gpt <вопрос> - спросить ChatGPT и сохранить контекст диалога",
+            "KBR_GPT:",
+            "/gpt <вопрос> - спросить KBR_GPT и сохранить контекст диалога",
             "/gpt - написать вопрос следующим сообщением",
-            "/gpt reset - очистить контекст ChatGPT",
+            "/gpt reset - очистить контекст KBR_GPT",
             "Голосовое без команды - распознать, понять и выполнить безопасное действие",
-            "Свободный текст без команды - обычный ChatGPT или умная команда",
+            "Свободный текст без команды - обычный KBR_GPT или умная команда",
             "",
             "Пользователи:",
             "/user <id|username> - краткая карточка через админ-бот",
@@ -2341,7 +3302,7 @@ def build_command_menu_text() -> str:
 def build_command_menu_buttons():
     return [
         [Button.text("scan"), Button.text("scan results")],
-        [Button.text("/dashboard"), Button.text("/version"), Button.text("/diag")],
+        [Button.text("/dashboard"), Button.text("/adminsite"), Button.text("/diag")],
         [Button.text("/processes"), Button.text("/tail")],
         [Button.text("/gpt"), Button.text("/gpt reset")],
         [Button.text("menu")],
@@ -2353,6 +3314,72 @@ def build_command_menu_buttons():
         [Button.text("/send 123456789"), Button.text("/broadcast")],
         [Button.text("/roots"), Button.text("/roots add me")],
     ]
+
+
+def is_requester_capabilities_question(text: str) -> bool:
+    cleaned = (text or "").strip().casefold()
+    if not cleaned:
+        return False
+    patterns = (
+        "что ты умеешь",
+        "что умеешь",
+        "что можешь",
+        "твои возможности",
+        "возможности бота",
+        "что ты можешь",
+        "что умеет бот",
+        "покажи возможности",
+    )
+    return any(marker in cleaned for marker in patterns)
+
+
+def build_requester_capabilities_text() -> str:
+    return "\n".join(
+        (
+            "Я виртуальный помощник VPN_KBR. Ниже — что я умею и как этим пользоваться.",
+            "",
+            "1) Работа с пользователями:",
+            "• /help 123456789 — короткая карточка пользователя",
+            "• /help username -b — карточка из базы SQLite",
+            "• /info 123456789 — полный отчет по подпискам",
+            "• /info username -b — полный отчет из базы SQLite",
+            "• /user ... и /subs ... — те же действия в новых коротких названиях",
+            "",
+            "2) Работа с Wizard и поддержкой:",
+            "• /wizard 123456789 — собрать карточку, показать тебе на проверку, затем отправить в wizard",
+            "• Я умею принять проблему пользователя и сформировать карточку для wizard",
+            "",
+            "3) Рассылки и промо:",
+            "• /send 123456789 Текст — отправить сообщение конкретному пользователю",
+            "• /mail2 Текст или /broadcast Текст — рассылка по базе пользователям без подписки",
+            "• /promo 123456789 или /coupon 123456789 — создать промокод и отправить пользователю",
+            "",
+            "4) Scan и аналитика:",
+            "• scan — открыть меню скана",
+            "• scan new — новый полный скан",
+            "• scan continue — продолжить с сохраненного места",
+            "• stop скан — поставить scan на паузу и сохранить прогресс",
+            "• scan results — показать результаты и dashboard",
+            "",
+            "5) Dashboard и админ-сайт:",
+            "• /dashboard — аналитический dashboard по базе",
+            "• /adminsite — открыть live admin панель",
+            "• /status — быстро открыть статус и dashboard",
+            "",
+            "6) Контроль и диагностика:",
+            "• /processes или /poc — активные процессы, пауза/снятие задач",
+            "• /diag — диагностика бота, базы и сервисов",
+            "• /tail 100 — последние строки лога",
+            "• /version — версия, commit и время запуска",
+            "",
+            "7) Доступы запросников:",
+            "• /roots — список запросников",
+            "• /roots add <id|@username|me> — добавить запросника",
+            "• /roots del <id|@username> — удалить запросника",
+            "",
+            "Подсказка: напиши просто `menu`, и я покажу кнопки всех основных команд.",
+        )
+    )
 
 
 def extract_labeled_value(text: str, labels: tuple[str, ...]) -> str | None:
@@ -2497,48 +3524,8 @@ def get_back_page_button(message) -> dict[str, int | str] | None:
     return None
 
 
-def get_next_page_button(message) -> dict[str, int | str] | None:
-    if not message.buttons:
-        return None
-
-    expected = settings.next_page_button_text.casefold()
-    candidates = {"➡", "➡️", "»", ">>", "⏭"}
-    for row_index, row in enumerate(message.buttons):
-        for column_index, button in enumerate(row):
-            text = button.text.strip()
-            lowered = text.casefold()
-            if (expected and expected in lowered) or text in candidates:
-                return {
-                    "text": button.text,
-                    "row": row_index,
-                    "column": column_index,
-                }
-
-    nav_buttons = [button for button in extract_all_buttons(message) if is_navigation_button_text(str(button["text"]))]
-    if nav_buttons:
-        back_tokens = (
-            settings.back_button_text.casefold(),
-            "назад",
-            "back",
-            "return",
-        )
-        forward_buttons = [
-            button
-            for button in nav_buttons
-            if not any(token and token in str(button["text"]).casefold() for token in back_tokens)
-        ]
-        pool = forward_buttons or nav_buttons
-        pool.sort(key=lambda button: (int(button["row"]), int(button["column"])), reverse=True)
-        return pool[0]
-    return None
-
-
 def is_users_page_message(message) -> bool:
     return bool(extract_user_buttons(message))
-
-
-def users_page_user_ids_signature(message) -> tuple[str, ...]:
-    return tuple(str(button["id"]) for button in extract_user_buttons(message))
 
 
 def score_users_menu_button(text: str) -> int:
@@ -2703,23 +3690,6 @@ def extract_admin_statistics_snapshot(text: str) -> dict:
         "profit_by_period": profit_by_period,
         "raw_text": text,
     }
-
-
-def extract_vpn_count(text: str) -> int | None:
-    patterns = (
-        r"(?:кол(?:-?во|ичество)?\s*)?vpn\s*[:=\-]?\s*(\d{1,6})",
-        r"vpn\s*(?:подписок|ключей|subscriptions)?\s*[:=\-]?\s*(\d{1,6})",
-        r"(?:подписок|ключей)\s*vpn\s*[:=\-]?\s*(\d{1,6})",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            return int(match.group(1))
-        except ValueError:
-            continue
-    return None
 
 
 def format_user_summary(user_id: str, user_text: str, subscriptions_message) -> str:
@@ -2952,13 +3922,6 @@ def message_snapshot(message) -> tuple[int | None, str, tuple[tuple[str, ...], .
     if message.buttons:
         buttons = tuple(tuple(button.text for button in row) for row in message.buttons)
     return getattr(message, "id", None), message.raw_text or "", buttons
-
-
-def message_content_signature(message) -> tuple[str, tuple[tuple[str, ...], ...]]:
-    buttons: tuple[tuple[str, ...], ...] = ()
-    if message.buttons:
-        buttons = tuple(tuple(button.text for button in row) for row in message.buttons)
-    return message.raw_text or "", buttons
 
 
 def is_intermediate_message(message) -> bool:
@@ -3336,11 +4299,6 @@ def publish_dashboard_file(source_path: Path, latest_name: str | None = None) ->
     return public_path, publish_dashboard_loader_file(public_name)
 
 
-def public_dashboard_url_from_report_path(report_path: Path) -> str:
-    public_name = safe_dashboard_public_file_name(Path(report_path).name)
-    return publish_dashboard_loader_file(public_name)
-
-
 def ensure_dashboard_public_url(report_path: Path, latest_name: str | None = None) -> str:
     public_name = safe_dashboard_public_file_name(Path(report_path).name)
     public_path = dashboard_public_dir() / public_name
@@ -3400,6 +4358,173 @@ def live_admin_dashboard_url() -> str:
     return build_dashboard_public_url("admin.html")
 
 
+def resolve_dashboard_user_id(user_lookup: str) -> str | None:
+    cleaned = (user_lookup or "").strip()
+    if not cleaned:
+        return None
+    if re.fullmatch(r"\d{1,20}", cleaned):
+        return cleaned
+    record = load_latest_record_by_lookup_from_database(cleaned)
+    if record:
+        resolved = str(record.get("user_id") or "").strip()
+        if re.fullmatch(r"\d{1,20}", resolved):
+            return resolved
+    extracted = extract_user_id(cleaned)
+    if extracted and re.fullmatch(r"\d{1,20}", extracted):
+        return extracted
+    return None
+
+
+def dashboard_job_snapshot(job: dict[str, object] | None) -> dict[str, object] | None:
+    if not job:
+        return None
+    return {key: value for key, value in job.items() if key != "updated_ts"}
+
+
+def dashboard_trim_jobs_locked() -> None:
+    if len(dashboard_action_jobs) <= DASHBOARD_ACTION_JOBS_LIMIT:
+        return
+    ordered = sorted(
+        dashboard_action_jobs.items(),
+        key=lambda item: float(item[1].get("updated_ts") or 0.0),
+        reverse=True,
+    )
+    keep_ids = {job_id for job_id, _ in ordered[:DASHBOARD_ACTION_JOBS_LIMIT]}
+    for job_id in list(dashboard_action_jobs.keys()):
+        if job_id not in keep_ids:
+            dashboard_action_jobs.pop(job_id, None)
+
+
+def dashboard_create_job(action: str, user_lookup: str, message_text: str) -> dict[str, object]:
+    now_iso = datetime.now().isoformat(timespec="seconds")
+    now_ts = now_timestamp()
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "id": job_id,
+        "action": action,
+        "status": "queued",
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "updated_ts": now_ts,
+        "user_lookup": user_lookup,
+        "resolved_user_id": "",
+        "message_text": message_text,
+        "result_text": "",
+        "error_text": "",
+    }
+    with dashboard_action_jobs_lock:
+        dashboard_action_jobs[job_id] = job
+        dashboard_trim_jobs_locked()
+    return dashboard_job_snapshot(job) or {"id": job_id}
+
+
+def dashboard_update_job(job_id: str, **fields: object) -> dict[str, object] | None:
+    with dashboard_action_jobs_lock:
+        job = dashboard_action_jobs.get(job_id)
+        if not job:
+            return None
+        job.update(fields)
+        job["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        job["updated_ts"] = now_timestamp()
+        snapshot = dashboard_job_snapshot(job)
+    return snapshot
+
+
+def dashboard_get_job(job_id: str) -> dict[str, object] | None:
+    with dashboard_action_jobs_lock:
+        return dashboard_job_snapshot(dashboard_action_jobs.get(job_id))
+
+
+async def dashboard_execute_job(job_id: str) -> None:
+    job = dashboard_get_job(job_id)
+    if not job:
+        return
+
+    action = str(job.get("action") or "").strip().casefold()
+    user_lookup = str(job.get("user_lookup") or "").strip()
+    message_text = str(job.get("message_text") or "").strip()
+    dashboard_update_job(job_id, status="running")
+
+    try:
+        if action == "mail":
+            if not message_text:
+                raise ValueError("Текст сообщения пустой.")
+            resolved_user_id = resolve_dashboard_user_id(user_lookup)
+            if not resolved_user_id:
+                raise ValueError("Не удалось определить ID пользователя.")
+            result_text = await send_mail_to_user_in_admin_bot(resolved_user_id, message_text)
+            dashboard_update_job(
+                job_id,
+                status="done",
+                resolved_user_id=resolved_user_id,
+                result_text=result_text,
+                error_text="",
+            )
+            return
+
+        if action == "wizard_card":
+            resolved_user_id = resolve_dashboard_user_id(user_lookup)
+            if not resolved_user_id:
+                raise ValueError("Не удалось определить ID пользователя.")
+            record = load_latest_record_from_database(resolved_user_id)
+            if record:
+                card_text = format_user_summary_from_record(record)
+            else:
+                card_text = await find_user_in_admin_bot(
+                    resolved_user_id,
+                    progress_callback=None,
+                    progress_title="Dashboard wizard",
+                    progress_steps=WIZARD_STEPS,
+                )
+            final_text = card_text if not message_text else f"{card_text}\n\nДополнение:\n{message_text}"
+            await send_to_wizard_target(final_text)
+            dashboard_update_job(
+                job_id,
+                status="done",
+                resolved_user_id=resolved_user_id,
+                result_text=final_text[:1200],
+                error_text="",
+            )
+            return
+
+        if action == "wizard_text":
+            if not message_text:
+                raise ValueError("Текст для wizard пустой.")
+            await send_to_wizard_target(message_text)
+            dashboard_update_job(
+                job_id,
+                status="done",
+                resolved_user_id="",
+                result_text=message_text[:1200],
+                error_text="",
+            )
+            return
+
+        raise ValueError(f"Неизвестное действие: {action}")
+    except Exception as error:
+        logging.exception("Dashboard action failed job_id=%s action=%s", job_id, action)
+        dashboard_update_job(
+            job_id,
+            status="failed",
+            error_text=str(error)[:600],
+        )
+
+
+def dashboard_start_job(action: str, user_lookup: str, message_text: str) -> dict[str, object]:
+    job = dashboard_create_job(action, user_lookup, message_text)
+    job_id = str(job.get("id") or "")
+    future = asyncio.run_coroutine_threadsafe(dashboard_execute_job(job_id), loop)
+
+    def _on_done(done_future) -> None:
+        try:
+            done_future.result()
+        except Exception:
+            logging.exception("Unhandled dashboard action exception job_id=%s", job_id)
+
+    future.add_done_callback(_on_done)
+    return dashboard_get_job(job_id) or job
+
+
 class DashboardRequestHandler(BaseHTTPRequestHandler):
     server_version = "VPNKBRDashboard/1.0"
 
@@ -3407,26 +4532,128 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         logging.info("Dashboard HTTP: " + format, *args)
 
     def do_GET(self) -> None:
-        self.serve_dashboard(send_body=True)
+        parts = self.resolve_public_parts()
+        if parts is None:
+            return
+        if self.try_serve_api(parts, send_body=True):
+            return
+        self.serve_dashboard(parts=parts, send_body=True)
 
     def do_HEAD(self) -> None:
-        self.serve_dashboard(send_body=False)
+        parts = self.resolve_public_parts()
+        if parts is None:
+            return
+        if self.try_serve_api(parts, send_body=False):
+            return
+        self.serve_dashboard(parts=parts, send_body=False)
 
-    def serve_dashboard(self, *, send_body: bool) -> None:
+    def do_POST(self) -> None:
+        parts = self.resolve_public_parts()
+        if parts is None:
+            return
+        if not self.try_serve_api(parts, send_body=True):
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def resolve_public_parts(self) -> list[str] | None:
         path = unquote(urlsplit(self.path).path)
         parts = [part for part in path.split("/") if part]
         prefix = settings.dashboard_public_path_prefix.strip("/")
         if not parts or parts[0] != prefix:
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
-            return
+            return None
 
         parts = parts[1:]
         if settings.dashboard_public_token:
             if not parts or parts[0] != settings.dashboard_public_token:
                 self.send_error(HTTPStatus.NOT_FOUND, "Not found")
-                return
+                return None
             parts = parts[1:]
+        return parts
 
+    def send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK, *, send_body: bool = True) -> None:
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if send_body:
+            self.wfile.write(raw)
+
+    def read_json_body(self) -> dict[str, object]:
+        raw_length = self.headers.get("Content-Length", "0")
+        try:
+            body_length = max(0, min(int(raw_length), 200_000))
+        except ValueError:
+            body_length = 0
+        raw = self.rfile.read(body_length) if body_length else b""
+        if not raw:
+            return {}
+        payload = json.loads(raw.decode("utf-8", errors="replace"))
+        if isinstance(payload, dict):
+            return payload
+        raise ValueError("JSON body must be object")
+
+    def try_serve_api(self, parts: list[str], *, send_body: bool) -> bool:
+        if not parts or parts[0] != "admin-api":
+            return False
+
+        api_parts = parts[1:]
+        if self.command in {"GET", "HEAD"}:
+            if len(api_parts) == 2 and api_parts[0] == "job":
+                job_id = str(api_parts[1]).strip()
+                if not re.fullmatch(r"[a-f0-9]{6,32}", job_id):
+                    self.send_json({"ok": False, "error": "bad_job_id"}, HTTPStatus.BAD_REQUEST, send_body=send_body)
+                    return True
+                job = dashboard_get_job(job_id)
+                if not job:
+                    self.send_json({"ok": False, "error": "job_not_found"}, HTTPStatus.NOT_FOUND, send_body=send_body)
+                    return True
+                self.send_json({"ok": True, "job": job}, HTTPStatus.OK, send_body=send_body)
+                return True
+            if len(api_parts) == 1 and api_parts[0] == "ping":
+                self.send_json(
+                    {"ok": True, "status": "alive", "time": datetime.now().isoformat(timespec="seconds")},
+                    HTTPStatus.OK,
+                    send_body=send_body,
+                )
+                return True
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return True
+
+        if self.command != "POST":
+            self.send_error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
+            return True
+        if len(api_parts) != 1 or api_parts[0] != "action":
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return True
+
+        try:
+            payload = self.read_json_body()
+            action = str(payload.get("action") or "").strip().casefold()
+            user_lookup = str(payload.get("user") or "").strip()
+            message_text = str(payload.get("message") or "").strip()
+            if action not in {"mail", "wizard_card", "wizard_text"}:
+                self.send_json({"ok": False, "error": "bad_action"}, HTTPStatus.BAD_REQUEST, send_body=send_body)
+                return True
+            if action in {"mail", "wizard_card"} and not user_lookup:
+                self.send_json({"ok": False, "error": "missing_user"}, HTTPStatus.BAD_REQUEST, send_body=send_body)
+                return True
+            if action in {"mail", "wizard_text"} and not message_text:
+                self.send_json({"ok": False, "error": "missing_message"}, HTTPStatus.BAD_REQUEST, send_body=send_body)
+                return True
+            job = dashboard_start_job(action, user_lookup, message_text)
+            self.send_json({"ok": True, "job": job}, HTTPStatus.ACCEPTED, send_body=send_body)
+            return True
+        except json.JSONDecodeError:
+            self.send_json({"ok": False, "error": "bad_json"}, HTTPStatus.BAD_REQUEST, send_body=send_body)
+            return True
+        except Exception:
+            logging.exception("Dashboard action API failed")
+            self.send_json({"ok": False, "error": "server_error"}, HTTPStatus.INTERNAL_SERVER_ERROR, send_body=send_body)
+            return True
+
+    def serve_dashboard(self, *, parts: list[str], send_body: bool) -> None:
         if len(parts) != 1:
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
@@ -3669,6 +4896,17 @@ def requester_count() -> int:
 
 def sender_username(sender) -> str:
     return normalize_username(str(getattr(sender, "username", "") or ""))
+
+
+def sender_full_name(sender) -> str:
+    return " ".join(
+        part
+        for part in (
+            str(getattr(sender, "first_name", "") or "").strip(),
+            str(getattr(sender, "last_name", "") or "").strip(),
+        )
+        if part
+    ).strip()
 
 
 def upsert_requester(
@@ -4347,121 +5585,52 @@ def analyze_business_status(stats: dict) -> dict:
     }
 
 
-def build_business_status_dashboard_html(stats: dict, analysis: dict) -> str:
-    def esc(value) -> str:
-        return html.escape(str(value))
-
-    def fmt_int(value) -> str:
-        return f"{int(round(float(value or 0))):,}".replace(",", " ")
-
-    def fmt_money(value) -> str:
-        return f"{float(value or 0):,.0f}".replace(",", " ")
-
-    projections = list(analysis.get("projections") or [])
-    monthly_rows = list(analysis.get("recent_monthly_rows") or [])
-    projection_rows = "".join(
-        (
-            f"<tr><td>{item['months']} мес</td>"
-            f"<td>{fmt_int(item['users'])}</td>"
-            f"<td>{fmt_int(item['paid_users'])}</td>"
-            f"<td>{fmt_int(item['subscriptions'])}</td>"
-            f"<td>{fmt_money(item['revenue_rub'])} ₽</td></tr>"
-        )
-        for item in projections
-    )
-    monthly_table_rows = "".join(
-        (
-            f"<tr><td>{esc(item['month'])}</td>"
-            f"<td>{fmt_int(item['users'])}</td>"
-            f"<td>{fmt_int(item['paid_users'])}</td>"
-            f"<td>{fmt_int(item['subscriptions'])}</td>"
-            f"<td>{fmt_money(item['estimated_revenue_rub'])} ₽</td></tr>"
-        )
-        for item in monthly_rows
-    ) or "<tr><td colspan='5'>Нет дат регистрации в данных scan</td></tr>"
-
-    max_subs = max([int(item.get("subscriptions") or 0) for item in monthly_rows] or [1])
-    bars = "".join(
-        (
-            f"<div class='bar-row'><span>{esc(item['month'])}</span>"
-            f"<div class='bar'><i style='width:{max(4, int((item['subscriptions'] / max_subs) * 100))}%'></i></div>"
-            f"<b>{fmt_int(item['subscriptions'])}</b></div>"
-        )
-        for item in monthly_rows
-    ) or "<div class='muted'>Недостаточно исторических дат</div>"
-
-    best_month = analysis.get("best_month") or {}
-    growth_rate_text = f"{float(analysis.get('monthly_growth_rate') or 0) * 100:.1f}%"
-    dashboard_html = f"""<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Business Status Dashboard</title>
-  <style>
-    * {{ box-sizing: border-box; }}
-    body {{ margin:0; font-family: Arial, sans-serif; background:#08111f; color:#eef5ff; }}
-    .wrap {{ max-width:1280px; margin:0 auto; padding:24px 18px 38px; }}
-    h1 {{ margin:0 0 6px; font-size:30px; }}
-    .muted {{ color:#9fb0c9; }}
-    .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin:16px 0; }}
-    .card,.panel {{ background:#111d30; border:1px solid #243650; border-radius:8px; padding:14px; }}
-    .k {{ color:#9fb0c9; font-size:13px; }}
-    .v {{ font-size:25px; font-weight:700; margin-top:7px; }}
-    .good {{ color:#36d399; }} .warn {{ color:#f6c453; }} .blue {{ color:#5ab7ff; }}
-    .cols {{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }}
-    table {{ width:100%; border-collapse:collapse; font-size:14px; }}
-    th,td {{ padding:8px 9px; border-bottom:1px solid #243650; text-align:left; }}
-    th {{ color:#9fb0c9; }}
-    .bar-row {{ display:grid; grid-template-columns:80px 1fr 54px; gap:10px; align-items:center; margin:8px 0; }}
-    .bar {{ height:12px; background:#0a1424; border:1px solid #243650; border-radius:7px; overflow:hidden; }}
-    .bar i {{ display:block; height:100%; background:linear-gradient(90deg,#5ab7ff,#36d399); }}
-    @media (max-width:900px) {{ .cols {{ grid-template-columns:1fr; }} h1 {{ font-size:25px; }} }}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>Business Status</h1>
-    <div class="muted">SQL dashboard · scan: {esc(analysis.get('source_scan_generated_at') or '-')} · generated: {esc(analysis.get('generated_at'))}</div>
-    <div class="grid">
-      <div class="card"><div class="k">Оценка MRR</div><div class="v good">{fmt_money(analysis.get('estimated_mrr_rub'))} ₽</div></div>
-      <div class="card"><div class="k">База дохода / месяц</div><div class="v good">{fmt_money(analysis.get('baseline_month_revenue_rub'))} ₽</div></div>
-      <div class="card"><div class="k">Пользователей</div><div class="v blue">{fmt_int(analysis.get('total_users'))}</div></div>
-      <div class="card"><div class="k">Платящих</div><div class="v blue">{fmt_int(analysis.get('paid_users'))}</div></div>
-      <div class="card"><div class="k">Подписок</div><div class="v warn">{fmt_int(analysis.get('total_subscriptions'))}</div></div>
-      <div class="card"><div class="k">Рост подписок / мес</div><div class="v warn">{growth_rate_text}</div></div>
-    </div>
-    <div class="cols">
-      <div class="panel">
-        <h2>Прогноз на 1 / 3 / 6 / 9 / 12 месяцев</h2>
-        <table><thead><tr><th>Горизонт</th><th>Users</th><th>Paid</th><th>Subs</th><th>Доход/мес</th></tr></thead><tbody>{projection_rows}</tbody></table>
-      </div>
-      <div class="panel">
-        <h2>Прирост подписок по месяцам</h2>
-        {bars}
-      </div>
-    </div>
-    <div class="panel">
-      <h2>История прироста за последние месяцы</h2>
-      <table><thead><tr><th>Месяц</th><th>Новые users</th><th>Платящие</th><th>Подписки</th><th>Оценка дохода</th></tr></thead><tbody>{monthly_table_rows}</tbody></table>
-    </div>
-    <div class="grid">
-      <div class="card"><div class="k">Период наблюдения</div><div class="v">{fmt_int(analysis.get('observation_days'))} дн.</div></div>
-      <div class="card"><div class="k">Users / день</div><div class="v">{float(analysis.get('users_per_day') or 0):.2f}</div></div>
-      <div class="card"><div class="k">Subs / день</div><div class="v">{float(analysis.get('subscriptions_per_day') or 0):.2f}</div></div>
-      <div class="card"><div class="k">Лучший месяц</div><div class="v">{esc(best_month.get('month', '-'))}</div></div>
-      <div class="card"><div class="k">Ошибки scan</div><div class="v">{fmt_int(analysis.get('scan_errors_total'))}</div></div>
-    </div>
-  </div>
-</body>
-</html>"""
-    return fix_mojibake(dashboard_html)
-
-
 def build_status_dashboard_from_database() -> tuple[Path, dict] | None:
     stats = load_latest_scan_stats_from_database()
+    records_fallback: list[dict] = []
+    try:
+        records_fallback = load_latest_records_from_database()
+    except Exception:
+        logging.exception("Failed to load fallback latest records for status dashboard")
+        records_fallback = []
+
+    # Fallback path: no scan_runs row, but latest_* tables already contain data.
     if not stats:
-        return None
+        if not records_fallback:
+            return None
+        subscriptions_total = sum(len(record.get("subscriptions") or []) for record in records_fallback)
+        users_total = len(records_fallback)
+        users_with_subscriptions_total = sum(1 for record in records_fallback if record.get("subscriptions"))
+        estimated_mrr = round(float(subscriptions_total) * FORECAST_PRICE_PER_SUBSCRIPTION_RUB, 2)
+        stats = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "records": records_fallback,
+            "users_total": users_total,
+            "users_with_subscriptions_total": users_with_subscriptions_total,
+            "subscriptions_total": subscriptions_total,
+            "scan_errors": [],
+            "forecast": {
+                "estimated_mrr_rub": estimated_mrr,
+                "financial_projection": {
+                    "stats_month_profit_rub": estimated_mrr,
+                },
+            },
+        }
+
+    # Heal incomplete stats (for older scan rows without embedded records).
+    if not stats.get("records") and records_fallback:
+        stats["records"] = records_fallback
+    if not int(stats.get("users_total") or 0) and stats.get("records"):
+        stats["users_total"] = len(list(stats.get("records") or []))
+    if not int(stats.get("users_with_subscriptions_total") or 0) and stats.get("records"):
+        stats["users_with_subscriptions_total"] = sum(
+            1 for record in list(stats.get("records") or []) if record.get("subscriptions")
+        )
+    if not int(stats.get("subscriptions_total") or 0) and stats.get("records"):
+        stats["subscriptions_total"] = sum(
+            len(record.get("subscriptions") or []) for record in list(stats.get("records") or [])
+        )
+
     stats["database"] = {
         "path": str(database_path()),
         "source": "sqlite",
@@ -4989,28 +6158,6 @@ async def find_user_in_admin_bot(
         print("==============================\n")
         logging.info("Admin search finished for user_id=%s", user_id)
         return result_text
-
-
-def format_subscription_info(user_id: str, user_text: str, subscriptions_message, details: list[tuple[str, str, str]]) -> str:
-    subscriptions_text = subscriptions_message.raw_text or ""
-    user_number = extract_user_number(user_text, subscriptions_text)
-
-    lines = [
-        f"1. Username \u0431\u043e\u0442\u0430: @{settings.admin_bot_username}",
-        f"2. ID \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439: {user_number or user_id}",
-    ]
-
-    if not details:
-        lines.append("3. \u0418\u043d\u0444\u043e \u043f\u043e\u0434\u043f\u0438\u0441\u043e\u043a: \u043f\u043e\u0434\u043f\u0438\u0441\u043e\u043a \u043d\u0435\u0442")
-        return "\n".join(lines)
-
-    lines.append("3. \u0418\u043d\u0444\u043e \u043f\u043e\u0434\u043f\u0438\u0441\u043e\u043a:")
-    for subscription_id, button_text, detail_text in details:
-        lines.append("")
-        lines.append(f"[{subscription_id}] {button_text}")
-        lines.append(detail_text.strip() or "[empty subscription response]")
-
-    return "\n".join(lines)
 
 
 def make_keys_copyable_html(text: str) -> str:
@@ -6089,11 +7236,48 @@ def build_scan_dashboard_html(stats: dict) -> str:
     .pager {{ display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; flex-wrap: wrap; }}
     .pager-btn {{ border: 1px solid var(--border); background: rgba(255,255,255,.04); color: var(--text); border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit; }}
     .pager-btn[disabled] {{ opacity: .45; cursor: default; }}
+    .action-panel {{ border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255,255,255,.03); margin-bottom: 12px; }}
+    .action-grid {{ display: grid; grid-template-columns: minmax(160px, 220px) 1fr; gap: 10px; margin-bottom: 10px; }}
+    .action-grid input, .action-grid textarea {{
+      width: 100%;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+    }}
+    .action-grid textarea {{ min-height: 110px; resize: vertical; }}
+    .action-buttons {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+    .action-btn {{
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font: inherit;
+    }}
+    .action-btn.primary {{ border-color: rgba(86,212,255,.65); background: rgba(86,212,255,.14); color: var(--accent); }}
+    .action-btn.good {{ border-color: rgba(52,211,153,.65); background: rgba(52,211,153,.14); color: var(--good); }}
+    .action-btn.warn {{ border-color: rgba(245,158,11,.65); background: rgba(245,158,11,.14); color: var(--warn); }}
+    .action-btn[disabled] {{ opacity: .5; cursor: default; }}
+    .action-status {{
+      margin-top: 10px;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      color: var(--muted);
+      white-space: pre-wrap;
+      line-height: 1.5;
+      font-size: 13px;
+    }}
     .muted {{ color: var(--muted); }}
     @media (max-width: 980px) {{
       .admin-shell {{ grid-template-columns: 1fr; }}
       .side-nav {{ position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .toolbar {{ grid-template-columns: 1fr; }}
+      .action-grid {{ grid-template-columns: 1fr; }}
     }}
     code {{
       background: #101735;
@@ -6292,6 +7476,19 @@ def build_scan_dashboard_html(stats: dict) -> str:
             </div>
             <div class="muted" id="adminCount"></div>
             <div class="admin-kpis" id="adminKpis"></div>
+            <div class="action-panel">
+              <h2>Быстрое управление пользователем</h2>
+              <div class="action-grid">
+                <input id="actionUser" placeholder="ID или @username">
+                <textarea id="actionMessage" placeholder="Текст сообщения (для Mail и дописки в Wizard)"></textarea>
+              </div>
+              <div class="action-buttons">
+                <button class="action-btn primary" id="actionMail">Отправить Mail</button>
+                <button class="action-btn good" id="actionWizardCard">Карточка в Wizard</button>
+                <button class="action-btn warn" id="actionWizardText">Текст в Wizard</button>
+              </div>
+              <div class="action-status" id="actionStatus">Готово. Выбери пользователя, введи текст и нажми нужное действие.</div>
+            </div>
             <div class="table-scroll">
               <table>
                 <thead>
@@ -6368,7 +7565,16 @@ def build_scan_dashboard_html(stats: dict) -> str:
       const pageInfo = document.getElementById("adminPageInfo");
       const prevButton = document.getElementById("adminPrev");
       const nextButton = document.getElementById("adminNext");
+      const actionUser = document.getElementById("actionUser");
+      const actionMessage = document.getElementById("actionMessage");
+      const actionStatus = document.getElementById("actionStatus");
+      const actionMailButton = document.getElementById("actionMail");
+      const actionWizardCardButton = document.getElementById("actionWizardCard");
+      const actionWizardTextButton = document.getElementById("actionWizardText");
+      const actionApiBase = "admin-api";
       let currentPage = 1;
+      let activeJobId = "";
+      let activeJobPollTimer = null;
       const statusLabels = {{
         active: "Активные",
         expiring_7: "Истекают за 7 дней",
@@ -6475,7 +7681,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
         nextButton.disabled = currentPage >= totalPages;
         renderKpis(rows);
         body.innerHTML = pageRows.map(row => `
-          <tr>
+          <tr data-user-id="${{escapeText(row.user_id)}}">
             <td>${{escapeText(row.user_id)}}</td>
             <td>${{row.username ? "@" + escapeText(row.username) : "<span class='muted'>РЅРµС‚</span>"}}</td>
             <td>${{escapeText(row.registration_date || "-")}}</td>
@@ -6508,6 +7714,105 @@ def build_scan_dashboard_html(stats: dict) -> str:
         `).join("");
       }}
 
+      function setActionBusy(isBusy) {{
+        [actionMailButton, actionWizardCardButton, actionWizardTextButton].forEach(button => {{
+          if (button) button.disabled = Boolean(isBusy);
+        }});
+      }}
+
+      function updateActionStatusFromJob(job) {{
+        if (!job) {{
+          actionStatus.textContent = "Ошибка: пустой ответ от API.";
+          return;
+        }}
+        const lines = [
+          `Статус задачи: ${{job.status || "-"}}`,
+          job.id ? `ID задачи: ${{job.id}}` : "",
+          job.resolved_user_id ? `Пользователь: ${{job.resolved_user_id}}` : "",
+          job.error_text ? `Ошибка: ${{job.error_text}}` : "",
+          job.result_text ? `Результат: ${{String(job.result_text).slice(0, 500)}}` : "",
+        ].filter(Boolean);
+        actionStatus.textContent = lines.join("\\n");
+      }}
+
+      function stopJobPolling() {{
+        if (activeJobPollTimer) {{
+          clearTimeout(activeJobPollTimer);
+          activeJobPollTimer = null;
+        }}
+      }}
+
+      async function pollJob(jobId) {{
+        stopJobPolling();
+        try {{
+          const response = await fetch(`${{actionApiBase}}/job/${{encodeURIComponent(jobId)}}`, {{ cache: "no-store" }});
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {{
+            actionStatus.textContent = "Не удалось получить статус задачи.";
+            setActionBusy(false);
+            return;
+          }}
+          const job = payload.job || {{}};
+          updateActionStatusFromJob(job);
+          if (job.status === "queued" || job.status === "running") {{
+            activeJobPollTimer = setTimeout(() => pollJob(jobId), 1200);
+            return;
+          }}
+          setActionBusy(false);
+        }} catch (error) {{
+          actionStatus.textContent = `Ошибка опроса: ${{error}}`;
+          setActionBusy(false);
+        }}
+      }}
+
+      async function submitDashboardAction(actionName, requireUser, requireMessage) {{
+        const user = String(actionUser.value || "").trim();
+        const message = String(actionMessage.value || "").trim();
+        if (requireUser && !user) {{
+          actionStatus.textContent = "Укажи ID или @username.";
+          return;
+        }}
+        if (requireMessage && !message) {{
+          actionStatus.textContent = "Добавь текст сообщения.";
+          return;
+        }}
+        setActionBusy(true);
+        actionStatus.textContent = "Задача отправлена. Ожидаю ответ...";
+        try {{
+          const response = await fetch(`${{actionApiBase}}/action`, {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{
+              action: actionName,
+              user,
+              message,
+            }}),
+          }});
+          const payload = await response.json();
+          if (!response.ok || !payload.ok || !payload.job || !payload.job.id) {{
+            const errorText = payload && payload.error ? payload.error : "unknown_error";
+            actionStatus.textContent = `Ошибка API: ${{errorText}}`;
+            setActionBusy(false);
+            return;
+          }}
+          activeJobId = String(payload.job.id || "");
+          updateActionStatusFromJob(payload.job);
+          pollJob(activeJobId);
+        }} catch (error) {{
+          actionStatus.textContent = `Ошибка отправки: ${{error}}`;
+          setActionBusy(false);
+        }}
+      }}
+
+      body.addEventListener("click", event => {{
+        const row = event.target.closest("tr[data-user-id]");
+        if (!row) return;
+        const selectedUserId = String(row.dataset.userId || "").trim();
+        if (!selectedUserId) return;
+        actionUser.value = selectedUserId;
+        actionStatus.textContent = `Выбран пользователь: ${{selectedUserId}}`;
+      }});
+
       document.querySelectorAll(".nav-btn").forEach(button => {{
         button.addEventListener("click", () => {{
           document.querySelectorAll(".nav-btn").forEach(item => item.classList.remove("active"));
@@ -6537,6 +7842,9 @@ def build_scan_dashboard_html(stats: dict) -> str:
       pageSizeSelect.addEventListener("change", resetToFirstPageAndRender);
       prevButton.addEventListener("click", () => {{ currentPage -= 1; renderUsersEnhanced(); }});
       nextButton.addEventListener("click", () => {{ currentPage += 1; renderUsersEnhanced(); }});
+      actionMailButton.addEventListener("click", () => submitDashboardAction("mail", true, true));
+      actionWizardCardButton.addEventListener("click", () => submitDashboardAction("wizard_card", true, false));
+      actionWizardTextButton.addEventListener("click", () => submitDashboardAction("wizard_text", false, true));
       fillDynamicFilters();
       renderUsersEnhanced();
       renderAttention();
@@ -6845,9 +8153,15 @@ def build_scan_results_text() -> str:
 
 
 def dashboard_link_buttons(url: str):
-    if not url or not re.match(r"^https?://", url, flags=re.IGNORECASE):
+    rows = []
+    if url and re.match(r"^https?://", url, flags=re.IGNORECASE):
+        rows.append(Button.url("Открыть dashboard", url))
+    admin_url = live_admin_dashboard_url()
+    if admin_url and re.match(r"^https?://", admin_url, flags=re.IGNORECASE):
+        rows.append(Button.url("Открыть admin сайт", admin_url))
+    if not rows:
         return None
-    return [[Button.url("Открыть dashboard", url)]]
+    return [rows]
 
 
 def dashboard_message_text(title: str, url: str, fallback_path: Path | None = None) -> str:
@@ -6855,6 +8169,19 @@ def dashboard_message_text(title: str, url: str, fallback_path: Path | None = No
     if url and settings.dashboard_intro_enabled:
         return f"{title}\n{target}\n\nСначала откроется короткая VPN_KBR-анимация, потом dashboard."
     return f"{title}\n{target}"
+
+
+async def send_live_admin_dashboard_link(event) -> bool:
+    admin_url = live_admin_dashboard_url()
+    if not admin_url or not re.match(r"^https?://", admin_url, flags=re.IGNORECASE):
+        await safe_event_reply(event, "Live admin сайт сейчас недоступен. Проверь DASHBOARD_HTTP_* и DASHBOARD_PUBLIC_*.")
+        return False
+    sent = await safe_event_reply(
+        event,
+        f"Live admin сайт:\n{admin_url}",
+        buttons=[[Button.url("Открыть admin сайт", admin_url)]],
+    )
+    return sent is not None
 
 
 async def send_latest_dashboard_to_chat(event) -> bool:
@@ -8541,89 +9868,227 @@ async def handle_roots_command(event, sender) -> None:
     await safe_event_reply(event, "Не понял команду /roots. Отправь /roots, чтобы посмотреть список и подсказки.")
 
 
-async def handle_gpt_prompt(event: events.NewMessage.Event, sender_id: int, prompt: str, status_message=None) -> None:
+async def handle_gpt_prompt(
+    event: events.NewMessage.Event,
+    sender_id: int,
+    prompt: str,
+    status_message=None,
+    *,
+    compact_status: bool = False,
+) -> None:
     if not prompt.strip():
-        await safe_event_reply(event, "Пришли вопрос для `/gpt` или отправь `0 отмена`.")
+        await safe_event_reply(event, assistant_compact_reply("Напишите вопрос.", "Я сразу начну готовить ответ."))
         return
 
     if status_message is None:
-        status_message = await safe_event_reply(
-            event,
-            build_process_status(
-                "ChatGPT",
-                GPT_STEPS,
-                1,
-                extra_lines=[f"Модель: {settings.openai_model}", f"Вопрос: {len(prompt)} символов"],
-            ),
-        )
+        if compact_status:
+            status_message = await safe_event_reply(event, gpt_processing_message())
+        else:
+            status_message = await safe_event_reply(
+                event,
+                build_process_status(
+                    "KBR_GPT",
+                    GPT_STEPS,
+                    1,
+                    extra_lines=[f"Модель: {settings.openai_model}", f"Вопрос: {len(prompt)} символов"],
+                ),
+            )
 
     async def update_gpt_status(text: str, *, force: bool = False) -> None:
         if status_message:
-            await edit_status_message(status_message, text, force=force)
+            if compact_status:
+                await edit_status_message(status_message, text, force=True)
+            else:
+                await edit_status_message(status_message, text, force=force)
         else:
             await safe_event_reply(event, text)
 
-    if not settings.openai_api_key:
+    if sender_id in active_gpt_requests:
         await update_gpt_status(
-            build_process_status(
-                "ChatGPT",
-                GPT_STEPS,
-                1,
-                extra_lines=["OPENAI_API_KEY не задан в .env на сервере"],
-                failed=True,
+            assistant_compact_reply(
+                "Предыдущий запрос еще обрабатывается.",
+                "Дождитесь ответа на него, потом отправьте следующий вопрос.",
             ),
             force=True,
         )
-        await safe_event_reply(event, "ChatGPT не настроен: добавь `OPENAI_API_KEY` в `.env` на сервере и перезапусти бота.")
+        return
+
+    if not settings.openai_api_key:
+        if compact_status:
+            await update_gpt_status(gpt_unavailable_message(), force=True)
+        else:
+            await update_gpt_status(
+                build_process_status(
+                    "KBR_GPT",
+                    GPT_STEPS,
+                    1,
+                    extra_lines=["OPENAI_API_KEY не задан в .env на сервере"],
+                    failed=True,
+                ),
+                force=True,
+            )
+            await safe_event_reply(event, "KBR_GPT не настроен: добавь `OPENAI_API_KEY` в `.env` на сервере и перезапусти бота.")
         return
 
     previous_response_id = gpt_chat_sessions.get(sender_id)
-    active_gpt_requests[sender_id] = {
-        "stage": "request",
-        "user_id": "-",
-        "created_at": now_timestamp(),
-    }
-    try:
-        await update_gpt_status(
-            build_process_status(
-                "ChatGPT",
-                GPT_STEPS,
-                2,
-                extra_lines=[
-                    f"Модель: {settings.openai_model}",
-                    "Контекст: " + ("продолжаю прошлый диалог" if previous_response_id else "новый диалог"),
-                ],
+    if gpt_request_lock.locked():
+        if compact_status:
+            await update_gpt_status(gpt_queue_message(), force=True)
+        else:
+            await update_gpt_status(
+                build_process_status(
+                    "KBR_GPT",
+                    GPT_STEPS,
+                    1,
+                    extra_lines=["Запрос поставлен в очередь", "Жду освобождения текущего ответа"],
+                ),
+                force=True,
             )
-        )
-        answer_text, response_id = await ask_chatgpt(prompt, previous_response_id)
-        if response_id:
-            gpt_chat_sessions[sender_id] = response_id
-        await update_gpt_status(
-            build_process_status(
-                "ChatGPT",
-                GPT_STEPS,
-                len(GPT_STEPS),
-                extra_lines=[f"Ответ: {len(answer_text)} символов"],
-                done=True,
-            ),
-            force=True,
-        )
-        await safe_event_reply(event, answer_text)
-    except Exception as error:
-        logging.exception("ChatGPT request failed sender_id=%s", sender_id)
-        await update_gpt_status(
-            build_process_status(
-                "ChatGPT",
-                GPT_STEPS,
-                len(GPT_STEPS),
-                extra_lines=["Запрос завершился ошибкой", str(error)[:300]],
-                failed=True,
-            ),
-            force=True,
-        )
-        await safe_event_reply(event, "ChatGPT сейчас не ответил. Подробности записаны в лог.")
-    finally:
-        active_gpt_requests.pop(sender_id, None)
+
+    async with gpt_request_lock:
+        active_gpt_requests[sender_id] = {
+            "stage": "request",
+            "user_id": "-",
+            "created_at": now_timestamp(),
+        }
+        rate_limit_deadline = time.monotonic() + GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS
+        rate_limit_wait_total = 0.0
+        rate_limit_retries = 0
+        try:
+            if compact_status:
+                await update_gpt_status(gpt_processing_message())
+            else:
+                await update_gpt_status(
+                    build_process_status(
+                        "KBR_GPT",
+                        GPT_STEPS,
+                        2,
+                        extra_lines=[
+                            f"Модель: {settings.openai_model}",
+                            "Контекст: " + ("продолжаю прошлый диалог" if previous_response_id else "новый диалог"),
+                        ],
+                    )
+                )
+            while True:
+                try:
+                    answer_text, response_id = await ask_chatgpt(prompt, previous_response_id)
+                    break
+                except Exception as retry_error:
+                    error_text = str(retry_error)
+                    if not is_rate_limit_error_text(error_text):
+                        raise
+                    now_monotonic = time.monotonic()
+                    remaining = rate_limit_deadline - now_monotonic
+                    if remaining <= 0:
+                        raise RuntimeError(
+                            f"KBR_GPT_RATE_LIMIT_TIMEOUT after {int(rate_limit_wait_total)}s: {error_text[:300]}"
+                        ) from retry_error
+                    wait_seconds = min(parse_retry_seconds_from_error_text(error_text), remaining)
+                    rate_limit_retries += 1
+                    rate_limit_wait_total += wait_seconds
+                    if compact_status:
+                        await update_gpt_status(gpt_retry_message(wait_seconds), force=True)
+                    else:
+                        await update_gpt_status(
+                            build_process_status(
+                                "KBR_GPT",
+                                GPT_STEPS,
+                                2,
+                                extra_lines=[
+                                    f"Лимит запросов, повтор через {int(round(wait_seconds))} сек",
+                                    f"Попытка: {rate_limit_retries}",
+                                ],
+                            ),
+                            force=True,
+                        )
+                    await asyncio.sleep(max(1.0, wait_seconds))
+            if response_id:
+                gpt_chat_sessions[sender_id] = response_id
+            if compact_status:
+                await update_gpt_status(assistant_compact_reply("Ответ готов.", "Отправляю его в чат."), force=True)
+            else:
+                await update_gpt_status(
+                    build_process_status(
+                        "KBR_GPT",
+                        GPT_STEPS,
+                        len(GPT_STEPS),
+                        extra_lines=[f"Ответ: {len(answer_text)} символов"],
+                        done=True,
+                    ),
+                    force=True,
+                )
+            final_answer_text = answer_text.strip() or "Готово."
+            edited_in_place = False
+            if status_message:
+                edited_in_place = await edit_status_message(status_message, final_answer_text, force=True)
+            if not edited_in_place:
+                await safe_event_reply(event, final_answer_text)
+        except Exception as error:
+            logging.exception("KBR_GPT request failed sender_id=%s", sender_id)
+            error_text = str(error)
+            is_rate_limit_timeout = "KBR_GPT_RATE_LIMIT_TIMEOUT" in error_text or (
+                is_rate_limit_error_text(error_text) and rate_limit_wait_total >= GPT_RATE_LIMIT_RETRY_WINDOW_SECONDS
+            )
+            if is_rate_limit_timeout and compact_status:
+                try:
+                    sender = await event.get_sender()
+                    sender_username_value = sender_username(sender)
+                    sender_full_name_value = sender_full_name(sender)
+                    await send_to_wizard_target(
+                        "\n".join(
+                            (
+                                "Эскалация KBR_GPT в поддержку (лимит > 2 минут)",
+                                f"Время: {datetime.now().isoformat(timespec='seconds')}",
+                                f"Отправитель Telegram ID: {sender_id}",
+                                (
+                                    f"Отправитель username: @{sender_username_value}"
+                                    if sender_username_value
+                                    else "Отправитель username: нет"
+                                ),
+                                (
+                                    f"Отправитель имя: {sender_full_name_value}"
+                                    if sender_full_name_value
+                                    else "Отправитель имя: нет"
+                                ),
+                                "",
+                                "Текст запроса:",
+                                prompt.strip() or "[пусто]",
+                            )
+                        )
+                    )
+                except Exception:
+                    logging.exception("Failed to forward GPT rate-limit escalation to support sender_id=%s", sender_id)
+            if compact_status:
+                if is_rate_limit_timeout:
+                    await update_gpt_status(gpt_escalated_message(), force=True)
+                else:
+                    await update_gpt_status(gpt_failed_message(), force=True)
+            else:
+                await update_gpt_status(
+                    build_process_status(
+                        "KBR_GPT",
+                        GPT_STEPS,
+                        len(GPT_STEPS),
+                        extra_lines=[
+                            "Запрос завершился ошибкой",
+                            f"Ожидание ретраев: {int(rate_limit_wait_total)} сек" if rate_limit_wait_total > 0 else "",
+                            error_text[:300],
+                        ],
+                        failed=True,
+                    ),
+                    force=True,
+                )
+                if is_rate_limit_timeout:
+                    await safe_event_reply(
+                        event,
+                        assistant_user_message(
+                            f"Сервис перегружен более 2 минут. Передаю в поддержку.\nСвяжитесь с @{SUPPORT_OPERATOR_USERNAME}"
+                        ),
+                    )
+                else:
+                    await safe_event_reply(event, "KBR_GPT сейчас не ответил. Подробности записаны в лог.")
+        finally:
+            active_gpt_requests.pop(sender_id, None)
 
 
 @client.on(events.CallbackQuery(data=SCAN_CANCEL_CALLBACK_DATA))
@@ -8739,12 +10204,178 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         return
 
     if not is_requester_allowed(sender_id, sender):
-        await safe_event_reply(event, REQUESTER_DENY_MESSAGE)
         logging.info(
-            "Rejected private message from non-requester sender_id=%s username=%s text=%r",
+            "Non-requester GPT mode sender_id=%s username=%s text=%r",
             sender_id,
             sender_username(sender),
             incoming_text,
+        )
+        if is_operator_request_text(incoming_text):
+            await safe_event_reply(event, support_operator_contact_text())
+            return
+        if await handle_pending_support_request(event, sender, sender_id, incoming_text):
+            return
+        pending_support = pending_support_requests.get(sender_id)
+        if pending_support:
+            lowered_reply = incoming_text.casefold()
+            if lowered_reply in {"0", "отмена", "cancel", "/cancel"}:
+                pending_support_requests.pop(sender_id, None)
+                await safe_event_reply(
+                    event,
+                    assistant_compact_reply("Запрос отменен.", "Пришлите новое описание, когда будете готовы."),
+                )
+                return
+            pending_stage = str(pending_support.get("stage") or "await_subscription")
+            if pending_stage == "await_issue_details":
+                if is_support_issue_too_vague(incoming_text):
+                    await safe_event_reply(
+                        event,
+                        support_issue_clarification_message(
+                            str(pending_support.get("issue_text") or incoming_text)
+                        ),
+                    )
+                    return
+                pending_support_requests.pop(sender_id, None)
+                await forward_support_issue_to_wizard(
+                    sender=sender,
+                    sender_id=sender_id,
+                    issue_text=incoming_text,
+                    record=dict(pending_support.get("record") or {}),
+                    lookup_used=str(pending_support.get("lookup") or ""),
+                    selected_subscriptions=(
+                        list(pending_support.get("selected_subscriptions") or [])
+                        if isinstance(pending_support.get("selected_subscriptions"), list)
+                        else []
+                    ),
+                )
+                await safe_event_reply(event, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+                return
+            record = dict(pending_support.get("record") or {})
+            if not list(record.get("subscriptions") or []):
+                pending_support_requests.pop(sender_id, None)
+                await safe_event_reply(event, support_no_subscriptions_message())
+                return
+            selected_subscriptions = support_pick_subscriptions(record, incoming_text)
+            if not selected_subscriptions:
+                await safe_event_reply(event, support_subscriptions_question(record))
+                return
+            original_issue_text = str(pending_support.get("issue_text") or "")
+            if is_support_issue_too_vague(original_issue_text):
+                pending_support["stage"] = "await_issue_details"
+                pending_support["selected_subscriptions"] = selected_subscriptions
+                pending_support_requests[sender_id] = pending_support
+                await safe_event_reply(event, support_clarification_message())
+                return
+            pending_support_requests.pop(sender_id, None)
+            await forward_support_issue_to_wizard(
+                sender=sender,
+                sender_id=sender_id,
+                issue_text=original_issue_text,
+                record=record,
+                lookup_used=str(pending_support.get("lookup") or ""),
+                selected_subscriptions=selected_subscriptions,
+            )
+            await safe_event_reply(event, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+            return
+        if is_voice_or_audio_message(event):
+            status_message = await safe_event_reply(
+                event,
+                support_voice_processing_message(),
+            )
+            try:
+                transcript = await transcribe_telegram_voice(event)
+                if is_operator_request_text(transcript):
+                    await edit_status_message(status_message, support_operator_contact_text(), force=True)
+                    return
+                voice_intent = detect_non_requester_intent(transcript)
+                if voice_intent == "greeting":
+                    await edit_status_message(status_message, support_intake_message(), force=True)
+                    return
+                if voice_intent == "vpn_setup_help":
+                    await edit_status_message(status_message, vpn_setup_help_message(), force=True)
+                    return
+                if voice_intent == "profile_id_help":
+                    await edit_status_message(status_message, profile_id_help_message(), force=True)
+                    return
+                if voice_intent == "thanks":
+                    await edit_status_message(
+                        status_message,
+                        support_thanks_message(),
+                        force=True,
+                    )
+                    return
+                if voice_intent == "support_issue":
+                    await handle_support_issue_flow(
+                        event,
+                        sender,
+                        sender_id,
+                        transcript,
+                        status_message=status_message,
+                    )
+                    return
+                await handle_gpt_prompt(
+                    event,
+                    sender_id,
+                    transcript,
+                    status_message=status_message,
+                    compact_status=True,
+                )
+            except Exception:
+                logging.exception("Non-requester voice GPT mode failed sender_id=%s", sender_id)
+                await edit_status_message(
+                    status_message,
+                    assistant_compact_reply(
+                        "Не удалось распознать голосовое сообщение.",
+                        "Напишите вопрос текстом. Если это проблема по VPN, добавьте ID и краткое описание.",
+                    ),
+                    force=True,
+                )
+            return
+
+        if not incoming_text:
+            await safe_event_reply(event, support_intake_message())
+            return
+
+        text_intent = detect_non_requester_intent(incoming_text)
+        if text_intent == "greeting":
+            await safe_event_reply(event, support_intake_message())
+            return
+        if text_intent == "vpn_setup_help":
+            await safe_event_reply(event, vpn_setup_help_message())
+            return
+        if text_intent == "profile_id_help":
+            await safe_event_reply(event, profile_id_help_message())
+            return
+        if text_intent == "thanks":
+            await safe_event_reply(
+                event,
+                support_thanks_message(),
+            )
+            return
+        if text_intent == "support_issue":
+            status_message = await safe_event_reply(
+                event,
+                support_processing_message(),
+            )
+            await handle_support_issue_flow(
+                event,
+                sender,
+                sender_id,
+                incoming_text,
+                status_message=status_message,
+            )
+            return
+
+        status_message = await safe_event_reply(
+            event,
+            support_processing_message(),
+        )
+        await handle_gpt_prompt(
+            event,
+            sender_id,
+            incoming_text,
+            status_message=status_message,
+            compact_status=True,
         )
         return
 
@@ -9069,7 +10700,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             pending_gpt_requests.pop(sender_id, None)
             status_message = pending_gpt.get("status_message")
             cancel_text = build_process_status(
-                "ChatGPT",
+                "KBR_GPT",
                 GPT_STEPS,
                 1,
                 extra_lines=["Запрос отменен пользователем"],
@@ -9089,6 +10720,16 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         pending_gpt_requests.pop(sender_id, None)
         await handle_gpt_prompt(event, sender_id, prompt, pending_gpt.get("status_message"))
         return
+
+    active_command_name = current_command_execution_name(sender_id)
+    if active_command_name:
+        if is_voice_or_audio_message(event):
+            await safe_event_reply(event, command_reply_guard_message(active_command_name))
+            return
+        plain_text = (event.raw_text or "").strip()
+        if plain_text and not plain_text.startswith("/"):
+            await safe_event_reply(event, command_reply_guard_message(active_command_name))
+            return
 
     if is_voice_or_audio_message(event):
         status_message = await safe_event_reply(
@@ -9138,6 +10779,10 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         await safe_event_reply(event, build_command_menu_text(), buttons=build_command_menu_buttons())
         return
 
+    if is_requester_capabilities_question(event.raw_text or ""):
+        await safe_event_reply(event, build_requester_capabilities_text(), buttons=build_command_menu_buttons())
+        return
+
     if is_version_command(event.raw_text or ""):
         await safe_event_reply(event, build_runtime_version_text())
         return
@@ -9160,17 +10805,21 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         await send_status_dashboard_from_database(event)
         return
 
+    if is_admin_site_command(event.raw_text or ""):
+        await send_live_admin_dashboard_link(event)
+        return
+
     gpt_command = parse_gpt_command(event.raw_text or "")
     if gpt_command:
         if gpt_command.action == "reset":
             gpt_chat_sessions.pop(sender_id, None)
-            await safe_event_reply(event, "Контекст ChatGPT очищен. Следующий `/gpt` начнет новый диалог.")
+            await safe_event_reply(event, "Контекст KBR_GPT очищен. Следующий `/gpt` начнет новый диалог.")
             return
         if not gpt_command.prompt:
             status_message = await safe_event_reply(
                 event,
                 build_process_status(
-                    "ChatGPT",
+                    "KBR_GPT",
                     GPT_STEPS,
                     1,
                     extra_lines=[
@@ -9185,7 +10834,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                 "status_message": status_message,
                 "created_at": now_timestamp(),
             }
-            await safe_event_reply(event, "Напиши вопрос для ChatGPT следующим сообщением.")
+            await safe_event_reply(event, "Напиши вопрос для KBR_GPT следующим сообщением.")
             return
         await handle_gpt_prompt(event, sender_id, gpt_command.prompt)
         return
@@ -9764,7 +11413,35 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         return
 
     if (event.raw_text or "").strip():
+        raw_text = (event.raw_text or "").strip()
         lowered_text = (event.raw_text or "").casefold()
+        if raw_text.startswith("/"):
+            await safe_event_reply(event, unknown_slash_command_message())
+            return
+        if is_control_reply_text(raw_text):
+            workflow_name = current_pending_workflow_name(sender_id)
+            if workflow_name:
+                await safe_event_reply(event, command_reply_guard_message(workflow_name))
+            else:
+                await safe_event_reply(
+                    event,
+                    assistant_compact_reply(
+                        "Короткий ответ не распознан.",
+                        "Используйте полную команду или сначала откройте нужный сценарий.",
+                    ),
+                )
+            return
+        try:
+            if await forward_problem_report_to_wizard(event, sender, event.raw_text or ""):
+                await safe_event_reply(event, "Проблему принял. Карточку отправил в wizard для обработки.")
+                return
+        except Exception:
+            logging.exception("Failed to auto-forward problem report sender_id=%s", sender_id)
+            await safe_event_reply(
+                event,
+                "Не удалось автоматически отправить проблему в wizard. Попробуй еще раз или отправь /wizard <id>.",
+            )
+            return
         if "scan" in lowered_text or "скан" in lowered_text:
             active_scan_menu_owner_id = event.sender_id
             await safe_event_reply(event, build_scan_menu_text_fast(), buttons=build_scan_menu_buttons())
@@ -9812,3 +11489,4 @@ if __name__ == "__main__":
     log_runtime_version()
     with client:
         loop.run_until_complete(main())
+
