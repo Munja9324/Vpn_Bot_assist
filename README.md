@@ -1,24 +1,20 @@
 # Vpn_Bot_assist
 
-`Vpn_Bot_assist` - это Telegram userbot на Telethon для работы с админ-панелью VPN-бота через личный Telegram-аккаунт.
+`Vpn_Bot_assist` - Telegram userbot на Telethon для работы с админ-панелью VPN-бота через личный Telegram-аккаунт.
 
-Разработчик: `DevM29`.
+Разработчик: `DevM29`
 
-Он умеет:
+## Что умеет
 
-- искать пользователей в админ-боте по ID или username;
-- получать краткую карточку `help` и подробную карточку `info`;
-- брать данные из SQLite базы через флаг `-b`;
-- сканировать всех пользователей и подписки;
-- строить HTML dashboard с прогнозом денег, пользователей и подписок;
-- отдавать dashboard по ссылке с сервера;
-- отправлять карточки в `wizard` только после предпросмотра и подтверждения;
-- ограничивать доступ к командам через список запросников `/roots`;
-- автоматически деплоить изменения через GitHub на KVM-сервер.
-
-Полная документация на русском:
-
-[docs/RU_FULL_GUIDE.md](docs/RU_FULL_GUIDE.md)
+- искать пользователей по ID и username;
+- открывать краткую карточку пользователя и подробную информацию по подпискам;
+- брать данные либо напрямую из админ-бота, либо из локальной SQLite-базы;
+- сканировать базу пользователей и обновлять локальную БД;
+- строить dashboard и live admin site;
+- отправлять сообщения, промокоды и карточки в wizard;
+- принимать голос, распознавать его и запускать безопасные сценарии;
+- работать как KBR_GPT-помощник;
+- сохранять все неразобранные случаи в `unresolved_requests`.
 
 ## Быстрый старт
 
@@ -37,42 +33,63 @@ pip install -r requirements.txt
 python main.py
 ```
 
-6. При первом запуске введи номер телефона Telegram, код входа и 2FA пароль, если он включен.
-7. После запуска отправь боту:
+6. При первом запуске введи номер Telegram, код входа и пароль 2FA, если он включен.
+7. После запуска добавь себя в список разрешенных аккаунтов:
 
 ```text
 /roots add me
 ```
 
-После этого команды будут приниматься только от аккаунтов из списка `/roots`.
-
-## Главные команды
+## Основные команды
 
 ```text
 menu
-/roots
-help 123456789
-help @username -b
-info 123456789
-info @username -b
-wizard 123456789
-promo 123456789
-/mail2 Текст рассылки
-scan
-scan results
-/status
+/dashboard
+/adminsite
+/diag
+/processes
+/unresolved
 /version
+/gpt
+/gpt reset
+/user <id|username>
+/user <id|username> -b
+/subs <id|username>
+/subs <id|username> -b
+/wizard <id>
+/send <id> <текст>
+/broadcast <текст>
+/coupon <id>
+scan
+scan new
+scan continue
+scan results
+scan reset
+stop scan
+/roots
 ```
 
-## Важно про секреты
+Старые алиасы вроде `help`, `info`, `mail`, `mail2`, `promo`, `status`, `poc`, `logs` тоже поддерживаются.
 
-Нельзя выкладывать в GitHub:
+## Важные файлы
 
-- `.env`;
-- `*.session`;
-- `scan-data.sqlite3`;
-- `reports/`;
-- `userbot.log`;
-- любые пароли, токены, API hash и приватные ключи.
+- [main.py](C:/Project/main.py) - основная логика
+- [docs/RU_FULL_GUIDE.md](C:/Project/docs/RU_FULL_GUIDE.md) - полная инструкция
+- `scan-data.sqlite3` - локальная база проекта
+- `userbot.log` - рабочий лог
+- `.env` - секреты и конфиг
+- `*.session` - Telethon-сессия аккаунта
 
-Эти файлы должны жить только локально или на сервере.
+## Безопасность
+
+Никогда не выкладывай в GitHub:
+
+- `.env`
+- `.env.txt`
+- `*.session`
+- `*.sqlite3`
+- `reports/`
+- `*.log`
+- приватные токены, ключи и пароли
+
+Полная инструкция по установке, настройке, GitHub и серверу лежит в [docs/RU_FULL_GUIDE.md](C:/Project/docs/RU_FULL_GUIDE.md).
