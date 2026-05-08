@@ -3336,6 +3336,52 @@ def ensure_dashboard_public_url(report_path: Path, latest_name: str | None = Non
     return publish_dashboard_loader_file(public_name)
 
 
+def build_dashboard_empty_admin_html(message: str) -> str:
+    safe_message = html.escape(message)
+    brand = html.escape(settings.dashboard_brand_name or settings.app_name or "Vpn_Bot_assist")
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{brand} - Admin</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b1020; color: #edf1ff; font-family: "Segoe UI", Arial, sans-serif; }}
+    main {{ width: min(720px, calc(100vw - 32px)); border: 1px solid #2a3564; border-radius: 10px; padding: 24px; background: linear-gradient(180deg, #141a30, #1b2340); }}
+    h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    p {{ margin: 0; color: #aeb9d6; line-height: 1.55; }}
+    code {{ color: #56d4ff; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{brand}: admin dashboard</h1>
+    <p>{safe_message}</p>
+    <p>Запусти <code>/scan</code>, дождись записи данных в SQLite, затем обнови эту страницу.</p>
+  </main>
+</body>
+</html>"""
+
+
+def build_live_admin_dashboard_html() -> str:
+    stats = load_latest_scan_stats_from_database()
+    if not stats:
+        return build_dashboard_empty_admin_html("В SQL базе пока нет последнего scan для построения живой админ-панели.")
+    stats["database"] = {
+        "path": str(database_path()),
+        "source": "sqlite-live",
+    }
+    stats["business_analysis"] = analyze_business_status(stats)
+    return build_scan_dashboard_html(stats)
+
+
+def live_admin_dashboard_url() -> str:
+    if settings.dashboard_intro_enabled:
+        return publish_dashboard_loader_file("admin.html")
+    return build_dashboard_public_url("admin.html")
+
+
 class DashboardRequestHandler(BaseHTTPRequestHandler):
     server_version = "VPNKBRDashboard/1.0"
 
@@ -3368,6 +3414,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
 
         file_name = parts[0]
+        if file_name == "admin.html":
+            self.serve_live_admin_dashboard(send_body=send_body)
+            return
+
         allowed_suffixes = {".html", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".css", ".js"}
         suffix = Path(file_name).suffix.casefold()
         if "/" in file_name or "\\" in file_name or suffix not in allowed_suffixes:
@@ -3386,6 +3436,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if suffix == ".html":
             content_type = "text/html; charset=utf-8"
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if send_body:
+            self.wfile.write(content)
+
+    def serve_live_admin_dashboard(self, *, send_body: bool) -> None:
+        try:
+            content = build_live_admin_dashboard_html().encode("utf-8")
+        except Exception:
+            logging.exception("Failed to build live admin dashboard")
+            content = build_dashboard_empty_admin_html("Не удалось собрать живую админ-панель. Подробности записаны в лог.").encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -4401,11 +4465,13 @@ def build_status_summary_from_stats(stats: dict, dashboard_path: Path) -> str:
     analysis = dict(stats.get("business_analysis") or analyze_business_status(stats))
     projections = list(analysis.get("projections") or [])
     dashboard_url = str(stats.get("dashboard_public_url") or ensure_dashboard_public_url(dashboard_path, "latest-status-dashboard.html"))
+    admin_url = live_admin_dashboard_url()
     lines = [
         "Business status из SQL базы",
         f"Админ-бот: {format_admin_bot_health()}",
         f"SQLite: {database_path()}",
         f"Dashboard: {dashboard_url or dashboard_path}",
+        f"Live admin: {admin_url}" if admin_url else "Live admin: disabled",
         "",
         f"Сформирован scan: {str(stats.get('generated_at') or '-').replace('T', ' ')}",
         f"Пользователей: {int(analysis.get('total_users') or 0)}",
