@@ -6741,7 +6741,19 @@ def admin_user_rows_json(records: list[dict]) -> str:
                 r"(?:total\s+topped\s*up|total\s+recharge)\D{0,20}([0-9][0-9\s.,]*)",
             ],
         )
-        subscriptions = list(record.get("subscriptions") or [])
+        raw_subscriptions = list(record.get("subscriptions") or [])
+        deduped_subscriptions: list[dict] = []
+        seen_sub_keys: set[str] = set()
+        for sub in raw_subscriptions:
+            sub_id = str(sub.get("subscription_id") or "").strip()
+            btn = str(sub.get("button_text") or "").strip()
+            loc = str(sub.get("location") or "").strip()
+            key = sub_id or f"{btn}|{loc}"
+            if not key or key in seen_sub_keys:
+                continue
+            seen_sub_keys.add(key)
+            deduped_subscriptions.append(sub)
+        subscriptions = deduped_subscriptions
         locations = sorted(
             {
                 str(sub.get("location") or "").strip()
@@ -9669,7 +9681,19 @@ def build_scan_report(records: list[dict], pages_total: int = 0, admin_statistic
 
     for record in records:
         user_id = str(record["user_id"])
-        user_subscriptions = record["subscriptions"]
+        raw_user_subscriptions = list(record.get("subscriptions") or [])
+        user_subscriptions: list[dict] = []
+        seen_sub_keys: set[str] = set()
+        for sub in raw_user_subscriptions:
+            sub_id = str(sub.get("subscription_id") or "").strip()
+            btn = str(sub.get("button_text") or "").strip()
+            loc = str(sub.get("location") or "").strip()
+            key = sub_id or f"{btn}|{loc}"
+            if not key or key in seen_sub_keys:
+                continue
+            seen_sub_keys.add(key)
+            user_subscriptions.append(sub)
+
         subscriptions_per_user[user_id] = len(user_subscriptions)
         if not user_subscriptions:
             users_without_subscriptions.append(user_id)
@@ -9753,7 +9777,20 @@ def build_scan_report(records: list[dict], pages_total: int = 0, admin_statistic
         if not reg_date:
             continue
         registrations_all.append(reg_date)
-        sub_count = len(record.get("subscriptions") or [])
+        # Keep registration-linked stats in sync with deduped subscriptions logic.
+        reg_subs = list(record.get("subscriptions") or [])
+        reg_seen: set[str] = set()
+        reg_count = 0
+        for sub in reg_subs:
+            sub_id = str(sub.get("subscription_id") or "").strip()
+            btn = str(sub.get("button_text") or "").strip()
+            loc = str(sub.get("location") or "").strip()
+            key = sub_id or f"{btn}|{loc}"
+            if not key or key in reg_seen:
+                continue
+            reg_seen.add(key)
+            reg_count += 1
+        sub_count = reg_count
         registration_subscription_points.append((reg_date.date(), sub_count))
         if sub_count > 0:
             registrations_paid.append(reg_date)
