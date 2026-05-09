@@ -5932,6 +5932,23 @@ def build_live_root_panel_html() -> str:
     <section class="panel">
       <h1>Пользователи</h1>
       <input id="search" placeholder="Поиск: ID или @username">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <select id="filterStatus">
+          <option value="all">Все статусы</option>
+          <option value="active">Активные</option>
+          <option value="expiring_7">Истекают до 7 дней</option>
+          <option value="expiring_30">Истекают до 30 дней</option>
+          <option value="expired">Истекшие</option>
+          <option value="no_subs">Без подписки</option>
+        </select>
+        <select id="sortUsers">
+          <option value="id_asc">Сортировка: ID ↑</option>
+          <option value="id_desc">Сортировка: ID ↓</option>
+          <option value="subs_desc">Подписок ↓</option>
+          <option value="days_asc">Дней до конца ↑</option>
+        </select>
+      </div>
+      <div class="grid" style="margin-top:8px" id="userKpis"></div>
       <div class="list" id="list"></div>
     </section>
     <section class="panel">
@@ -5975,6 +5992,9 @@ def build_live_root_panel_html() -> str:
     const users = {users_json};
     const list = document.getElementById("list");
     const search = document.getElementById("search");
+    const filterStatus = document.getElementById("filterStatus");
+    const sortUsers = document.getElementById("sortUsers");
+    const userKpis = document.getElementById("userKpis");
     const meta = document.getElementById("meta");
     const message = document.getElementById("message");
     const statusBox = document.getElementById("status");
@@ -5989,13 +6009,46 @@ def build_live_root_panel_html() -> str:
     function userLabel(u) {{
       return `ID ${{u.user_id}} ${{u.username ? "@" + u.username : ""}}`;
     }}
-    function renderList() {{
+    function filteredUsers() {{
       const q = String(search.value || "").trim().toLowerCase();
-      const rows = users.filter(u => {{
+      const status = String(filterStatus?.value || "all");
+      let rows = users.filter(u => {{
         const id = String(u.user_id || "");
         const un = String(u.username || "").toLowerCase();
-        return !q || id.includes(q) || un.includes(q) || ("@" + un).includes(q);
+        const byQuery = (!q || id.includes(q) || un.includes(q) || ("@" + un).includes(q));
+        const byStatus = (status === "all" || String(u.status || "") === status);
+        return byQuery && byStatus;
       }});
+      const sortMode = String(sortUsers?.value || "id_asc");
+      const toNum = (v, d=0) => Number.isFinite(Number(v)) ? Number(v) : d;
+      if (sortMode === "id_desc") {{
+        rows.sort((a,b) => toNum(b.user_id, -1) - toNum(a.user_id, -1));
+      }} else if (sortMode === "subs_desc") {{
+        rows.sort((a,b) => toNum(b.subscriptions, 0) - toNum(a.subscriptions, 0));
+      }} else if (sortMode === "days_asc") {{
+        rows.sort((a,b) => toNum(a.days_left, 10**9) - toNum(b.days_left, 10**9));
+      }} else {{
+        rows.sort((a,b) => toNum(a.user_id, 10**9) - toNum(b.user_id, 10**9));
+      }}
+      return rows;
+    }}
+
+    function renderKpis(rows) {{
+      const total = rows.length;
+      const paid = rows.filter(u => Number(u.subscriptions || 0) > 0).length;
+      const risk = rows.filter(u => ["expired","expiring_7"].includes(String(u.status || ""))).length;
+      const noSubs = rows.filter(u => String(u.status || "") === "no_subs").length;
+      userKpis.innerHTML = `
+        <div class="card"><div class="muted">Найдено</div><b>${{esc(total)}}</b></div>
+        <div class="card"><div class="muted">С подписками</div><b>${{esc(paid)}}</b></div>
+        <div class="card"><div class="muted">Зона риска</div><b>${{esc(risk)}}</b></div>
+        <div class="card"><div class="muted">Без подписки</div><b>${{esc(noSubs)}}</b></div>
+      `;
+    }}
+
+    function renderList() {{
+      const rows = filteredUsers();
+      renderKpis(rows);
       list.innerHTML = rows.map(u => `
         <div class="item ${{selected && String(selected.user_id) === String(u.user_id) ? "active" : ""}}" data-id="${{esc(u.user_id)}}">
           <div>${{esc(userLabel(u))}}</div>
@@ -6129,7 +6182,9 @@ def build_live_root_panel_html() -> str:
       }}
     }}
 
+    let activeTab = "users";
     function switchTab(name) {{
+      activeTab = name;
       document.getElementById("viewUsers").style.display = name === "users" ? "grid" : "none";
       document.getElementById("viewServices").style.display = name === "services" ? "block" : "none";
       document.getElementById("viewState").style.display = name === "state" ? "block" : "none";
@@ -6141,12 +6196,14 @@ def build_live_root_panel_html() -> str:
       const row = e.target.closest(".item[data-id]");
       if (!row) return;
       const id = String(row.dataset.id || "");
-      selected = users.find(u => String(u.user_id) === id) || null;
+      selected = filteredUsers().find(u => String(u.user_id) === id) || users.find(u => String(u.user_id) === id) || null;
       renderList();
       renderMeta();
       statusBox.textContent = selected ? `Выбран пользователь ${{selected.user_id}}.` : "Пользователь не выбран.";
     }});
     search.addEventListener("input", renderList);
+    filterStatus.addEventListener("change", renderList);
+    sortUsers.addEventListener("change", renderList);
     document.getElementById("btnWizard").addEventListener("click", () => submit("wizard_card", false));
     document.getElementById("btnMail").addEventListener("click", () => submit("mail", true));
     document.getElementById("btnPromo").addEventListener("click", () => submit("promo", false));
@@ -6159,6 +6216,10 @@ def build_live_root_panel_html() -> str:
     document.getElementById("tabState").addEventListener("click", () => switchTab("state"));
     renderList();
     renderMeta();
+    setInterval(() => {{
+      if (activeTab === "services") loadServices();
+      if (activeTab === "state") loadState();
+    }}, 15000);
   </script>
 </body>
 </html>"""
