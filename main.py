@@ -5896,18 +5896,18 @@ def build_live_root_panel_html() -> str:
   <title>{brand} — Root Panel</title>
   <style>
     :root {{
-      --bg:#f5f5f7; --panel:#ffffff; --border:#e5e5ea; --text:#1d1d1f; --muted:#6e6e73;
+      --bg:#f5f5f7; --panel:#ffffff; --border:#c7c7cc; --text:#1d1d1f; --muted:#6e6e73;
       --primary:#0071e3; --good:#34c759; --warn:#ff9f0a;
     }}
     * {{ box-sizing:border-box; }}
     body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }}
     .wrap {{ display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:12px; min-height:100vh; }}
-    .panel {{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.03); }}
+    .panel {{ background:var(--panel); border:2px solid var(--border); border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.03); }}
     .panel + .panel {{ margin-top: 10px; }}
     h1 {{ margin:0 0 10px; font-size:17px; font-weight:600; letter-spacing:0; }}
     h1 {{
       padding: 8px 10px;
-      border: 1px solid var(--border);
+      border: 2px solid var(--border);
       border-radius: 10px;
       background: #fafafc;
     }}
@@ -5926,14 +5926,14 @@ def build_live_root_panel_html() -> str:
       color: #8a8a90;
     }}
     textarea {{ min-height:88px; resize:vertical; }}
-    .list {{ margin-top:10px; max-height:52vh; overflow:auto; border:1px solid var(--border); border-radius:10px; background:#fff; }}
-    .item {{ padding:10px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .16s ease; }}
+    .list {{ margin-top:10px; max-height:52vh; overflow:auto; border:2px solid var(--border); border-radius:10px; background:#fff; }}
+    .item {{ padding:10px; border-bottom:2px solid #e3e3e8; cursor:pointer; transition:background .16s ease; }}
     .item:last-child {{ border-bottom:none; }}
     .item:hover {{ background:#f7f7f9; }}
     .item.active {{ background:#eef4ff; }}
     .muted {{ color:var(--muted); font-size:12px; }}
     .grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
-    .card {{ border:1px solid var(--border); border-radius:10px; padding:10px; background:#fbfbfd; }}
+    .card {{ border:2px solid var(--border); border-radius:10px; padding:10px; background:#fbfbfd; }}
     .actions {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }}
     .scenarios {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }}
     .btn-primary {{ background:var(--primary); color:#fff; border-color:var(--primary); }}
@@ -5942,17 +5942,17 @@ def build_live_root_panel_html() -> str:
     button {{ transition:transform .06s ease, box-shadow .16s ease, background .16s ease; }}
     button:hover {{ box-shadow:0 2px 10px rgba(0,0,0,.06); }}
     button:active {{ transform:translateY(1px); }}
-    .status {{ margin-top:10px; white-space:pre-wrap; font-size:13px; color:var(--muted); border:1px solid var(--border); border-radius:10px; padding:10px; background:#fafafa; }}
+    .status {{ margin-top:10px; white-space:pre-wrap; font-size:13px; color:var(--muted); border:2px solid var(--border); border-radius:10px; padding:10px; background:#fafafa; }}
     #tabUsers, #tabServices, #tabState, #tabConsole {{
       width: auto;
       min-width: 140px;
       background: #fff;
-      border: 1px solid var(--border);
+      border: 2px solid var(--border);
       border-radius: 10px;
       font-weight: 600;
     }}
     #tabUsers.active, #tabServices.active, #tabState.active, #tabConsole.active {{
-      border-color: rgba(0,113,227,.45);
+      border-color: rgba(0,113,227,.9);
       color: var(--primary);
       background: #eef4ff;
     }}
