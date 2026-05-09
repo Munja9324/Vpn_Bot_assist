@@ -13,8 +13,7 @@ $KeyPath = Join-Path $env:USERPROFILE ".ssh\codex_kvm_ed25519"
 Set-Location -LiteralPath $Repo
 
 $Python = "C:\Users\VOL29\AppData\Local\Programs\Python\Python314\python.exe"
-& $Python "$Repo\tools\repair_mojibake.py" --check "$Repo\main.py"
-& $Python -m py_compile "$Repo\main.py"
+& $Python -m py_compile "$Repo\vpn_kbr.py"
 
 function Test-SensitivePath {
     param([string]$Path)

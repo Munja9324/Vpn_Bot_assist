@@ -30,7 +30,7 @@ pip install -r requirements.txt
 5. Запусти:
 
 ```powershell
-python main.py
+python vpn_kbr.py
 ```
 
 6. При первом запуске введи номер Telegram, код входа и пароль 2FA, если он включен.
@@ -73,7 +73,8 @@ stop scan
 
 ## Важные файлы
 
-- [main.py](C:/Project/main.py) - основная логика
+- [vpn_kbr.py](C:/Project/vpn_kbr.py) - точка входа
+- [kbrbot/app.py](C:/Project/kbrbot/app.py) - основная логика
 - [docs/RU_FULL_GUIDE.md](C:/Project/docs/RU_FULL_GUIDE.md) - полная инструкция
 - `scan-data.sqlite3` - локальная база проекта
 - `userbot.log` - рабочий лог

@@ -20,7 +20,8 @@
 
 Основные части:
 
-- `main.py` - вся бизнес-логика;
+- `vpn_kbr.py` - точка входа;
+- `kbrbot/app.py` - вся бизнес-логика;
 - `.env` - настройки и секреты;
 - `scan-data.sqlite3` - локальная база;
 - `reports/` - HTML-отчеты и dashboard;
@@ -179,7 +180,7 @@ CLEANUP_TEMP_ON_START=true
 Запуск:
 
 ```powershell
-python main.py
+python vpn_kbr.py
 ```
 
 При первом запуске Telethon попросит:
@@ -481,7 +482,7 @@ CLEANUP_TEMP_ON_START=true
 Минимум:
 
 ```powershell
-python -m py_compile main.py
+python -m py_compile vpn_kbr.py
 ```
 
 Потом:
@@ -495,7 +496,8 @@ python -m py_compile main.py
 
 ## 18. Куда смотреть при проблемах
 
-- [main.py](C:/Project/main.py)
+- [vpn_kbr.py](C:/Project/vpn_kbr.py)
+- [kbrbot/app.py](C:/Project/kbrbot/app.py)
 - [README.md](C:/Project/README.md)
 - [docs/RU_FULL_GUIDE.md](C:/Project/docs/RU_FULL_GUIDE.md)
 - `userbot.log`

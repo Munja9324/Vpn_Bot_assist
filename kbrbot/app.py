@@ -6279,7 +6279,9 @@ def build_live_root_panel_html() -> str:
         if (!risky.length) {{
           riskPreview.innerHTML = "<b>ТОП риск:</b> сейчас критичных пользователей нет";
         }} else {{
-          riskPreview.innerHTML = "<b>ТОП риск:</b> " + risky.map(u => `ID ${esc(u.user_id)} (${esc(u.days_left ?? "-")} дн.)`).join(" | ");
+          riskPreview.innerHTML = "<b>ТОП риск:</b> " + risky.map(
+            u => "ID " + esc(u.user_id) + " (" + esc((u.days_left ?? "-")) + " дн.)"
+          ).join(" | ");
         }}
       }}
       if (miniKpis) {{
