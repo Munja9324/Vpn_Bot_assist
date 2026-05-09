@@ -9005,16 +9005,17 @@ def build_scan_dashboard_html(stats: dict) -> str:
     users_forecast_chart = list(six_month.get("users_forecast_series") or [])
     subs_actual_chart = list(six_month.get("subscriptions_actual_series") or [])
     subs_forecast_chart = list(six_month.get("subscriptions_forecast_series") or [])
-    theme_bg = sanitize_hex_color(settings.dashboard_theme_bg, "#0b1020")
-    theme_panel = sanitize_hex_color(settings.dashboard_theme_panel, "#141a30")
-    theme_panel_soft = sanitize_hex_color(settings.dashboard_theme_panel_soft, "#1b2340")
-    theme_text = sanitize_hex_color(settings.dashboard_theme_text, "#edf1ff")
-    theme_muted = sanitize_hex_color(settings.dashboard_theme_muted, "#aeb9d6")
-    theme_primary = sanitize_hex_color(settings.dashboard_theme_primary, "#56d4ff")
-    theme_good = sanitize_hex_color(settings.dashboard_theme_good, "#34d399")
-    theme_warn = sanitize_hex_color(settings.dashboard_theme_warn, "#f59e0b")
-    theme_bad = sanitize_hex_color(settings.dashboard_theme_bad, "#f87171")
-    theme_border = sanitize_hex_color(settings.dashboard_theme_border, "#2a3564")
+    # Apple-like light theme for dashboard readability on desktop/mobile.
+    theme_bg = "#f5f5f7"
+    theme_panel = "#ffffff"
+    theme_panel_soft = "#ffffff"
+    theme_text = "#1d1d1f"
+    theme_muted = "#6e6e73"
+    theme_primary = "#0071e3"
+    theme_good = "#1d9d62"
+    theme_warn = "#b26a00"
+    theme_bad = "#c93434"
+    theme_border = "#e5e5ea"
     dashboard_brand = esc(settings.dashboard_brand_name or settings.app_name or "Vpn_Bot_assist")
     dashboard_title = esc(settings.dashboard_title or "VPN Dashboard")
     dashboard_subtitle = esc(settings.dashboard_subtitle or "")
@@ -9079,11 +9080,8 @@ def build_scan_dashboard_html(stats: dict) -> str:
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: "Segoe UI", "Inter", Arial, sans-serif;
-      background:
-        radial-gradient(1200px 500px at 10% -20%, rgba(86,212,255,.16), transparent 60%),
-        radial-gradient(1000px 400px at 90% -20%, rgba(52,211,153,.12), transparent 60%),
-        var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
       color: var(--text);
     }}
     .wrap {{ max-width: 1280px; margin: 0 auto; padding: 28px 20px 40px; }}
@@ -9100,9 +9098,9 @@ def build_scan_dashboard_html(stats: dict) -> str:
       margin-bottom: 14px;
     }}
     .card {{
-      background: linear-gradient(180deg, var(--panel), var(--panel-soft));
+      background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 14px;
       padding: 14px;
       min-height: 96px;
     }}
@@ -9112,9 +9110,9 @@ def build_scan_dashboard_html(stats: dict) -> str:
     .v.warn {{ color: var(--warn); }}
     .v.bad {{ color: var(--bad); }}
     .panel {{
-      background: linear-gradient(180deg, var(--panel), var(--panel-soft));
+      background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 14px;
       padding: 14px;
       margin-top: 12px;
     }}
@@ -9174,7 +9172,13 @@ def build_scan_dashboard_html(stats: dict) -> str:
     .status-pill.expired {{ color: var(--bad); border-color: rgba(248,113,113,.45); }}
     .status-pill.expiring_7, .status-pill.expiring_30 {{ color: var(--warn); border-color: rgba(245,158,11,.45); }}
     .status-pill.active {{ color: var(--good); border-color: rgba(52,211,153,.45); }}
-    .table-scroll {{ overflow: auto; border: 1px solid var(--border); border-radius: 8px; }}
+    .table-scroll {{
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }}
     .table-scroll table {{ min-width: 860px; }}
     .admin-kpis {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }}
     .admin-kpi {{ border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(255,255,255,.03); }}
@@ -9237,18 +9241,52 @@ def build_scan_dashboard_html(stats: dict) -> str:
       .panel {{ padding: 12px; margin-top: 10px; }}
       .cols {{ grid-template-columns: 1fr; gap: 10px; }}
       th, td {{ padding: 7px 8px; font-size: 13px; }}
-      .side-nav {{ grid-template-columns: 1fr; }}
+      .side-nav {{
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }}
+      .nav-btn {{
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }}
+      .filter-row {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }}
+      .filter-btn {{
+        text-align: center;
+      }}
       .nav-btn, .filter-btn, .action-btn, .pager-btn {{ min-height: 40px; }}
       .admin-kpis {{ grid-template-columns: 1fr 1fr; }}
       .admin-kpi b {{ font-size: 20px; }}
-      .table-scroll table {{ min-width: 620px; }}
+      .table-scroll table {{ min-width: 540px; }}
+      .toolbar input, .toolbar select, .action-grid input, .action-grid textarea {{
+        font-size: 16px;
+      }}
+      .pager {{
+        justify-content: flex-start;
+      }}
+      .action-buttons {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }}
+    }}
+    @media (max-width: 480px) {{
+      .admin-kpis {{ grid-template-columns: 1fr; }}
+      .filter-row {{ grid-template-columns: 1fr; }}
+      .action-buttons {{ grid-template-columns: 1fr; }}
+      .toolbar {{ gap: 8px; }}
+      .table-scroll table {{ min-width: 480px; }}
+      th, td {{ font-size: 12px; }}
     }}
     code {{
-      background: #101735;
+      background: #f2f2f7;
       border: 1px solid var(--border);
       padding: 1px 6px;
       border-radius: 6px;
-      color: #c4d7ff;
+      color: #1d1d1f;
     }}
   </style>
 </head>
