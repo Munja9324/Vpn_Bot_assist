@@ -5914,6 +5914,7 @@ def build_live_root_panel_html() -> str:
     .grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
     .card {{ border:1px solid var(--border); border-radius:10px; padding:10px; background:#fafafa; }}
     .actions {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }}
+    .scenarios {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }}
     .btn-primary {{ background:var(--primary); color:#fff; border-color:var(--primary); }}
     .btn-good {{ background:var(--good); color:#fff; border-color:var(--good); }}
     .btn-warn {{ background:var(--warn); color:#fff; border-color:var(--warn); }}
@@ -5934,6 +5935,12 @@ def build_live_root_panel_html() -> str:
       <div class="panel" style="margin-top:10px;padding:10px">
         <div class="muted" style="margin-bottom:8px">Текст для Mail / Wizard</div>
         <textarea id="message" placeholder="Введите текст сообщения"></textarea>
+        <div class="scenarios">
+          <button id="scKey" type="button">Ключ не работает</button>
+          <button id="scPay" type="button">Платеж не прошел</button>
+          <button id="scIos" type="button">Подключение iOS</button>
+          <button id="scAndroid" type="button">Подключение Android</button>
+        </div>
         <div class="actions">
           <button class="btn-good" id="btnWizard">Отправить в Wizard</button>
           <button class="btn-primary" id="btnMail">Написать Mail</button>
@@ -6049,6 +6056,19 @@ def build_live_root_panel_html() -> str:
       }}
     }}
 
+    const scenarioTemplates = {{
+      key: "Здравствуйте. Проверим ключ по шагам:\\n1) Скопируйте ключ заново из подписки полностью.\\n2) Удалите старый профиль и импортируйте новый.\\n3) Проверьте авто-дату и авто-время.\\n4) Переключите сеть Wi-Fi/мобильная.\\nЕсли не поможет, ответьте: не помогло.",
+      pay: "Здравствуйте. Для проверки платежа пришлите:\\n1) ID из раздела Профиль\\n2) Время и сумму платежа\\n3) Последние цифры операции или чек\\nПосле этого сразу передам в поддержку.",
+      ios: "Инструкция iOS:\\n1) Установите приложение для VPN.\\n2) Скопируйте ключ из подписки.\\n3) Импортируйте ключ в приложение.\\n4) Включите VPN-профиль.\\nЕсли ошибка останется — пришлите скрин и текст ошибки.",
+      android: "Инструкция Android:\\n1) Установите v2rayNG.\\n2) Скопируйте ключ из подписки.\\n3) Импортируйте ключ в приложение.\\n4) Нажмите Подключить.\\nЕсли не подключается — пришлите текст ошибки и модель телефона.",
+    }};
+    function applyScenario(key) {{
+      const text = scenarioTemplates[key];
+      if (!text) return;
+      message.value = text;
+      statusBox.textContent = "Сценарий подставлен. Нажмите Mail или Wizard.";
+    }}
+
     list.addEventListener("click", (e) => {{
       const row = e.target.closest(".item[data-id]");
       if (!row) return;
@@ -6062,6 +6082,10 @@ def build_live_root_panel_html() -> str:
     document.getElementById("btnWizard").addEventListener("click", () => submit("wizard_card", false));
     document.getElementById("btnMail").addEventListener("click", () => submit("mail", true));
     document.getElementById("btnPromo").addEventListener("click", () => submit("promo", false));
+    document.getElementById("scKey").addEventListener("click", () => applyScenario("key"));
+    document.getElementById("scPay").addEventListener("click", () => applyScenario("pay"));
+    document.getElementById("scIos").addEventListener("click", () => applyScenario("ios"));
+    document.getElementById("scAndroid").addEventListener("click", () => applyScenario("android"));
     renderList();
     renderMeta();
   </script>
