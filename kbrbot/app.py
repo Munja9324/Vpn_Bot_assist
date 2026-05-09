@@ -6113,31 +6113,6 @@ def build_live_root_panel_html() -> str:
     <section class="panel">
       <div class="section-tag">Users</div>
       <h1>РџРѕР»СЊР·РѕРІР°С‚РµР»Рё</h1>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-        <select id="filterStatus">
-          <option value="all">Р’СЃРµ СЃС‚Р°С‚СѓСЃС‹</option>
-          <option value="active">РђРєС‚РёРІРЅС‹Рµ</option>
-          <option value="expiring_7">РСЃС‚РµРєР°СЋС‚ РґРѕ 7 РґРЅРµР№</option>
-          <option value="expiring_30">РСЃС‚РµРєР°СЋС‚ РґРѕ 30 РґРЅРµР№</option>
-          <option value="expired">РСЃС‚РµРєС€РёРµ</option>
-          <option value="no_subs">Р‘РµР· РїРѕРґРїРёСЃРєРё</option>
-        </select>
-        <select id="sortUsers">
-          <option value="id_asc">РЎРѕСЂС‚РёСЂРѕРІРєР°: ID в†‘</option>
-          <option value="id_desc">РЎРѕСЂС‚РёСЂРѕРІРєР°: ID в†“</option>
-          <option value="subs_desc">РџРѕРґРїРёСЃРѕРє в†“</option>
-          <option value="days_asc">Р”РЅРµР№ РґРѕ РєРѕРЅС†Р° в†‘</option>
-        </select>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-        <button id="btnExportCsv" type="button">Р­РєСЃРїРѕСЂС‚ CSV</button>
-        <button id="btnResetFilters" type="button">РЎР±СЂРѕСЃ С„РёР»СЊС‚СЂРѕРІ</button>
-      </div>
-      <div class="quick-row">
-        <button id="qRisk" class="quick-btn" type="button">Р РёСЃРє</button>
-        <button id="qNoSubs" class="quick-btn" type="button">Р‘РµР· РїРѕРґРїРёСЃРєРё</button>
-        <button id="qActive" class="quick-btn" type="button">РђРєС‚РёРІРЅС‹Рµ</button>
-      </div>
       <div class="grid" style="margin-top:8px" id="userKpis"></div>
       <div id="riskPreview" class="risk-preview"></div>
       <div class="search-wrap">
@@ -6197,17 +6172,10 @@ def build_live_root_panel_html() -> str:
       <tbody id="stateBody"></tbody>
     </table>
   </div>
-  <div class="quick-dock" id="quickDock">
-    <button id="dockRisk" type="button">Р РёСЃРє</button>
-    <button id="dockActive" type="button">РђРєС‚РёРІРЅС‹Рµ</button>
-    <button id="dockNoSubs" type="button">Р‘РµР· РїРѕРґРїРёСЃРєРё</button>
-  </div>
   <script>
     const users = {users_json};
     const list = document.getElementById("list");
     const search = document.getElementById("search");
-    const filterStatus = document.getElementById("filterStatus");
-    const sortUsers = document.getElementById("sortUsers");
     const userKpis = document.getElementById("userKpis");
     const riskPreview = document.getElementById("riskPreview");
     const meta = document.getElementById("meta");
@@ -6277,7 +6245,6 @@ def build_live_root_panel_html() -> str:
     }}
     function filteredUsers() {{
       const q = String(search.value || "").trim().toLowerCase();
-      const status = String(filterStatus?.value || "all");
       const qDigits = q.replace(/\D+/g, "");
 
       // Exact ID/username lookup should not be blocked by status filter.
@@ -6298,21 +6265,10 @@ def build_live_root_panel_html() -> str:
       let rows = users.filter(u => {{
         const id = String(u.user_id || "");
         const un = String(u.username || "").toLowerCase();
-        const byQuery = (!q || id.includes(q) || un.includes(q) || ("@" + un).includes(q));
-        const byStatus = (status === "all" || String(u.status || "") === status);
-        return byQuery && byStatus;
+        return (!q || id.includes(q) || un.includes(q) || ("@" + un).includes(q));
       }});
-      const sortMode = String(sortUsers?.value || "id_asc");
       const toNum = (v, d=0) => Number.isFinite(Number(v)) ? Number(v) : d;
-      if (sortMode === "id_desc") {{
-        rows.sort((a,b) => toNum(b.user_id, -1) - toNum(a.user_id, -1));
-      }} else if (sortMode === "subs_desc") {{
-        rows.sort((a,b) => toNum(b.subscriptions, 0) - toNum(a.subscriptions, 0));
-      }} else if (sortMode === "days_asc") {{
-        rows.sort((a,b) => toNum(a.days_left, 10**9) - toNum(b.days_left, 10**9));
-      }} else {{
-        rows.sort((a,b) => toNum(a.user_id, 10**9) - toNum(b.user_id, 10**9));
-      }}
+      rows.sort((a,b) => toNum(a.user_id, 10**9) - toNum(b.user_id, 10**9));
       return rows;
     }}
 
@@ -6352,32 +6308,6 @@ def build_live_root_panel_html() -> str:
           <div class="mini-kpi">Истекли<b>${{esc(expired)}}</b></div>
         `;
       }}
-    }}
-
-    function downloadFilteredCsv() {{
-      const rows = filteredUsers();
-      const head = ["user_id","username","subscriptions","status","days_left","registration_date"];
-      const body = rows.map((u) => [
-        String(u.user_id || ""),
-        String(u.username || ""),
-        String(u.subscriptions ?? ""),
-        String(u.status_label || u.status || ""),
-        String(u.days_left ?? ""),
-        String(u.registration_date || ""),
-      ]);
-      const all = [head, ...body];
-      const escCsv = (v) => `"${{String(v).replace(/"/g, '""')}}"`;
-      const csv = all.map((r) => r.map(escCsv).join(",")).join("\\n");
-      const blob = new Blob([csv], {{ type: "text/csv;charset=utf-8;" }});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `users-${{new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      statusBox.textContent = `Р­РєСЃРїРѕСЂС‚РёСЂРѕРІР°РЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№: ${{rows.length}}`;
     }}
 
     function copySelected(kind) {{
@@ -6657,8 +6587,6 @@ def build_live_root_panel_html() -> str:
       }}
     }});
     search.addEventListener("input", renderList);
-    filterStatus.addEventListener("change", renderList);
-    sortUsers.addEventListener("change", renderList);
     document.getElementById("btnWizard").addEventListener("click", () => submit("wizard_card", false));
     document.getElementById("btnMail").addEventListener("click", () => submit("mail", true));
     document.getElementById("btnPromo").addEventListener("click", () => submit("promo", false));
@@ -6666,36 +6594,6 @@ def build_live_root_panel_html() -> str:
     document.getElementById("scPay").addEventListener("click", () => applyScenario("pay"));
     document.getElementById("scIos").addEventListener("click", () => applyScenario("ios"));
     document.getElementById("scAndroid").addEventListener("click", () => applyScenario("android"));
-    document.getElementById("btnExportCsv").addEventListener("click", downloadFilteredCsv);
-    document.getElementById("btnResetFilters").addEventListener("click", () => {{
-      search.value = "";
-      filterStatus.value = "all";
-      sortUsers.value = "id_asc";
-      renderList();
-      statusBox.textContent = "Р¤РёР»СЊС‚СЂС‹ СЃР±СЂРѕС€РµРЅС‹.";
-      pushEvent("Р¤РёР»СЊС‚СЂС‹ СЃР±СЂРѕС€РµРЅС‹");
-    }});
-    document.getElementById("qRisk").addEventListener("click", () => {{
-      filterStatus.value = "expiring_7";
-      renderList();
-      pushEvent("РџСЂРёРјРµРЅРµРЅ С„РёР»СЊС‚СЂ: СЂРёСЃРє");
-    }});
-    document.getElementById("qNoSubs").addEventListener("click", () => {{
-      filterStatus.value = "no_subs";
-      renderList();
-      pushEvent("РџСЂРёРјРµРЅРµРЅ С„РёР»СЊС‚СЂ: Р±РµР· РїРѕРґРїРёСЃРєРё");
-    }});
-    document.getElementById("qActive").addEventListener("click", () => {{
-      filterStatus.value = "active";
-      renderList();
-      pushEvent("РџСЂРёРјРµРЅРµРЅ С„РёР»СЊС‚СЂ: Р°РєС‚РёРІРЅС‹Рµ");
-    }});
-    const dockRisk = document.getElementById("dockRisk");
-    const dockActive = document.getElementById("dockActive");
-    const dockNoSubs = document.getElementById("dockNoSubs");
-    if (dockRisk) dockRisk.addEventListener("click", () => document.getElementById("qRisk").click());
-    if (dockActive) dockActive.addEventListener("click", () => document.getElementById("qActive").click());
-    if (dockNoSubs) dockNoSubs.addEventListener("click", () => document.getElementById("qNoSubs").click());
     document.getElementById("btnCopyId").addEventListener("click", () => copySelected("id"));
     document.getElementById("btnCopyUsername").addEventListener("click", () => copySelected("username"));
     document.getElementById("btnFillTemplate").addEventListener("click", fillSupportTemplate);
@@ -6717,9 +6615,9 @@ def build_live_root_panel_html() -> str:
     document.getElementById("tabState").addEventListener("click", () => switchTab("state"));
     if (selectionHint) {{
       selectionHint.addEventListener("click", () => {{
-        sortUsers.value = "days_asc";
+        search.focus();
         renderList();
-        pushEvent("РЈРјРЅР°СЏ СЃРѕСЂС‚РёСЂРѕРІРєР° РїРѕ СЂРёСЃРєСѓ");
+        pushEvent("Фокус на поиск");
       }});
     }}
     setupConsoleTab();
@@ -9626,8 +9524,29 @@ def format_subscription_info_html(user_id: str, user_text: str, subscriptions_me
 
 
 def extract_location_from_subscription_button(text: str) -> str:
-    cleaned = re.sub(r"\[\d+\]", "", text).strip()
-    return cleaned or "\u0431\u0435\u0437 \u043b\u043e\u043a\u0430\u0446\u0438\u0438"
+    raw = sanitize_outgoing_text(str(text or "")).strip()
+    if not raw:
+        return "\u0431\u0435\u0437 \u043b\u043e\u043a\u0430\u0446\u0438\u0438"
+
+    # Remove obvious technical fragments.
+    cleaned = re.sub(r"\[\d+\]", "", raw)
+    cleaned = re.sub(r"\b(?:id|srv|server|loc|location)\s*[:#-]?\s*\d+\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" -|:;,.")
+
+    # Keep friendly location part before service separators.
+    parts = [p.strip(" -|:;,.") for p in re.split(r"\s+[|/]\s+|\s+-\s+|\s+—\s+", cleaned) if p.strip()]
+    best = parts[0] if parts else cleaned
+
+    # If a flag exists in the source, keep "flag + name".
+    flag_match = re.search(r"[\U0001F1E6-\U0001F1FF]{2}", raw)
+    if flag_match:
+        flag = flag_match.group(0)
+        best_no_flag = best.replace(flag, "").strip()
+        if best_no_flag:
+            return f"{flag} {best_no_flag}".strip()
+        return flag
+
+    return best or "\u0431\u0435\u0437 \u043b\u043e\u043a\u0430\u0446\u0438\u0438"
 
 
 def extract_expiration_date(text: str) -> datetime | None:
