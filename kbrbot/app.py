@@ -6711,9 +6711,13 @@ def admin_user_rows_json(records: list[dict]) -> str:
     now = datetime.now()
     rows: list[dict[str, object]] = []
 
+    def normalize_profile_text(value: str) -> str:
+        return sanitize_outgoing_text(str(value or "")).replace("\xa0", " ")
+
     def parse_money(text: str, patterns: list[str]) -> float | None:
+        normalized = normalize_profile_text(text)
         for pattern in patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
+            match = re.search(pattern, normalized, flags=re.IGNORECASE)
             if not match:
                 continue
             token = str(match.group(1) or "").replace(" ", "").replace(",", ".")
@@ -6735,36 +6739,43 @@ def admin_user_rows_json(records: list[dict]) -> str:
         if not user_id:
             continue
         username = normalize_username(str(record.get("username") or ""))
-        profile_text = str(record.get("user_text") or "")
+        profile_text = normalize_profile_text(str(record.get("user_text") or ""))
         parsed_profile = record.get("parsed_profile") if isinstance(record.get("parsed_profile"), dict) else {}
         balance_rub = parsed_profile.get("balance_rub")
         if not isinstance(balance_rub, (int, float)):
             balance_rub = parse_money(
                 profile_text,
                 [
-                    r"(?:Р±Р°Р»Р°РЅСЃ|balance)\D{0,16}([0-9][0-9\s.,]*)",
-                    r"(?:РЅР°\s+СЃС‡РµС‚Рµ|РЅР°\s+СЃС‡С‘С‚Рµ)\D{0,16}([0-9][0-9\s.,]*)",
+                    r"(?:баланс|balance|wallet)\D{0,24}([0-9][0-9\s.,]*)",
+                    r"(?:на\s+счете|на\s+счёте|на\s+балансе)\D{0,24}([0-9][0-9\s.,]*)",
                 ],
             )
-        total_topped_up_rub = parse_money(
-            profile_text,
-            [
-                r"(?:РІСЃРµРіРѕ\s+РїРѕРїРѕР»РЅРµРЅРѕ|РїРѕРїРѕР»РЅРµРЅРѕ\s+РІСЃРµРіРѕ)\D{0,20}([0-9][0-9\s.,]*)",
-                r"(?:total\s+topped\s*up|total\s+recharge)\D{0,20}([0-9][0-9\s.,]*)",
-            ],
-        )
+        total_topped_up_rub = parsed_profile.get("total_topped_up_rub")
+        if not isinstance(total_topped_up_rub, (int, float)):
+            total_topped_up_rub = parse_money(
+                profile_text,
+                [
+                    r"(?:всего\s+пополнено|пополнено\s+всего|сумма\s+пополнений)\D{0,28}([0-9][0-9\s.,]*)",
+                    r"(?:total\s+topped\s*up|total\s+recharge|total\s+deposits?)\D{0,28}([0-9][0-9\s.,]*)",
+                ],
+            )
         raw_subscriptions = list(record.get("subscriptions") or [])
         deduped_subscriptions: list[dict] = []
         seen_sub_keys: set[str] = set()
         for sub in raw_subscriptions:
-            sub_id = str(sub.get("subscription_id") or "").strip()
-            btn = str(sub.get("button_text") or "").strip()
-            loc = str(sub.get("location") or "").strip()
+            sub_id = normalize_profile_text(str(sub.get("subscription_id") or "")).strip()
+            btn = normalize_profile_text(str(sub.get("button_text") or "")).strip()
+            loc = normalize_profile_text(str(sub.get("location") or "")).strip()
             key = sub_id or f"{btn}|{loc}"
             if not key or key in seen_sub_keys:
                 continue
             seen_sub_keys.add(key)
-            deduped_subscriptions.append(sub)
+            sub_copy = dict(sub)
+            sub_copy["subscription_id"] = sub_id
+            sub_copy["button_text"] = btn
+            sub_copy["location"] = loc
+            sub_copy["detail_text"] = normalize_profile_text(str(sub.get("detail_text") or ""))
+            deduped_subscriptions.append(sub_copy)
         subscriptions = deduped_subscriptions
         locations = sorted(
             {
