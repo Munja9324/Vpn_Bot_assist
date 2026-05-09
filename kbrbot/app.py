@@ -6374,6 +6374,7 @@ def build_live_root_panel_html() -> str:
         <div class="card"><div class="muted">Р‘Р°Р»Р°РЅСЃ</div><b>${{esc(selected.balance_rub_text || "-")}}</b></div>
         <div class="card"><div class="muted">Р’СЃРµРіРѕ РїРѕРїРѕР»РЅРµРЅРѕ</div><b>${{esc(selected.total_topped_up_rub_text || "-")}}</b></div>
         <div class="card"><div class="muted">Р›РѕРєР°С†РёРё</div><b>${{esc(selected.locations || "-")}}</b></div>
+        <div class="card"><div class="muted">Локация (debug)</div><b>${{esc(selected.locations_debug || "-")}}</b></div>
         <div class="card"><div class="muted">Р‘Р»РёР¶Р°Р№С€РµРµ РёСЃС‚РµС‡РµРЅРёРµ</div><b>${{esc(selected.nearest_expiration || "-")}}</b></div>
         <div class="card"><div class="muted">Р”РЅРµР№ РґРѕ РѕРєРѕРЅС‡Р°РЅРёСЏ</div><b>${{esc(selected.days_left !== "" ? selected.days_left : "-")}}</b></div>
       `;
@@ -6699,6 +6700,8 @@ def admin_user_rows_json(records: list[dict]) -> str:
                 continue
             if re.fullmatch(r"\d{1,8}", candidate):
                 continue
+            if len(candidate) > 36:
+                continue
             cleaned.append(candidate)
         if cleaned:
             return cleaned
@@ -6805,7 +6808,17 @@ def admin_user_rows_json(records: list[dict]) -> str:
                 "username": username,
                 "registration_date": str(record.get("registration_date") or ""),
                 "subscriptions": len(subscriptions),
-                "locations": ", ".join(locations),
+                "locations": " • ".join(locations),
+                "locations_debug": " | ".join(
+                    [
+                        f"btn={str(sub.get('button_text') or '').strip()}"[:120]
+                        for sub in subscriptions[:2]
+                    ]
+                    + [
+                        f"loc={str(sub.get('location') or '').strip()}"[:80]
+                        for sub in subscriptions[:2]
+                    ]
+                ),
                 "nearest_expiration": nearest_expiration_text,
                 "days_left": days_left,
                 "status": status,
@@ -9536,6 +9549,10 @@ def extract_location_from_subscription_button(text: str) -> str:
     # Keep friendly location part before service separators.
     parts = [p.strip(" -|:;,.") for p in re.split(r"\s+[|/]\s+|\s+-\s+|\s+—\s+", cleaned) if p.strip()]
     best = parts[0] if parts else cleaned
+    # Remove numeric tails and technical fragments.
+    best = re.sub(r"\b\d{1,8}\b", "", best)
+    best = re.sub(r"\b(?:id|srv|server|loc|location|node|uuid)\b", "", best, flags=re.IGNORECASE)
+    best = re.sub(r"\s{2,}", " ", best).strip(" -|:;,.")
 
     # If a flag exists in the source, keep "flag + name".
     flag_match = re.search(r"[\U0001F1E6-\U0001F1FF]{2}", raw)
