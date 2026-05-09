@@ -5903,7 +5903,14 @@ def build_live_root_panel_html() -> str:
     body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }}
     .wrap {{ display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:12px; min-height:100vh; }}
     .panel {{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.03); }}
+    .panel + .panel {{ margin-top: 10px; }}
     h1 {{ margin:0 0 10px; font-size:17px; font-weight:600; letter-spacing:0; }}
+    h1 {{
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fafafc;
+    }}
     input, textarea, button, select {{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px; font:inherit; background:#fff; color:var(--text); }}
     input:focus, textarea:focus, select:focus {{
       outline: none;
@@ -5935,7 +5942,20 @@ def build_live_root_panel_html() -> str:
     button {{ transition:transform .06s ease, box-shadow .16s ease, background .16s ease; }}
     button:hover {{ box-shadow:0 2px 10px rgba(0,0,0,.06); }}
     button:active {{ transform:translateY(1px); }}
-    .status {{ margin-top:10px; white-space:pre-wrap; font-size:13px; color:var(--muted); }}
+    .status {{ margin-top:10px; white-space:pre-wrap; font-size:13px; color:var(--muted); border:1px solid var(--border); border-radius:10px; padding:10px; background:#fafafa; }}
+    #tabUsers, #tabServices, #tabState, #tabConsole {{
+      width: auto;
+      min-width: 140px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-weight: 600;
+    }}
+    #tabUsers.active, #tabServices.active, #tabState.active, #tabConsole.active {{
+      border-color: rgba(0,113,227,.45);
+      color: var(--primary);
+      background: #eef4ff;
+    }}
     @media (max-width: 980px) {{
       .wrap {{ grid-template-columns:1fr; }}
       .actions {{ grid-template-columns:1fr; }}
@@ -6296,6 +6316,16 @@ def build_live_root_panel_html() -> str:
       document.getElementById("viewUsers").style.display = name === "users" ? "grid" : "none";
       document.getElementById("viewServices").style.display = name === "services" ? "block" : "none";
       document.getElementById("viewState").style.display = name === "state" ? "block" : "none";
+      ["tabUsers","tabServices","tabState","tabConsole"].forEach((id) => {{
+        const el = document.getElementById(id);
+        if (!el) return;
+        const isActive =
+          (name === "users" && id === "tabUsers") ||
+          (name === "services" && id === "tabServices") ||
+          (name === "state" && id === "tabState") ||
+          (name === "console" && id === "tabConsole");
+        el.classList.toggle("active", !!isActive);
+      }});
       const consolePanel = document.getElementById("viewConsole");
       if (consolePanel) {{
         consolePanel.style.display = name === "console" ? "block" : "none";
