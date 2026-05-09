@@ -6151,6 +6151,14 @@ def build_live_root_panel_html() -> str:
         </div>
         <div class="status" id="status">Р’С‹Р±РµСЂРё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ СЃР»РµРІР°.</div>
         <div id="eventLog" class="event-log"></div>
+        <div class="panel" style="margin-top:10px;padding:10px">
+          <div class="muted" style="margin-bottom:6px">История действий</div>
+          <div id="actionsLog" class="event-log"></div>
+        </div>
+        <div class="panel" style="margin-top:10px;padding:10px">
+          <div class="muted" style="margin-bottom:6px">Последние ошибки</div>
+          <div id="errorsLog" class="event-log"></div>
+        </div>
       </div>
     </section>
   </div>
@@ -6184,6 +6192,8 @@ def build_live_root_panel_html() -> str:
     const selectionHint = document.getElementById("selectionHint");
     const miniKpis = document.getElementById("miniKpis");
     const eventLog = document.getElementById("eventLog");
+    const actionsLog = document.getElementById("actionsLog");
+    const errorsLog = document.getElementById("errorsLog");
     let selected = null;
     let activeJobId = "";
     let pollTimer = null;
@@ -6366,18 +6376,43 @@ def build_live_root_panel_html() -> str:
         meta.innerHTML = '<div class="card"><div class="muted">РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РІС‹Р±СЂР°РЅ</div></div>';
         return;
       }}
-      meta.innerHTML = `
-        <div class="card"><div class="muted">ID</div><b>${{esc(selected.user_id)}}</b></div>
-        <div class="card"><div class="muted">Username</div><b>${{esc(selected.username ? "@" + selected.username : "-")}}</b></div>
-        <div class="card"><div class="muted">Р РµРіРёСЃС‚СЂР°С†РёСЏ</div><b>${{esc(selected.registration_date || "-")}}</b></div>
-        <div class="card"><div class="muted">РџРѕРґРїРёСЃРѕРє</div><b>${{esc(selected.subscriptions || 0)}}</b></div>
-        <div class="card"><div class="muted">Р‘Р°Р»Р°РЅСЃ</div><b>${{esc(selected.balance_rub_text || "-")}}</b></div>
-        <div class="card"><div class="muted">Р’СЃРµРіРѕ РїРѕРїРѕР»РЅРµРЅРѕ</div><b>${{esc(selected.total_topped_up_rub_text || "-")}}</b></div>
-        <div class="card"><div class="muted">Р›РѕРєР°С†РёРё</div><b>${{esc(selected.locations || "-")}}</b></div>
-        <div class="card"><div class="muted">Локация (debug)</div><b>${{esc(selected.locations_debug || "-")}}</b></div>
-        <div class="card"><div class="muted">Р‘Р»РёР¶Р°Р№С€РµРµ РёСЃС‚РµС‡РµРЅРёРµ</div><b>${{esc(selected.nearest_expiration || "-")}}</b></div>
-        <div class="card"><div class="muted">Р”РЅРµР№ РґРѕ РѕРєРѕРЅС‡Р°РЅРёСЏ</div><b>${{esc(selected.days_left !== "" ? selected.days_left : "-")}}</b></div>
-      `;
+      const cards = [];
+      const addCard = (label, value, full = false) => {{
+        const text = String(value ?? "").trim();
+        if (!text || text === "-" || text === "0" || text === "0.0") return;
+        cards.push(`<div class="card"${{full ? ' style="grid-column: 1 / -1;"' : ""}}><div class="muted">${{esc(label)}}</div><b>${{esc(text)}}</b></div>`);
+      }};
+      const addCardAllowZero = (label, value, full = false) => {{
+        const text = String(value ?? "").trim();
+        if (!text || text === "-") return;
+        cards.push(`<div class="card"${{full ? ' style="grid-column: 1 / -1;"' : ""}}><div class="muted">${{esc(label)}}</div><b>${{esc(text)}}</b></div>`);
+      }};
+
+      const requestsTotal = Number(selected.requests_count ?? 0);
+      const incomingCount = Number(selected.incoming_count ?? 0);
+      const wizardCount = Number(selected.wizard_count ?? 0);
+      const mailCount = Number(selected.mail_count ?? 0);
+      const hasRequestInfo = requestsTotal > 0 || incomingCount > 0 || wizardCount > 0 || mailCount > 0 || Boolean(selected.last_request_at) || Boolean(selected.last_request_text);
+      addCardAllowZero("ID", selected.user_id);
+      addCard("Username", selected.username ? "@" + selected.username : "");
+      addCard("Регистрация", selected.registration_date || "");
+      addCardAllowZero("Подписок", selected.subscriptions);
+      addCard("Баланс", selected.balance_rub_text || "");
+      addCard("Всего пополнено", selected.total_topped_up_rub_text || "");
+      addCard("Локации", selected.locations || "");
+      addCard("Ближайшее истечение", selected.nearest_expiration || "");
+      addCard("Дней до окончания", selected.days_left !== "" ? selected.days_left : "");
+
+      if (hasRequestInfo) {{
+        addCardAllowZero("Всего обращений", requestsTotal);
+        if (incomingCount > 0) addCardAllowZero("Входящие обращения", incomingCount);
+        if (wizardCount > 0) addCardAllowZero("Отправок в Wizard", wizardCount);
+        if (mailCount > 0) addCardAllowZero("Отправок сообщений", mailCount);
+        addCard("Последнее обращение", selected.last_request_at || "");
+        addCard("Текст последнего обращения", selected.last_request_text || "", true);
+      }}
+
+      meta.innerHTML = cards.join("") || '<div class="card"><div class="muted">Нет данных</div></div>';
     }}
     async function pollJob(jobId) {{
       if (pollTimer) clearTimeout(pollTimer);
@@ -6485,6 +6520,38 @@ def build_live_root_panel_html() -> str:
         body.innerHTML = rows.map(([k,v]) => `<tr><td>${{esc(k)}}</td><td>${{esc(v)}}</td></tr>`).join("");
       }} catch (e) {{
         body.innerHTML = `<tr><td colspan='2'>РћС€РёР±РєР°: ${{esc(e)}}</td></tr>`;
+      }}
+    }}
+
+    async function loadActionsLog() {{
+      if (!actionsLog) return;
+      try {{
+        const r = await fetch(`${{actionApiBase}}/actions`, {{ cache: "no-store" }});
+        const p = await r.json();
+        const rows = (r.ok && p.ok && p.payload && Array.isArray(p.payload.rows)) ? p.payload.rows : [];
+        actionsLog.innerHTML = rows.slice(0, 12).map((row) => {{
+          const at = esc(row.created_at || "-");
+          const act = esc(row.action || "-");
+          const usr = esc(row.resolved_user_id || row.user_lookup || "-");
+          const st = esc(row.status || "-");
+          const err = String(row.error_text || "").trim();
+          const txt = err ? esc(err) : esc(String(row.result_text || "").slice(0, 120));
+          return `<div>[${{at}}] ${{act}} | user: ${{usr}} | ${{st}}${{txt ? " | " + txt : ""}}</div>`;
+        }}).join("") || "<div>Нет данных</div>";
+      }} catch (e) {{
+        actionsLog.innerHTML = `<div>Ошибка загрузки: ${{esc(e)}}</div>`;
+      }}
+    }}
+
+    async function loadErrorsLog() {{
+      if (!errorsLog) return;
+      try {{
+        const r = await fetch(`${{actionApiBase}}/errors`, {{ cache: "no-store" }});
+        const p = await r.json();
+        const rows = (r.ok && p.ok && p.payload && Array.isArray(p.payload.rows)) ? p.payload.rows : [];
+        errorsLog.innerHTML = rows.slice(-12).map((line) => `<div>${{esc(line)}}</div>`).join("") || "<div>Ошибок нет</div>";
+      }} catch (e) {{
+        errorsLog.innerHTML = `<div>Ошибка загрузки: ${{esc(e)}}</div>`;
       }}
     }}
 
@@ -6624,9 +6691,13 @@ def build_live_root_panel_html() -> str:
     setupConsoleTab();
     renderList();
     renderMeta();
+    loadActionsLog();
+    loadErrorsLog();
     setInterval(() => {{
       if (activeTab === "services") loadServices();
       if (activeTab === "state") loadState();
+      loadActionsLog();
+      loadErrorsLog();
     }}, 15000);
   </script>
 </body>
@@ -6809,16 +6880,6 @@ def admin_user_rows_json(records: list[dict]) -> str:
                 "registration_date": str(record.get("registration_date") or ""),
                 "subscriptions": len(subscriptions),
                 "locations": " • ".join(locations),
-                "locations_debug": " | ".join(
-                    [
-                        f"btn={str(sub.get('button_text') or '').strip()}"[:120]
-                        for sub in subscriptions[:2]
-                    ]
-                    + [
-                        f"loc={str(sub.get('location') or '').strip()}"[:80]
-                        for sub in subscriptions[:2]
-                    ]
-                ),
                 "nearest_expiration": nearest_expiration_text,
                 "days_left": days_left,
                 "status": status,
@@ -6905,24 +6966,127 @@ def dashboard_create_job(action: str, user_lookup: str, message_text: str) -> di
     with dashboard_action_jobs_lock:
         dashboard_action_jobs[job_id] = job
         dashboard_trim_jobs_locked()
+    dashboard_log_action_event(
+        action=action,
+        user_lookup=user_lookup,
+        resolved_user_id="",
+        status="queued",
+    )
     return dashboard_job_snapshot(job) or {"id": job_id}
 
 
 def dashboard_update_job(job_id: str, **fields: object) -> dict[str, object] | None:
+    status_changed_to = ""
     with dashboard_action_jobs_lock:
         job = dashboard_action_jobs.get(job_id)
         if not job:
             return None
+        prev_status = str(job.get("status") or "")
         job.update(fields)
+        new_status = str(job.get("status") or "")
+        if new_status != prev_status:
+            status_changed_to = new_status
         job["updated_at"] = datetime.now().isoformat(timespec="seconds")
         job["updated_ts"] = now_timestamp()
         snapshot = dashboard_job_snapshot(job)
+    if status_changed_to in {"queued", "running", "done", "failed"} and snapshot:
+        dashboard_log_action_event(
+            action=str(snapshot.get("action") or ""),
+            user_lookup=str(snapshot.get("user_lookup") or ""),
+            resolved_user_id=str(snapshot.get("resolved_user_id") or ""),
+            status=status_changed_to,
+            result_text=str(snapshot.get("result_text") or ""),
+            error_text=str(snapshot.get("error_text") or ""),
+        )
     return snapshot
 
 
 def dashboard_get_job(job_id: str) -> dict[str, object] | None:
     with dashboard_action_jobs_lock:
         return dashboard_job_snapshot(dashboard_action_jobs.get(job_id))
+
+
+def dashboard_log_action_event(
+    *,
+    action: str,
+    user_lookup: str,
+    resolved_user_id: str = "",
+    status: str = "queued",
+    result_text: str = "",
+    error_text: str = "",
+) -> None:
+    try:
+        with connect_database() as conn:
+            initialize_database(conn)
+            conn.execute(
+                """
+                INSERT INTO action_logs (
+                    created_at, action, user_lookup, resolved_user_id, status, result_text, error_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now().isoformat(timespec="seconds"),
+                    str(action or "")[:64],
+                    str(user_lookup or "")[:64],
+                    str(resolved_user_id or "")[:64],
+                    str(status or "")[:24],
+                    str(result_text or "")[:1200],
+                    str(error_text or "")[:1200],
+                ),
+            )
+            conn.commit()
+    except Exception:
+        logging.exception("Failed to write action_logs")
+
+
+def dashboard_recent_actions_payload(limit: int = 30) -> dict[str, object]:
+    rows_out: list[dict[str, object]] = []
+    try:
+        with connect_database() as conn:
+            initialize_database(conn)
+            rows = conn.execute(
+                """
+                SELECT created_at, action, user_lookup, resolved_user_id, status, result_text, error_text
+                FROM action_logs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 200)),),
+            ).fetchall()
+        for row in rows:
+            rows_out.append(
+                {
+                    "created_at": str(row["created_at"] or ""),
+                    "action": str(row["action"] or ""),
+                    "user_lookup": str(row["user_lookup"] or ""),
+                    "resolved_user_id": str(row["resolved_user_id"] or ""),
+                    "status": str(row["status"] or ""),
+                    "result_text": str(row["result_text"] or ""),
+                    "error_text": str(row["error_text"] or ""),
+                }
+            )
+    except Exception:
+        logging.exception("Failed to read action_logs")
+    return {"generated_at": datetime.now().isoformat(timespec="seconds"), "rows": rows_out}
+
+
+def dashboard_recent_errors_payload(limit: int = 20) -> dict[str, object]:
+    out: list[str] = []
+    try:
+        log_path = Path(settings.log_file or "userbot.log")
+        if not log_path.is_absolute():
+            log_path = APP_ROOT / log_path
+        if log_path.exists():
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            for line in reversed(lines):
+                if "ERROR" in line or "Traceback" in line:
+                    out.append(line.strip())
+                if len(out) >= max(1, min(int(limit), 200)):
+                    break
+            out.reverse()
+    except Exception:
+        logging.exception("Failed to read recent errors")
+    return {"generated_at": datetime.now().isoformat(timespec="seconds"), "rows": out}
 
 
 def build_dashboard_operator_request(
@@ -7384,6 +7548,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     return True
                 self.send_json({"ok": True, "user": detail}, HTTPStatus.OK, send_body=send_body)
                 return True
+            if api_name == "root-api" and len(api_parts) == 1 and api_parts[0] == "actions":
+                self.send_json(
+                    {"ok": True, "payload": dashboard_recent_actions_payload(30)},
+                    HTTPStatus.OK,
+                    send_body=send_body,
+                )
+                return True
+            if api_name == "root-api" and len(api_parts) == 1 and api_parts[0] == "errors":
+                self.send_json(
+                    {"ok": True, "payload": dashboard_recent_errors_payload(20)},
+                    HTTPStatus.OK,
+                    send_body=send_body,
+                )
+                return True
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return True
 
@@ -7678,6 +7856,17 @@ def initialize_database(conn: sqlite3.Connection) -> None:
             resolution_note TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS action_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            action TEXT NOT NULL DEFAULT '',
+            user_lookup TEXT NOT NULL DEFAULT '',
+            resolved_user_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '',
+            result_text TEXT NOT NULL DEFAULT '',
+            error_text TEXT NOT NULL DEFAULT ''
+        );
+
         CREATE INDEX IF NOT EXISTS idx_users_run_user_id ON users(run_id, user_id);
         CREATE INDEX IF NOT EXISTS idx_subscriptions_run_user_id ON subscriptions(run_id, user_id);
         CREATE INDEX IF NOT EXISTS idx_subscriptions_expires_at ON subscriptions(expires_at);
@@ -7690,6 +7879,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_latest_subscriptions_expires_at ON latest_subscriptions(expires_at);
         CREATE INDEX IF NOT EXISTS idx_unresolved_requests_status_created_at ON unresolved_requests(status, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_unresolved_requests_sender_id ON unresolved_requests(sender_id);
+        CREATE INDEX IF NOT EXISTS idx_action_logs_created_at ON action_logs(created_at DESC);
         """
     )
     ensure_database_column(conn, "users", "username", "TEXT NOT NULL DEFAULT ''")
@@ -7710,6 +7900,7 @@ def reset_database(conn: sqlite3.Connection) -> None:
         DROP TABLE IF EXISTS latest_users;
         DROP TABLE IF EXISTS subscriptions;
         DROP TABLE IF EXISTS scan_errors;
+        DROP TABLE IF EXISTS action_logs;
         DROP TABLE IF EXISTS users;
         DROP TABLE IF EXISTS scan_runs;
         """
@@ -8750,6 +8941,17 @@ def dashboard_root_users_payload(query: str = "") -> dict[str, object]:
             if q in user_id or q in username or q in f"@{username}":
                 filtered.append(row)
         rows = filtered
+    user_ids = [str(row.get("user_id") or "").strip() for row in rows if str(row.get("user_id") or "").strip()]
+    support_map = dashboard_support_summary_by_user_ids(user_ids)
+    for row in rows:
+        uid = str(row.get("user_id") or "").strip()
+        info = support_map.get(uid, {})
+        row["requests_count"] = int(info.get("count") or 0)
+        row["incoming_count"] = int(info.get("incoming_count") or 0)
+        row["wizard_count"] = int(info.get("wizard_count") or 0)
+        row["mail_count"] = int(info.get("mail_count") or 0)
+        row["last_request_text"] = str(info.get("last_text") or "")
+        row["last_request_at"] = str(info.get("last_at") or "")
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "count": len(rows),
@@ -8765,8 +8967,94 @@ def dashboard_root_user_detail_payload(user_lookup: str) -> dict[str, object] | 
         row = json.loads(admin_user_rows_json([record]))[0]
     except Exception:
         row = {"user_id": str(record.get("user_id") or "")}
+    uid = str(row.get("user_id") or "").strip()
+    info = dashboard_support_summary_by_user_ids([uid]).get(uid, {})
+    row["requests_count"] = int(info.get("count") or 0)
+    row["incoming_count"] = int(info.get("incoming_count") or 0)
+    row["wizard_count"] = int(info.get("wizard_count") or 0)
+    row["mail_count"] = int(info.get("mail_count") or 0)
+    row["last_request_text"] = str(info.get("last_text") or "")
+    row["last_request_at"] = str(info.get("last_at") or "")
     row["raw_record"] = record
     return row
+
+
+def dashboard_support_summary_by_user_ids(user_ids: list[str]) -> dict[str, dict[str, object]]:
+    cleaned_ids = [str(uid or "").strip() for uid in user_ids if str(uid or "").strip()]
+    if not cleaned_ids:
+        return {}
+    placeholders = ",".join("?" for _ in cleaned_ids)
+    out: dict[str, dict[str, object]] = {}
+    try:
+        with connect_database() as conn:
+            initialize_database(conn)
+            rows = conn.execute(
+                f"""
+                SELECT sender_id, created_at, question_text, transcript_text
+                FROM unresolved_requests
+                WHERE sender_id IN ({placeholders})
+                ORDER BY datetime(created_at) DESC, id DESC
+                """,
+                tuple(cleaned_ids),
+            ).fetchall()
+        for row in rows:
+            uid = str(row["sender_id"] or "").strip()
+            if not uid:
+                continue
+            item = out.setdefault(
+                uid,
+                {
+                    "count": 0,
+                    "incoming_count": 0,
+                    "wizard_count": 0,
+                    "mail_count": 0,
+                    "last_text": "",
+                    "last_at": "",
+                },
+            )
+            item["count"] = int(item.get("count") or 0) + 1
+            item["incoming_count"] = int(item.get("incoming_count") or 0) + 1
+            if not item["last_at"]:
+                item["last_at"] = str(row["created_at"] or "")
+                text = str(row["question_text"] or "").strip() or str(row["transcript_text"] or "").strip()
+                item["last_text"] = text[:180]
+
+        action_rows = conn.execute(
+            f"""
+            SELECT resolved_user_id, action, status
+            FROM action_logs
+            WHERE resolved_user_id IN ({placeholders})
+            """,
+            tuple(cleaned_ids),
+        ).fetchall()
+        for row in action_rows:
+            uid = str(row["resolved_user_id"] or "").strip()
+            if not uid:
+                continue
+            status = str(row["status"] or "").strip().casefold()
+            if status != "done":
+                continue
+            action = str(row["action"] or "").strip().casefold()
+            item = out.setdefault(
+                uid,
+                {
+                    "count": 0,
+                    "incoming_count": 0,
+                    "wizard_count": 0,
+                    "mail_count": 0,
+                    "last_text": "",
+                    "last_at": "",
+                },
+            )
+            if action in {"wizard_card", "wizard_text", "replace_key", "delete_access"}:
+                item["wizard_count"] = int(item.get("wizard_count") or 0) + 1
+                item["count"] = int(item.get("count") or 0) + 1
+            elif action in {"mail", "broadcast", "promo"}:
+                item["mail_count"] = int(item.get("mail_count") or 0) + 1
+                item["count"] = int(item.get("count") or 0) + 1
+    except Exception:
+        logging.exception("Failed to load support summary for users")
+    return out
 
 
 def load_latest_record_from_database(user_id: str) -> dict | None:
