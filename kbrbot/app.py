@@ -6734,6 +6734,28 @@ def admin_user_rows_json(records: list[dict]) -> str:
             return f"{int(value)} в‚Ѕ"
         return f"{value:.2f} в‚Ѕ"
 
+    def derive_location(sub: dict) -> str:
+        raw_location = normalize_profile_text(str(sub.get("location") or "")).strip()
+        if raw_location and raw_location.casefold() not in {"-", "без локации", "unknown"}:
+            return raw_location
+
+        button_text = normalize_profile_text(str(sub.get("button_text") or "")).strip()
+        button_loc = extract_location_from_subscription_button(button_text).strip()
+        if button_loc and button_loc.casefold() not in {"-", "без локации", "unknown"}:
+            return button_loc
+
+        detail_text = normalize_profile_text(str(sub.get("detail_text") or ""))
+        for pattern in (
+            r"(?:локац(?:ия|ии)|страна|сервер|гео)\s*[:\-]\s*([^\n\r,;|]{2,40})",
+            r"(?:location|country|server)\s*[:\-]\s*([^\n\r,;|]{2,40})",
+        ):
+            match = re.search(pattern, detail_text, flags=re.IGNORECASE)
+            if match:
+                candidate = normalize_profile_text(match.group(1)).strip(" .")
+                if candidate and candidate.casefold() not in {"-", "без локации", "unknown"}:
+                    return candidate
+        return ""
+
     for record in records:
         user_id = str(record.get("user_id") or "").strip()
         if not user_id:
@@ -6765,7 +6787,7 @@ def admin_user_rows_json(records: list[dict]) -> str:
         for sub in raw_subscriptions:
             sub_id = normalize_profile_text(str(sub.get("subscription_id") or "")).strip()
             btn = normalize_profile_text(str(sub.get("button_text") or "")).strip()
-            loc = normalize_profile_text(str(sub.get("location") or "")).strip()
+            loc = derive_location(sub)
             key = sub_id or f"{btn}|{loc}"
             if not key or key in seen_sub_keys:
                 continue
