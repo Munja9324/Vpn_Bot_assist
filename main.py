@@ -5959,6 +5959,77 @@ def build_live_root_panel_html() -> str:
 </html>"""
 
 
+def admin_user_rows_json(records: list[dict]) -> str:
+    now = datetime.now()
+    rows: list[dict[str, object]] = []
+    for record in records:
+        user_id = str(record.get("user_id") or "").strip()
+        if not user_id:
+            continue
+        username = normalize_username(str(record.get("username") or ""))
+        subscriptions = list(record.get("subscriptions") or [])
+        locations = sorted(
+            {
+                str(sub.get("location") or "").strip()
+                for sub in subscriptions
+                if str(sub.get("location") or "").strip()
+            }
+        )
+        nearest_expiration: datetime | None = None
+        for sub in subscriptions:
+            expires_at = extract_expiration_date(str(sub.get("detail_text") or ""))
+            if not expires_at:
+                continue
+            if nearest_expiration is None or expires_at < nearest_expiration:
+                nearest_expiration = expires_at
+
+        days_left = ""
+        status = "no_subs"
+        status_label = "Без подписки"
+        nearest_expiration_text = "-"
+        if subscriptions:
+            if nearest_expiration is None:
+                status = "unknown_date"
+                status_label = "Дата неизвестна"
+            else:
+                days_left_int = (nearest_expiration.date() - now.date()).days
+                days_left = days_left_int
+                nearest_expiration_text = nearest_expiration.strftime("%Y-%m-%d")
+                if days_left_int < 0:
+                    status = "expired"
+                    status_label = "Истекли"
+                elif days_left_int <= 7:
+                    status = "expiring_7"
+                    status_label = "Истекают до 7 дней"
+                elif days_left_int <= 30:
+                    status = "expiring_30"
+                    status_label = "Истекают до 30 дней"
+                else:
+                    status = "active"
+                    status_label = "Активные"
+
+        rows.append(
+            {
+                "user_id": user_id,
+                "username": username,
+                "registration_date": str(record.get("registration_date") or ""),
+                "subscriptions": len(subscriptions),
+                "locations": ", ".join(locations),
+                "nearest_expiration": nearest_expiration_text,
+                "days_left": days_left,
+                "status": status,
+                "status_label": status_label,
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            0 if str(item.get("user_id") or "").isdigit() else 1,
+            int(str(item.get("user_id") or "0")) if str(item.get("user_id") or "").isdigit() else str(item.get("user_id") or ""),
+        )
+    )
+    return json.dumps(rows, ensure_ascii=False).replace("</", "<\\/")
+
+
 def live_admin_dashboard_url() -> str:
     if settings.dashboard_intro_enabled:
         return publish_dashboard_loader_file("admin.html")
