@@ -4272,6 +4272,16 @@ def is_admin_site_command(text: str) -> bool:
     )
 
 
+def is_root_panel_command(text: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*/?(?:root|rootpanel|root_site|оператор|operator)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def is_version_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
 
@@ -5762,10 +5772,199 @@ def build_live_admin_dashboard_html() -> str:
     return build_scan_dashboard_html(stats)
 
 
+def build_live_root_panel_html() -> str:
+    stats = load_latest_scan_stats_from_database()
+    if not stats:
+        return build_dashboard_empty_admin_html("В SQL базе пока нет данных для root-панели. Сначала запусти scan.")
+    records = list(stats.get("records") or [])
+    users_json = admin_user_rows_json(records)
+    brand = html.escape(settings.dashboard_brand_name)
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{brand} — Root Panel</title>
+  <style>
+    :root {{
+      --bg:#f5f5f7; --panel:#fff; --border:#d2d2d7; --text:#1d1d1f; --muted:#6e6e73;
+      --primary:#0071e3; --good:#34c759; --warn:#ff9f0a;
+    }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }}
+    .wrap {{ display:grid; grid-template-columns: 360px 1fr; gap:12px; padding:12px; min-height:100vh; }}
+    .panel {{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:12px; }}
+    h1 {{ margin:0 0 10px; font-size:18px; }}
+    input, textarea, button {{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px; font:inherit; }}
+    textarea {{ min-height:88px; resize:vertical; }}
+    .list {{ margin-top:10px; max-height:calc(100vh - 170px); overflow:auto; border:1px solid var(--border); border-radius:10px; }}
+    .item {{ padding:10px; border-bottom:1px solid var(--border); cursor:pointer; }}
+    .item:last-child {{ border-bottom:none; }}
+    .item:hover, .item.active {{ background:#eef5ff; }}
+    .muted {{ color:var(--muted); font-size:12px; }}
+    .grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
+    .card {{ border:1px solid var(--border); border-radius:10px; padding:10px; background:#fafafa; }}
+    .actions {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }}
+    .btn-primary {{ background:var(--primary); color:#fff; border-color:var(--primary); }}
+    .btn-good {{ background:var(--good); color:#fff; border-color:var(--good); }}
+    .btn-warn {{ background:var(--warn); color:#fff; border-color:var(--warn); }}
+    .status {{ margin-top:10px; white-space:pre-wrap; font-size:13px; color:var(--muted); }}
+    @media (max-width: 980px) {{ .wrap {{ grid-template-columns:1fr; }} .actions {{ grid-template-columns:1fr; }} }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="panel">
+      <h1>Пользователи</h1>
+      <input id="search" placeholder="Поиск: ID или @username">
+      <div class="list" id="list"></div>
+    </section>
+    <section class="panel">
+      <h1>Карточка пользователя</h1>
+      <div class="grid" id="meta"></div>
+      <div class="panel" style="margin-top:10px;padding:10px">
+        <div class="muted" style="margin-bottom:8px">Текст для Mail / Wizard</div>
+        <textarea id="message" placeholder="Введите текст сообщения"></textarea>
+        <div class="actions">
+          <button class="btn-good" id="btnWizard">Отправить в Wizard</button>
+          <button class="btn-primary" id="btnMail">Написать Mail</button>
+          <button class="btn-warn" id="btnPromo">Подготовить Promo</button>
+        </div>
+        <div class="status" id="status">Выбери пользователя слева.</div>
+      </div>
+    </section>
+  </div>
+  <script>
+    const users = {users_json};
+    const list = document.getElementById("list");
+    const search = document.getElementById("search");
+    const meta = document.getElementById("meta");
+    const message = document.getElementById("message");
+    const statusBox = document.getElementById("status");
+    let selected = null;
+    let activeJobId = "";
+    let pollTimer = null;
+    const actionApiBase = "admin-api";
+
+    function esc(v) {{
+      return String(v ?? "").replace(/[&<>"']/g, m => ({{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}}[m]));
+    }}
+    function userLabel(u) {{
+      return `ID ${{u.user_id}} ${{u.username ? "@" + u.username : ""}}`;
+    }}
+    function renderList() {{
+      const q = String(search.value || "").trim().toLowerCase();
+      const rows = users.filter(u => {{
+        const id = String(u.user_id || "");
+        const un = String(u.username || "").toLowerCase();
+        return !q || id.includes(q) || un.includes(q) || ("@" + un).includes(q);
+      }});
+      list.innerHTML = rows.map(u => `
+        <div class="item ${{selected && String(selected.user_id) === String(u.user_id) ? "active" : ""}}" data-id="${{esc(u.user_id)}}">
+          <div>${{esc(userLabel(u))}}</div>
+          <div class="muted">Подписок: ${{esc(u.subscriptions)}} · Статус: ${{esc(u.status_label)}}</div>
+        </div>
+      `).join("") || `<div class="item"><div class="muted">Ничего не найдено</div></div>`;
+    }}
+    function renderMeta() {{
+      if (!selected) {{
+        meta.innerHTML = '<div class="card"><div class="muted">Пользователь не выбран</div></div>';
+        return;
+      }}
+      meta.innerHTML = `
+        <div class="card"><div class="muted">ID</div><b>${{esc(selected.user_id)}}</b></div>
+        <div class="card"><div class="muted">Username</div><b>${{esc(selected.username ? "@" + selected.username : "-")}}</b></div>
+        <div class="card"><div class="muted">Регистрация</div><b>${{esc(selected.registration_date || "-")}}</b></div>
+        <div class="card"><div class="muted">Подписок</div><b>${{esc(selected.subscriptions || 0)}}</b></div>
+        <div class="card"><div class="muted">Локации</div><b>${{esc(selected.locations || "-")}}</b></div>
+        <div class="card"><div class="muted">Ближайшее истечение</div><b>${{esc(selected.nearest_expiration || "-")}}</b></div>
+      `;
+    }}
+    async function pollJob(jobId) {{
+      if (pollTimer) clearTimeout(pollTimer);
+      try {{
+        const r = await fetch(`${{actionApiBase}}/job/${{encodeURIComponent(jobId)}}`, {{ cache: "no-store" }});
+        const p = await r.json();
+        if (!r.ok || !p.ok || !p.job) {{
+          statusBox.textContent = "Ошибка получения статуса задачи.";
+          return;
+        }}
+        const j = p.job;
+        const lines = [
+          `Статус: ${{j.status || "-"}}`,
+          j.id ? `Задача: ${{j.id}}` : "",
+          j.result_text ? `Результат: ${{String(j.result_text).slice(0, 400)}}` : "",
+          j.error_text ? `Ошибка: ${{j.error_text}}` : "",
+        ].filter(Boolean);
+        statusBox.textContent = lines.join("\\n");
+        if (j.status === "queued" || j.status === "running") {{
+          pollTimer = setTimeout(() => pollJob(jobId), 1200);
+        }}
+      }} catch (e) {{
+        statusBox.textContent = `Ошибка опроса: ${{e}}`;
+      }}
+    }}
+    async function submit(action, needMessage) {{
+      if (!selected) {{
+        statusBox.textContent = "Сначала выбери пользователя.";
+        return;
+      }}
+      const text = String(message.value || "").trim();
+      if (needMessage && !text) {{
+        statusBox.textContent = "Добавь текст сообщения.";
+        return;
+      }}
+      statusBox.textContent = "Задача отправлена...";
+      try {{
+        const r = await fetch(`${{actionApiBase}}/action`, {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            action,
+            user: String(selected.user_id || ""),
+            message: text,
+          }}),
+        }});
+        const p = await r.json();
+        if (!r.ok || !p.ok || !p.job || !p.job.id) {{
+          statusBox.textContent = `Ошибка API: ${{(p && p.error) || "unknown_error"}}`;
+          return;
+        }}
+        activeJobId = String(p.job.id || "");
+        await pollJob(activeJobId);
+      }} catch (e) {{
+        statusBox.textContent = `Ошибка отправки: ${{e}}`;
+      }}
+    }}
+
+    list.addEventListener("click", (e) => {{
+      const row = e.target.closest(".item[data-id]");
+      if (!row) return;
+      const id = String(row.dataset.id || "");
+      selected = users.find(u => String(u.user_id) === id) || null;
+      renderList();
+      renderMeta();
+      statusBox.textContent = selected ? `Выбран пользователь ${{selected.user_id}}.` : "Пользователь не выбран.";
+    }});
+    search.addEventListener("input", renderList);
+    document.getElementById("btnWizard").addEventListener("click", () => submit("wizard_card", false));
+    document.getElementById("btnMail").addEventListener("click", () => submit("mail", true));
+    document.getElementById("btnPromo").addEventListener("click", () => submit("promo", false));
+    renderList();
+    renderMeta();
+  </script>
+</body>
+</html>"""
+
+
 def live_admin_dashboard_url() -> str:
     if settings.dashboard_intro_enabled:
         return publish_dashboard_loader_file("admin.html")
     return build_dashboard_public_url("admin.html")
+
+
+def live_root_panel_url() -> str:
+    return build_dashboard_public_url("root.html")
 
 
 def resolve_dashboard_user_id(user_lookup: str) -> str | None:
@@ -6249,6 +6448,9 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if file_name == "admin.html":
             self.serve_live_admin_dashboard(send_body=send_body)
             return
+        if file_name == "root.html":
+            self.serve_live_root_panel(send_body=send_body)
+            return
 
         allowed_suffixes = {".html", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".css", ".js"}
         suffix = Path(file_name).suffix.casefold()
@@ -6280,6 +6482,20 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         except Exception:
             logging.exception("Failed to build live admin dashboard")
             content = build_dashboard_empty_admin_html("Не удалось собрать живую админ-панель. Подробности записаны в лог.").encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if send_body:
+            self.wfile.write(content)
+
+    def serve_live_root_panel(self, *, send_body: bool) -> None:
+        try:
+            content = build_live_root_panel_html().encode("utf-8")
+        except Exception:
+            logging.exception("Failed to build live root panel")
+            content = build_dashboard_empty_admin_html("Не удалось собрать root-панель. Подробности записаны в лог.").encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
@@ -6360,6 +6576,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
             user_text TEXT NOT NULL DEFAULT '',
             registration_date TEXT,
             subscriptions_count INTEGER NOT NULL DEFAULT 0,
+            parsed_profile_json TEXT NOT NULL DEFAULT '{}',
             raw_json TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES scan_runs(id) ON DELETE CASCADE
         );
@@ -6374,6 +6591,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
             location TEXT NOT NULL DEFAULT '',
             detail_text TEXT NOT NULL DEFAULT '',
             expires_at TEXT,
+            parsed_subscription_json TEXT NOT NULL DEFAULT '{}',
             raw_json TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES scan_runs(id) ON DELETE CASCADE,
             FOREIGN KEY (user_db_id) REFERENCES users(id) ON DELETE CASCADE
@@ -6407,6 +6625,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
             user_text TEXT NOT NULL DEFAULT '',
             registration_date TEXT,
             subscriptions_count INTEGER NOT NULL DEFAULT 0,
+            parsed_profile_json TEXT NOT NULL DEFAULT '{}',
             raw_json TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -6418,6 +6637,7 @@ def initialize_database(conn: sqlite3.Connection) -> None:
             location TEXT NOT NULL DEFAULT '',
             detail_text TEXT NOT NULL DEFAULT '',
             expires_at TEXT,
+            parsed_subscription_json TEXT NOT NULL DEFAULT '{}',
             raw_json TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (user_id, subscription_id),
@@ -6458,6 +6678,10 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     )
     ensure_database_column(conn, "users", "username", "TEXT NOT NULL DEFAULT ''")
     ensure_database_column(conn, "latest_users", "username", "TEXT NOT NULL DEFAULT ''")
+    ensure_database_column(conn, "users", "parsed_profile_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_database_column(conn, "subscriptions", "parsed_subscription_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_database_column(conn, "latest_users", "parsed_profile_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_database_column(conn, "latest_subscriptions", "parsed_subscription_json", "TEXT NOT NULL DEFAULT '{}'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_latest_users_username ON latest_users(username)")
     conn.commit()
@@ -7078,6 +7302,7 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
         for record in records:
             subscriptions = list(record.get("subscriptions") or [])
             username = extract_username_from_record(record)
+            parsed_profile = parse_profile_text_features(str(record.get("user_text") or ""))
             user_cursor = conn.execute(
                 """
                 INSERT INTO users (
@@ -7088,9 +7313,10 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
                     user_text,
                     registration_date,
                     subscriptions_count,
+                    parsed_profile_json,
                     raw_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -7100,6 +7326,7 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
                     str(record.get("user_text") or ""),
                     record.get("registration_date"),
                     len(subscriptions),
+                    json.dumps(parsed_profile, ensure_ascii=False),
                     json.dumps(record, ensure_ascii=False),
                 ),
             )
@@ -7107,6 +7334,10 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
 
             for subscription in subscriptions:
                 expires_at = extract_expiration_date(str(subscription.get("detail_text") or ""))
+                parsed_subscription = parse_subscription_text_features(
+                    str(subscription.get("detail_text") or ""),
+                    expires_at=expires_at,
+                )
                 conn.execute(
                     """
                     INSERT INTO subscriptions (
@@ -7118,9 +7349,10 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
                         location,
                         detail_text,
                         expires_at,
+                        parsed_subscription_json,
                         raw_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -7131,6 +7363,7 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
                         str(subscription.get("location") or ""),
                         str(subscription.get("detail_text") or ""),
                         expires_at.strftime("%Y-%m-%d") if expires_at else None,
+                        json.dumps(parsed_subscription, ensure_ascii=False),
                         json.dumps(subscription, ensure_ascii=False),
                     ),
                 )
@@ -7176,14 +7409,24 @@ def load_latest_scan_stats_from_database() -> dict | None:
         row = conn.execute(
             "SELECT stats_json FROM scan_runs ORDER BY id DESC LIMIT 1"
         ).fetchone()
-    if not row:
-        return None
-    try:
-        data = json.loads(str(row["stats_json"]))
-    except json.JSONDecodeError:
-        logging.exception("Failed to parse latest scan stats from database")
-        return None
-    return data if isinstance(data, dict) else None
+        if row:
+            try:
+                data = json.loads(str(row["stats_json"]))
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                logging.exception("Failed to parse latest scan stats from database")
+
+        records = load_latest_records_from_database()
+        if not records:
+            return None
+        _, fallback_stats = build_scan_report(records, pages_total=0, admin_statistics={})
+        fallback_stats["generated_at"] = datetime.now().isoformat(timespec="seconds")
+        fallback_stats["database"] = {
+            "path": str(database_path()),
+            "source": "latest_tables_fallback",
+        }
+        return fallback_stats
 
 
 def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, observed_at: str | None = None) -> None:
@@ -7194,6 +7437,7 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
 
     subscriptions = list(record.get("subscriptions") or [])
     username = extract_username_from_record(record)
+    parsed_profile = parse_profile_text_features(str(record.get("user_text") or ""))
     conn.execute(
         """
         INSERT INTO latest_users (
@@ -7203,16 +7447,18 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
             user_text,
             registration_date,
             subscriptions_count,
+            parsed_profile_json,
             raw_json,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
             username=excluded.username,
             user_button_text=excluded.user_button_text,
             user_text=excluded.user_text,
             registration_date=excluded.registration_date,
             subscriptions_count=excluded.subscriptions_count,
+            parsed_profile_json=excluded.parsed_profile_json,
             raw_json=excluded.raw_json,
             updated_at=excluded.updated_at
         """,
@@ -7223,6 +7469,7 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
             str(record.get("user_text") or ""),
             record.get("registration_date"),
             len(subscriptions),
+            json.dumps(parsed_profile, ensure_ascii=False),
             json.dumps(record, ensure_ascii=False),
             observed_at,
         ),
@@ -7231,6 +7478,10 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
     conn.execute("DELETE FROM latest_subscriptions WHERE user_id = ?", (user_id,))
     for subscription in subscriptions:
         expires_at = extract_expiration_date(str(subscription.get("detail_text") or ""))
+        parsed_subscription = parse_subscription_text_features(
+            str(subscription.get("detail_text") or ""),
+            expires_at=expires_at,
+        )
         conn.execute(
             """
             INSERT INTO latest_subscriptions (
@@ -7240,10 +7491,11 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
                 location,
                 detail_text,
                 expires_at,
+                parsed_subscription_json,
                 raw_json,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -7252,6 +7504,7 @@ def upsert_latest_record_with_conn(conn: sqlite3.Connection, record: dict, *, ob
                 str(subscription.get("location") or ""),
                 str(subscription.get("detail_text") or ""),
                 expires_at.strftime("%Y-%m-%d") if expires_at else None,
+                json.dumps(parsed_subscription, ensure_ascii=False),
                 json.dumps(subscription, ensure_ascii=False),
                 observed_at,
             ),
@@ -7271,7 +7524,7 @@ def load_latest_records_from_database() -> list[dict]:
         seed_latest_records_from_scan_runs(conn)
         user_rows = conn.execute(
             """
-            SELECT user_id, username, user_button_text, user_text, registration_date
+            SELECT user_id, username, user_button_text, user_text, registration_date, parsed_profile_json
             FROM latest_users
             ORDER BY CAST(user_id AS INTEGER)
             """
@@ -7281,7 +7534,7 @@ def load_latest_records_from_database() -> list[dict]:
 
         sub_rows = conn.execute(
             """
-            SELECT user_id, subscription_id, button_text, location, detail_text
+            SELECT user_id, subscription_id, button_text, location, detail_text, parsed_subscription_json
             FROM latest_subscriptions
             ORDER BY CAST(user_id AS INTEGER), subscription_id
             """
@@ -7296,6 +7549,7 @@ def load_latest_records_from_database() -> list[dict]:
                 "button_text": str(row["button_text"] or ""),
                 "location": str(row["location"] or ""),
                 "detail_text": str(row["detail_text"] or ""),
+                "parsed": json.loads(str(row["parsed_subscription_json"] or "{}")),
             }
         )
 
@@ -7309,6 +7563,7 @@ def load_latest_records_from_database() -> list[dict]:
                 "user_button_text": str(row["user_button_text"] or ""),
                 "user_text": str(row["user_text"] or ""),
                 "registration_date": row["registration_date"],
+                "parsed_profile": json.loads(str(row["parsed_profile_json"] or "{}")),
                 "subscriptions": subs_by_user.get(user_id, []),
             }
         )
@@ -7342,7 +7597,7 @@ def load_latest_record_from_database_with_conn(conn: sqlite3.Connection, user_id
 
     row = conn.execute(
         """
-        SELECT user_id, username, user_button_text, user_text, registration_date
+        SELECT user_id, username, user_button_text, user_text, registration_date, parsed_profile_json
         FROM latest_users
         WHERE user_id = ?
         """,
@@ -7352,7 +7607,7 @@ def load_latest_record_from_database_with_conn(conn: sqlite3.Connection, user_id
         return None
     sub_rows = conn.execute(
         """
-        SELECT subscription_id, button_text, location, detail_text
+        SELECT subscription_id, button_text, location, detail_text, parsed_subscription_json
         FROM latest_subscriptions
         WHERE user_id = ?
         ORDER BY subscription_id
@@ -7366,12 +7621,14 @@ def load_latest_record_from_database_with_conn(conn: sqlite3.Connection, user_id
         "user_button_text": str(row["user_button_text"] or ""),
         "user_text": str(row["user_text"] or ""),
         "registration_date": row["registration_date"],
+        "parsed_profile": json.loads(str(row["parsed_profile_json"] or "{}")),
         "subscriptions": [
             {
                 "subscription_id": str(sub_row["subscription_id"] or ""),
                 "button_text": str(sub_row["button_text"] or ""),
                 "location": str(sub_row["location"] or ""),
                 "detail_text": str(sub_row["detail_text"] or ""),
+                "parsed": json.loads(str(sub_row["parsed_subscription_json"] or "{}")),
             }
             for sub_row in sub_rows
         ],
@@ -8201,6 +8458,79 @@ def extract_registration_date(text: str) -> datetime | None:
         if found and 2000 <= found.year <= datetime.now().year + 1:
             return found
     return None
+
+
+def parse_profile_text_features(text: str) -> dict[str, object]:
+    raw = str(text or "")
+    lowered = raw.casefold()
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    key_values: dict[str, str] = {}
+    for line in lines:
+        if ":" not in line:
+            continue
+        left, right = line.split(":", 1)
+        key = re.sub(r"\s+", " ", left.strip()).lower()
+        value = right.strip()
+        if key and value and key not in key_values:
+            key_values[key] = value
+
+    def find_number(*patterns: str) -> float | int | None:
+        for pattern in patterns:
+            match = re.search(pattern, raw, flags=re.IGNORECASE)
+            if match:
+                token = str(match.group(1)).replace(" ", "").replace(",", ".")
+                try:
+                    number = float(token)
+                    if number.is_integer():
+                        return int(number)
+                    return number
+                except ValueError:
+                    continue
+        return None
+
+    return {
+        "has_username": bool(re.search(r"@\w{3,}", raw)),
+        "telegram_id": find_number(r"(?:telegram\s*id|tg\s*id|id)\D{0,8}(\d{5,20})"),
+        "balance_rub": find_number(r"(?:баланс|balance)\D{0,12}([0-9][0-9\s.,]*)"),
+        "referrals": find_number(r"(?:реферал|referral)\D{0,12}([0-9]{1,9})"),
+        "key_values": key_values,
+        "text_size": len(raw),
+        "contains_payment_words": any(token in lowered for token in ("оплат", "payment", "платеж", "чек")),
+    }
+
+
+def parse_subscription_text_features(detail_text: str, *, expires_at: datetime | None = None) -> dict[str, object]:
+    raw = str(detail_text or "")
+    lowered = raw.casefold()
+
+    def find_number(pattern: str) -> float | int | None:
+        match = re.search(pattern, raw, flags=re.IGNORECASE)
+        if not match:
+            return None
+        token = str(match.group(1)).replace(" ", "").replace(",", ".")
+        try:
+            number = float(token)
+            if number.is_integer():
+                return int(number)
+            return number
+        except ValueError:
+            return None
+
+    days_left = None
+    if expires_at is not None:
+        days_left = (expires_at.date() - datetime.now().date()).days
+
+    return {
+        "expires_at": expires_at.strftime("%Y-%m-%d") if expires_at else None,
+        "days_left": days_left,
+        "has_key": ("vless://" in lowered) or ("vmess://" in lowered) or ("trojan://" in lowered),
+        "traffic_total_gb": find_number(r"(?:лимит|total|всего)\D{0,12}([0-9][0-9\s.,]*)\s*(?:gb|гб)"),
+        "traffic_used_gb": find_number(r"(?:использ|used)\D{0,12}([0-9][0-9\s.,]*)\s*(?:gb|гб)"),
+        "traffic_left_gb": find_number(r"(?:остат|left|remain)\D{0,12}([0-9][0-9\s.,]*)\s*(?:gb|гб)"),
+        "contains_block_words": any(token in lowered for token in ("блок", "ban", "огранич", "suspend")),
+        "contains_payment_words": any(token in lowered for token in ("оплат", "payment", "платеж", "чек")),
+        "text_size": len(raw),
+    }
 
 
 def build_scan_report(records: list[dict], pages_total: int = 0, admin_statistics: dict | None = None) -> tuple[str, dict]:
@@ -10458,6 +10788,19 @@ async def send_live_admin_dashboard_link(event) -> bool:
         event,
         dashboard_message_text("Admin system:", admin_url, admin_url=admin_url),
         buttons=dashboard_link_buttons(admin_url, admin_url=admin_url),
+    )
+    return sent is not None
+
+
+async def send_live_root_panel_link(event) -> bool:
+    root_url = live_root_panel_url()
+    if not root_url or not re.match(r"^https?://", root_url, flags=re.IGNORECASE):
+        await safe_event_reply(event, "Root panel сейчас недоступна. Проверь DASHBOARD_HTTP_* и DASHBOARD_PUBLIC_*.")
+        return False
+    sent = await safe_event_reply(
+        event,
+        f"Root panel:\n{root_url}",
+        buttons=[[Button.url("Открыть Root panel", root_url)]],
     )
     return sent is not None
 
@@ -13244,6 +13587,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     if is_admin_site_command(event.raw_text or ""):
         log_action_event("route", sender_id=sender_id, route="adminsite")
         await send_live_admin_dashboard_link(event)
+        return
+
+    if is_root_panel_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="root_panel")
+        await send_live_root_panel_link(event)
         return
 
     gpt_command = parse_gpt_command(event.raw_text or "")
