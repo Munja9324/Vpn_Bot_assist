@@ -6046,7 +6046,7 @@ def build_live_root_panel_html() -> str:
       consolePanel.style.margin = "12px";
       consolePanel.innerHTML = `
         <h1>Server Console</h1>
-        <div class="muted">Working directory: {esc(str(APP_ROOT))}</div>
+        <div class="muted">Working directory: {html.escape(str(APP_ROOT))}</div>
         <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:10px">
           <input id="consoleCommand" type="text" placeholder="Например: systemctl status vol29app --no-pager">
           <button id="consoleRun" class="btn-primary" type="button" style="min-width:120px">Run</button>
