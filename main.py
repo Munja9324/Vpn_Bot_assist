@@ -4380,16 +4380,6 @@ def is_root_panel_command(text: str) -> bool:
     )
 
 
-def is_system_site_command(text: str) -> bool:
-    return bool(
-        re.match(
-            r"^\s*/?(?:system|sys|serverpanel|server)\s*$",
-            text,
-            flags=re.IGNORECASE,
-        )
-    )
-
-
 def is_version_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
 
@@ -5937,7 +5927,6 @@ def build_live_root_panel_html() -> str:
     <button id="tabUsers" type="button">Пользователи</button>
     <button id="tabServices" type="button">Сервисы на сервере</button>
     <button id="tabState" type="button">Состояние служб</button>
-    <button id="tabSystem" type="button">System 9090</button>
   </div>
   <div class="wrap" id="viewUsers">
     <section class="panel">
@@ -5999,14 +5988,6 @@ def build_live_root_panel_html() -> str:
       <tbody id="stateBody"></tbody>
     </table>
   </div>
-  <div class="panel" id="viewSystem" style="display:none;margin:12px;">
-    <h1>System panel</h1>
-    <div class="muted">Откроется в новой вкладке, если iframe заблокирован.</div>
-    <div style="margin-top:8px">
-      <a id="systemOpenLink" href="{system_panel_url()}" target="_blank" rel="noopener noreferrer">Открыть system</a>
-    </div>
-    <iframe id="systemFrame" src="{system_panel_url()}" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:10px;margin-top:8px;"></iframe>
-  </div>
   <script>
     const users = {users_json};
     const list = document.getElementById("list");
@@ -6021,6 +6002,54 @@ def build_live_root_panel_html() -> str:
     let activeJobId = "";
     let pollTimer = null;
     const actionApiBase = "root-api";
+    let consoleCommand = null;
+    let consoleRun = null;
+    let consoleOutput = null;
+
+    function setupConsoleTab() {{
+      const tabsWrap = document.getElementById("tabUsers")?.parentElement;
+      if (!tabsWrap || document.getElementById("tabConsole")) return;
+      const tabBtn = document.createElement("button");
+      tabBtn.id = "tabConsole";
+      tabBtn.type = "button";
+      tabBtn.textContent = "Console";
+      tabsWrap.appendChild(tabBtn);
+
+      const consolePanel = document.createElement("div");
+      consolePanel.className = "panel";
+      consolePanel.id = "viewConsole";
+      consolePanel.style.display = "none";
+      consolePanel.style.margin = "12px";
+      consolePanel.innerHTML = `
+        <h1>Server Console</h1>
+        <div class="muted">Working directory: {esc(str(APP_ROOT))}</div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:10px">
+          <input id="consoleCommand" type="text" placeholder="Например: systemctl status vol29app --no-pager">
+          <button id="consoleRun" class="btn-primary" type="button" style="min-width:120px">Run</button>
+        </div>
+        <pre id="consoleOutput" style="margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:10px;background:#fafafa;min-height:220px;max-height:60vh;overflow:auto;white-space:pre-wrap">Ready.</pre>
+      `;
+      const anchor = document.getElementById("viewState");
+      if (anchor?.parentElement) {{
+        anchor.parentElement.insertBefore(consolePanel, anchor.nextSibling);
+      }} else {{
+        document.body.appendChild(consolePanel);
+      }}
+
+      consoleCommand = document.getElementById("consoleCommand");
+      consoleRun = document.getElementById("consoleRun");
+      consoleOutput = document.getElementById("consoleOutput");
+      tabBtn.addEventListener("click", () => switchTab("console"));
+      if (consoleRun) consoleRun.addEventListener("click", runConsoleCommand);
+      if (consoleCommand) {{
+        consoleCommand.addEventListener("keydown", (e) => {{
+          if (e.key === "Enter" && !e.shiftKey) {{
+            e.preventDefault();
+            runConsoleCommand();
+          }}
+        }});
+      }}
+    }}
 
     function esc(v) {{
       return String(v ?? "").replace(/[&<>"']/g, m => ({{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}}[m]));
@@ -6201,13 +6230,52 @@ def build_live_root_panel_html() -> str:
       }}
     }}
 
+    async function runConsoleCommand() {{
+      const cmd = String(consoleCommand?.value || "").trim();
+      if (!cmd) {{
+        if (consoleOutput) consoleOutput.textContent = "Введите команду.";
+        return;
+      }}
+      if (consoleRun) consoleRun.disabled = true;
+      if (consoleOutput) consoleOutput.textContent = `Running: ${{cmd}} ...`;
+      try {{
+        const r = await fetch(`${{actionApiBase}}/terminal`, {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ command: cmd }}),
+        }});
+        const p = await r.json();
+        if (!r.ok || !p.ok) {{
+          const err = (p && (p.error || p.detail)) || "unknown_error";
+          if (consoleOutput) consoleOutput.textContent = `Error: ${{err}}`;
+          return;
+        }}
+        const lines = [
+          `Command: ${{p.command || cmd}}`,
+          `Exit code: ${{p.code}}`,
+          `Time: ${{p.elapsed_ms}} ms`,
+          `At: ${{p.generated_at || "-"}}`,
+          "",
+          String(p.output || "(no output)"),
+        ];
+        if (consoleOutput) consoleOutput.textContent = lines.join("\\n");
+      }} catch (e) {{
+        if (consoleOutput) consoleOutput.textContent = `Request failed: ${{e}}`;
+      }} finally {{
+        if (consoleRun) consoleRun.disabled = false;
+      }}
+    }}
+
     let activeTab = "users";
     function switchTab(name) {{
       activeTab = name;
       document.getElementById("viewUsers").style.display = name === "users" ? "grid" : "none";
       document.getElementById("viewServices").style.display = name === "services" ? "block" : "none";
       document.getElementById("viewState").style.display = name === "state" ? "block" : "none";
-      document.getElementById("viewSystem").style.display = name === "system" ? "block" : "none";
+      const consolePanel = document.getElementById("viewConsole");
+      if (consolePanel) {{
+        consolePanel.style.display = name === "console" ? "block" : "none";
+      }}
       if (name === "services") loadServices();
       if (name === "state") loadState();
     }}
@@ -6234,8 +6302,7 @@ def build_live_root_panel_html() -> str:
     document.getElementById("tabUsers").addEventListener("click", () => switchTab("users"));
     document.getElementById("tabServices").addEventListener("click", () => switchTab("services"));
     document.getElementById("tabState").addEventListener("click", () => switchTab("state"));
-    document.getElementById("tabSystem").addEventListener("click", () => switchTab("system"));
-    document.getElementById("tabSystem").addEventListener("click", () => switchTab("system"));
+    setupConsoleTab();
     renderList();
     renderMeta();
     setInterval(() => {{
@@ -6368,11 +6435,6 @@ def live_admin_dashboard_url() -> str:
 
 def live_root_panel_url() -> str:
     return build_dashboard_public_url("root.html")
-
-
-def system_panel_url() -> str:
-    value = str(os.getenv("SYSTEM_PANEL_URL", "https://176.124.222.183:9090/system") or "").strip()
-    return value
 
 
 def resolve_dashboard_user_id(user_lookup: str) -> str | None:
@@ -6833,6 +6895,21 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if self.command != "POST":
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed")
             return True
+        if api_name == "root-api" and len(api_parts) == 1 and api_parts[0] == "terminal":
+            try:
+                payload = self.read_json_body()
+                command_text = str(payload.get("command") or "").strip()
+                result = dashboard_terminal_execute(command_text)
+                status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                self.send_json(result, status, send_body=send_body)
+                return True
+            except json.JSONDecodeError:
+                self.send_json({"ok": False, "error": "bad_json"}, HTTPStatus.BAD_REQUEST, send_body=send_body)
+                return True
+            except Exception:
+                logging.exception("Root terminal API failed")
+                self.send_json({"ok": False, "error": "server_error"}, HTTPStatus.INTERNAL_SERVER_ERROR, send_body=send_body)
+                return True
         if len(api_parts) != 1 or api_parts[0] != "action":
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return True
@@ -8089,6 +8166,68 @@ def dashboard_server_services_payload() -> dict[str, object]:
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "services": rows,
     }
+
+
+def dashboard_terminal_execute(command: str) -> dict[str, object]:
+    raw = str(command or "").strip()
+    if not raw:
+        return {"ok": False, "error": "empty_command"}
+    if len(raw) > 400:
+        return {"ok": False, "error": "command_too_long"}
+    lowered = raw.casefold()
+    banned_tokens = (
+        " rm -rf",
+        "mkfs",
+        "shutdown",
+        "reboot",
+        "poweroff",
+        ":(){",
+        "dd if=",
+        "> /dev/sd",
+        "chmod -R 777 /",
+    )
+    if any(token in f" {lowered}" for token in banned_tokens):
+        return {"ok": False, "error": "command_blocked"}
+    started_at = time.monotonic()
+    try:
+        completed = subprocess.run(
+            raw,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            cwd=str(APP_ROOT),
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        output = (completed.stdout or "") + ((("\n" + completed.stderr) if completed.stderr else ""))
+        output = output.strip()
+        if len(output) > 12000:
+            output = output[:12000] + "\n... output truncated ..."
+        return {
+            "ok": True,
+            "command": raw,
+            "code": int(completed.returncode),
+            "elapsed_ms": elapsed_ms,
+            "output": output or "(no output)",
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    except subprocess.TimeoutExpired as exc:
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        out = ((exc.stdout or "") + ("\n" + (exc.stderr or "") if exc.stderr else "")).strip()
+        if len(out) > 4000:
+            out = out[:4000] + "\n... output truncated ..."
+        return {
+            "ok": False,
+            "error": "timeout",
+            "command": raw,
+            "elapsed_ms": elapsed_ms,
+            "output": out or "Command timed out after 20 seconds.",
+        }
+    except Exception as exc:
+        return {"ok": False, "error": "exec_failed", "command": raw, "detail": str(exc)}
 
 
 def dashboard_root_users_payload(query: str = "") -> dict[str, object]:
@@ -14102,11 +14241,6 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     if is_root_panel_command(event.raw_text or ""):
         log_action_event("route", sender_id=sender_id, route="root_panel")
         await send_live_root_panel_link(event)
-        return
-
-    if is_system_site_command(event.raw_text or ""):
-        log_action_event("route", sender_id=sender_id, route="system_panel")
-        await send_system_panel_link(event)
         return
 
     gpt_command = parse_gpt_command(event.raw_text or "")
