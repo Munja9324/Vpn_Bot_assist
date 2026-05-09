@@ -5989,6 +5989,7 @@ def build_live_root_panel_html() -> str:
         <div class="card"><div class="muted">Всего пополнено</div><b>${{esc(selected.total_topped_up_rub_text || "-")}}</b></div>
         <div class="card"><div class="muted">Локации</div><b>${{esc(selected.locations || "-")}}</b></div>
         <div class="card"><div class="muted">Ближайшее истечение</div><b>${{esc(selected.nearest_expiration || "-")}}</b></div>
+        <div class="card"><div class="muted">Дней до окончания</div><b>${{esc(selected.days_left !== "" ? selected.days_left : "-")}}</b></div>
       `;
     }}
     async function pollJob(jobId) {{
