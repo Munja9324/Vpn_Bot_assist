@@ -5773,10 +5773,12 @@ def build_live_admin_dashboard_html() -> str:
 
 
 def build_live_root_panel_html() -> str:
-    stats = load_latest_scan_stats_from_database()
+    records = load_latest_records_from_database()
+    stats = True
     if not stats:
         return build_dashboard_empty_admin_html("В SQL базе пока нет данных для root-панели. Сначала запусти scan.")
-    records = list(stats.get("records") or [])
+    if not records:
+        return build_dashboard_empty_admin_html("В SQL базе пока нет данных для root-панели. Сначала запусти scan.")
     users_json = admin_user_rows_json(records)
     brand = html.escape(settings.dashboard_brand_name)
     return f"""<!DOCTYPE html>
