@@ -4380,6 +4380,16 @@ def is_root_panel_command(text: str) -> bool:
     )
 
 
+def is_system_site_command(text: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*/?(?:system|sys|serverpanel|server)\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def is_version_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?(?:version|версия|v)\s*$", text, flags=re.IGNORECASE))
 
@@ -5927,6 +5937,7 @@ def build_live_root_panel_html() -> str:
     <button id="tabUsers" type="button">Пользователи</button>
     <button id="tabServices" type="button">Сервисы на сервере</button>
     <button id="tabState" type="button">Состояние служб</button>
+    <button id="tabSystem" type="button">System 9090</button>
   </div>
   <div class="wrap" id="viewUsers">
     <section class="panel">
@@ -5987,6 +5998,14 @@ def build_live_root_panel_html() -> str:
       <thead><tr><th style="text-align:left">Параметр</th><th style="text-align:left">Значение</th></tr></thead>
       <tbody id="stateBody"></tbody>
     </table>
+  </div>
+  <div class="panel" id="viewSystem" style="display:none;margin:12px;">
+    <h1>System panel</h1>
+    <div class="muted">Откроется в новой вкладке, если iframe заблокирован.</div>
+    <div style="margin-top:8px">
+      <a id="systemOpenLink" href="{system_panel_url()}" target="_blank" rel="noopener noreferrer">Открыть system</a>
+    </div>
+    <iframe id="systemFrame" src="{system_panel_url()}" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:10px;margin-top:8px;"></iframe>
   </div>
   <script>
     const users = {users_json};
@@ -6188,6 +6207,7 @@ def build_live_root_panel_html() -> str:
       document.getElementById("viewUsers").style.display = name === "users" ? "grid" : "none";
       document.getElementById("viewServices").style.display = name === "services" ? "block" : "none";
       document.getElementById("viewState").style.display = name === "state" ? "block" : "none";
+      document.getElementById("viewSystem").style.display = name === "system" ? "block" : "none";
       if (name === "services") loadServices();
       if (name === "state") loadState();
     }}
@@ -6214,6 +6234,8 @@ def build_live_root_panel_html() -> str:
     document.getElementById("tabUsers").addEventListener("click", () => switchTab("users"));
     document.getElementById("tabServices").addEventListener("click", () => switchTab("services"));
     document.getElementById("tabState").addEventListener("click", () => switchTab("state"));
+    document.getElementById("tabSystem").addEventListener("click", () => switchTab("system"));
+    document.getElementById("tabSystem").addEventListener("click", () => switchTab("system"));
     renderList();
     renderMeta();
     setInterval(() => {{
@@ -6346,6 +6368,11 @@ def live_admin_dashboard_url() -> str:
 
 def live_root_panel_url() -> str:
     return build_dashboard_public_url("root.html")
+
+
+def system_panel_url() -> str:
+    value = str(os.getenv("SYSTEM_PANEL_URL", "https://176.124.222.183:9090/system") or "").strip()
+    return value
 
 
 def resolve_dashboard_user_id(user_lookup: str) -> str | None:
@@ -11268,6 +11295,19 @@ async def send_live_root_panel_link(event) -> bool:
     return sent is not None
 
 
+async def send_system_panel_link(event) -> bool:
+    target = system_panel_url()
+    if not target or not re.match(r"^https?://", target, flags=re.IGNORECASE):
+        await safe_event_reply(event, "System panel URL не настроен.")
+        return False
+    sent = await safe_event_reply(
+        event,
+        f"System panel:\n{target}",
+        buttons=[[Button.url("Открыть System", target)]],
+    )
+    return sent is not None
+
+
 async def send_latest_dashboard_to_chat(event) -> bool:
     _, _, _, dashboard_path = latest_scan_report_paths()
     if not dashboard_path:
@@ -14062,6 +14102,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     if is_root_panel_command(event.raw_text or ""):
         log_action_event("route", sender_id=sender_id, route="root_panel")
         await send_live_root_panel_link(event)
+        return
+
+    if is_system_site_command(event.raw_text or ""):
+        log_action_event("route", sender_id=sender_id, route="system_panel")
+        await send_system_panel_link(event)
         return
 
     gpt_command = parse_gpt_command(event.raw_text or "")
