@@ -5881,7 +5881,7 @@ def build_live_admin_dashboard_html() -> str:
 
 def build_live_root_panel_html() -> str:
     records = load_latest_records_from_database()
-    stats = True
+    stats = records
     if not stats:
         return build_dashboard_empty_admin_html("В SQL базе пока нет данных для root-панели. Сначала запусти scan.")
     if not records:
@@ -5985,6 +5985,8 @@ def build_live_root_panel_html() -> str:
         <div class="card"><div class="muted">Username</div><b>${{esc(selected.username ? "@" + selected.username : "-")}}</b></div>
         <div class="card"><div class="muted">Регистрация</div><b>${{esc(selected.registration_date || "-")}}</b></div>
         <div class="card"><div class="muted">Подписок</div><b>${{esc(selected.subscriptions || 0)}}</b></div>
+        <div class="card"><div class="muted">Баланс</div><b>${{esc(selected.balance_rub_text || "-")}}</b></div>
+        <div class="card"><div class="muted">Всего пополнено</div><b>${{esc(selected.total_topped_up_rub_text || "-")}}</b></div>
         <div class="card"><div class="muted">Локации</div><b>${{esc(selected.locations || "-")}}</b></div>
         <div class="card"><div class="muted">Ближайшее истечение</div><b>${{esc(selected.nearest_expiration || "-")}}</b></div>
       `;
@@ -6069,11 +6071,49 @@ def build_live_root_panel_html() -> str:
 def admin_user_rows_json(records: list[dict]) -> str:
     now = datetime.now()
     rows: list[dict[str, object]] = []
+
+    def parse_money(text: str, patterns: list[str]) -> float | None:
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            token = str(match.group(1) or "").replace(" ", "").replace(",", ".")
+            try:
+                return float(token)
+            except ValueError:
+                continue
+        return None
+
+    def money_text(value: float | None) -> str:
+        if value is None:
+            return "-"
+        if float(value).is_integer():
+            return f"{int(value)} ₽"
+        return f"{value:.2f} ₽"
+
     for record in records:
         user_id = str(record.get("user_id") or "").strip()
         if not user_id:
             continue
         username = normalize_username(str(record.get("username") or ""))
+        profile_text = str(record.get("user_text") or "")
+        parsed_profile = record.get("parsed_profile") if isinstance(record.get("parsed_profile"), dict) else {}
+        balance_rub = parsed_profile.get("balance_rub")
+        if not isinstance(balance_rub, (int, float)):
+            balance_rub = parse_money(
+                profile_text,
+                [
+                    r"(?:баланс|balance)\D{0,16}([0-9][0-9\s.,]*)",
+                    r"(?:на\s+счете|на\s+счёте)\D{0,16}([0-9][0-9\s.,]*)",
+                ],
+            )
+        total_topped_up_rub = parse_money(
+            profile_text,
+            [
+                r"(?:всего\s+пополнено|пополнено\s+всего)\D{0,20}([0-9][0-9\s.,]*)",
+                r"(?:total\s+topped\s*up|total\s+recharge)\D{0,20}([0-9][0-9\s.,]*)",
+            ],
+        )
         subscriptions = list(record.get("subscriptions") or [])
         locations = sorted(
             {
@@ -6126,6 +6166,10 @@ def admin_user_rows_json(records: list[dict]) -> str:
                 "days_left": days_left,
                 "status": status,
                 "status_label": status_label,
+                "balance_rub": balance_rub,
+                "balance_rub_text": money_text(balance_rub),
+                "total_topped_up_rub": total_topped_up_rub,
+                "total_topped_up_rub_text": money_text(total_topped_up_rub),
             }
         )
     rows.sort(
