@@ -506,6 +506,8 @@ pending_gpt_requests: dict[int, dict[str, object]] = {}
 pending_smart_actions: dict[int, dict[str, object]] = {}
 pending_support_requests: dict[int, dict[str, object]] = {}
 pending_direct_mail_requests: dict[int, dict[str, object]] = {}
+last_reply_sent_at_by_chat: dict[int, float] = {}
+last_reply_sent_at_lock = asyncio.Lock()
 active_gpt_requests: dict[int, dict[str, object]] = {}
 gpt_waiting_request_ids: list[str] = []
 gpt_response_cache: dict[str, tuple[float, str]] = {}
@@ -536,6 +538,7 @@ POST_ACTION_SETTLE_SECONDS = max(0.0, env_float("POST_ACTION_SETTLE_SECONDS", 0.
 PROMO_CONFIRM_HISTORY_LIMIT = max(100, env_int("PROMO_CONFIRM_HISTORY_LIMIT", 1000))
 PROMO_AFTER_SUBMIT_SETTLE_SECONDS = max(0.3, env_float("PROMO_AFTER_SUBMIT_SETTLE_SECONDS", 2.0))
 PENDING_REQUEST_TTL_SECONDS = max(300, env_int("PENDING_REQUEST_TTL_SECONDS", 1800))
+TELEGRAM_REPLY_MIN_INTERVAL_SECONDS = max(0.0, env_float("TELEGRAM_REPLY_MIN_INTERVAL_SECONDS", 0.45))
 LOG_TAIL_DEFAULT_LINES = max(10, env_int("LOG_TAIL_DEFAULT_LINES", 80))
 LOG_TAIL_MAX_LINES = max(LOG_TAIL_DEFAULT_LINES, env_int("LOG_TAIL_MAX_LINES", 250))
 ADMIN_FLOW_WAIT_NOTICE_SECONDS = max(1.0, env_float("ADMIN_FLOW_WAIT_NOTICE_SECONDS", 2.0))
@@ -1331,6 +1334,15 @@ async def safe_event_reply(event, *args, **kwargs):
         return await reply_with_text_file(event, args[0], **kwargs)
 
     try:
+        chat_id = int(getattr(event, "chat_id", 0) or 0)
+        if chat_id and TELEGRAM_REPLY_MIN_INTERVAL_SECONDS > 0:
+            async with last_reply_sent_at_lock:
+                now_ts = now_timestamp()
+                last_ts = float(last_reply_sent_at_by_chat.get(chat_id) or 0.0)
+                wait_for = TELEGRAM_REPLY_MIN_INTERVAL_SECONDS - (now_ts - last_ts)
+                if wait_for > 0:
+                    await asyncio.sleep(min(wait_for, 1.5))
+                last_reply_sent_at_by_chat[chat_id] = now_timestamp()
         sent = await event.reply(*args, **kwargs)
         log_action_event(
             "reply",
@@ -2850,6 +2862,78 @@ def support_clarification_message() -> str:
     )
 
 
+SUPPORT_QUICK_TEMPLATES: dict[str, str] = {
+    "key_not_working": (
+        "Быстрая проверка ключа:\n"
+        "1) Откройте подписку и заново скопируйте ключ целиком.\n"
+        "2) Удалите старый профиль в приложении и импортируйте новый ключ.\n"
+        "3) Проверьте дату и время на устройстве (должны быть автоматическими).\n"
+        "4) Переключите сеть: Wi‑Fi ↔ мобильная.\n"
+        "Если не поможет — напишите: `не помогло` и мы передадим в поддержку."
+    ),
+    "payment_not_applied": (
+        "Проверка оплаты:\n"
+        "1) Укажите ID из раздела «Профиль».\n"
+        "2) Время и сумму платежа.\n"
+        "3) Последние цифры операции или чек (если есть).\n"
+        "После этого сразу передам заявку оператору."
+    ),
+    "vpn_slow": (
+        "Если VPN медленно работает:\n"
+        "1) Смените сервер/локацию в подписке.\n"
+        "2) Перезапустите приложение и подключение.\n"
+        "3) Проверьте без VPN скорость интернета.\n"
+        "4) Попробуйте другую сеть.\n"
+        "Если проблема остается — напишите `не помогло`."
+    ),
+}
+
+
+def detect_support_template_key(text: str) -> str | None:
+    cleaned = (text or "").casefold()
+    if any(token in cleaned for token in ("ключ", "key", "конфиг", "vless", "vmess", "trojan")):
+        return "key_not_working"
+    if any(token in cleaned for token in ("оплат", "платеж", "чек", "payment", "перевод")):
+        return "payment_not_applied"
+    if any(token in cleaned for token in ("медлен", "скорост", "тормоз", "slow", "lag")):
+        return "vpn_slow"
+    return None
+
+
+def support_quick_template_message(issue_text: str) -> str | None:
+    key = detect_support_template_key(issue_text)
+    if not key:
+        return None
+    return SUPPORT_QUICK_TEMPLATES.get(key)
+
+
+def build_template_help_text() -> str:
+    return (
+        "Шаблоны поддержки:\n"
+        "- /tpl key\n"
+        "- /tpl payment\n"
+        "- /tpl slow\n"
+        "- /tpl auto <текст проблемы>\n\n"
+        "Пример: /tpl auto не работает ключ на iphone"
+    )
+
+
+def resolve_template_text(command_key: str, command_rest: str) -> str:
+    key = (command_key or "").strip().casefold()
+    if not key:
+        return build_template_help_text()
+    if key == "auto":
+        template = support_quick_template_message(command_rest)
+        return template or "Не удалось подобрать шаблон автоматически. " + build_template_help_text()
+    if key in {"key", "ключ"}:
+        return SUPPORT_QUICK_TEMPLATES["key_not_working"]
+    if key in {"payment", "pay", "оплата"}:
+        return SUPPORT_QUICK_TEMPLATES["payment_not_applied"]
+    if key in {"slow", "speed", "медленно", "скорость"}:
+        return SUPPORT_QUICK_TEMPLATES["vpn_slow"]
+    return build_template_help_text()
+
+
 def support_payment_clarification_message() -> str:
     return assistant_list_reply(
         "Чтобы проверить оплату, пришлите:",
@@ -3327,6 +3411,20 @@ async def handle_support_issue_flow(
                 "created_at": now_timestamp(),
             }
             await update_or_reply_text(event, status_message, support_subscriptions_question(record))
+            return
+
+        lowered_issue = (issue_text or "").casefold()
+        quick_template = support_quick_template_message(issue_text)
+        if quick_template and "не помогло" not in lowered_issue and "оператор" not in lowered_issue:
+            pending_support_requests[sender_id] = {
+                "record": record,
+                "lookup": lookup_used,
+                "selected_subscriptions": selected_subscriptions,
+                "issue_text": issue_text,
+                "stage": "await_issue_details",
+                "created_at": now_timestamp(),
+            }
+            await update_or_reply_text(event, status_message, quick_template)
             return
 
         if is_support_issue_too_vague(issue_text):
@@ -4302,6 +4400,15 @@ def is_poc_command(text: str) -> bool:
 
 def is_roots_command(text: str) -> bool:
     return bool(re.match(r"^\s*/?roots(?:\s+.*)?$", text or "", flags=re.IGNORECASE))
+
+
+def parse_template_command(text: str) -> tuple[str, str] | None:
+    match = re.match(r"^\s*/?(?:tpl|template|шаблон)(?:\s+([\w\-]+)(?:\s+([\s\S]+))?)?\s*$", text or "", flags=re.IGNORECASE)
+    if not match:
+        return None
+    key = str(match.group(1) or "").strip().casefold()
+    rest = str(match.group(2) or "").strip()
+    return key, rest
 
 
 def parse_scan_menu_action(text: str, allow_numeric: bool = False) -> str | None:
@@ -13633,6 +13740,13 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     if is_diagnostics_command(event.raw_text or ""):
         log_action_event("route", sender_id=sender_id, route="diagnostics")
         await safe_event_reply(event, build_diagnostics_text())
+        return
+
+    template_command = parse_template_command(event.raw_text or "")
+    if template_command is not None:
+        template_key, template_rest = template_command
+        log_action_event("route", sender_id=sender_id, route="templates", key=template_key)
+        await safe_event_reply(event, resolve_template_text(template_key, template_rest))
         return
 
     unresolved_command = parse_unresolved_command(event.raw_text or "")
