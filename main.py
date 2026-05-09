@@ -5981,7 +5981,7 @@ def build_live_root_panel_html() -> str:
     let selected = null;
     let activeJobId = "";
     let pollTimer = null;
-    const actionApiBase = "admin-api";
+    const actionApiBase = "root-api";
 
     function esc(v) {{
       return String(v ?? "").replace(/[&<>"']/g, m => ({{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}}[m]));
@@ -6683,9 +6683,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         raise ValueError("JSON body must be object")
 
     def try_serve_api(self, parts: list[str], *, send_body: bool) -> bool:
-        if not parts or parts[0] != "admin-api":
+        if not parts or parts[0] not in {"admin-api", "root-api"}:
             return False
 
+        api_name = parts[0]
         api_parts = parts[1:]
         if self.command in {"GET", "HEAD"}:
             if len(api_parts) == 2 and api_parts[0] == "job":
@@ -6719,6 +6720,24 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     send_body=send_body,
                 )
+                return True
+            if api_name == "root-api" and len(api_parts) == 1 and api_parts[0] == "users":
+                query_text = str(urlsplit(self.path).query or "")
+                query_match = re.search(r"(?:^|&)q=([^&]*)", query_text)
+                query_value = unquote(query_match.group(1)) if query_match else ""
+                self.send_json(
+                    {"ok": True, "payload": dashboard_root_users_payload(query_value)},
+                    HTTPStatus.OK,
+                    send_body=send_body,
+                )
+                return True
+            if api_name == "root-api" and len(api_parts) == 2 and api_parts[0] == "user":
+                lookup = str(api_parts[1] or "").strip()
+                detail = dashboard_root_user_detail_payload(lookup)
+                if not detail:
+                    self.send_json({"ok": False, "error": "user_not_found"}, HTTPStatus.NOT_FOUND, send_body=send_body)
+                    return True
+                self.send_json({"ok": True, "user": detail}, HTTPStatus.OK, send_body=send_body)
                 return True
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return True
@@ -7982,6 +8001,40 @@ def dashboard_server_services_payload() -> dict[str, object]:
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "services": rows,
     }
+
+
+def dashboard_root_users_payload(query: str = "") -> dict[str, object]:
+    records = load_latest_records_from_database()
+    try:
+        rows = json.loads(admin_user_rows_json(records))
+    except Exception:
+        rows = []
+    q = str(query or "").strip().casefold()
+    if q:
+        filtered = []
+        for row in rows:
+            user_id = str(row.get("user_id") or "").casefold()
+            username = str(row.get("username") or "").casefold()
+            if q in user_id or q in username or q in f"@{username}":
+                filtered.append(row)
+        rows = filtered
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "count": len(rows),
+        "users": rows[:5000],
+    }
+
+
+def dashboard_root_user_detail_payload(user_lookup: str) -> dict[str, object] | None:
+    record = load_latest_record_by_lookup_from_database(user_lookup)
+    if not record:
+        return None
+    try:
+        row = json.loads(admin_user_rows_json([record]))[0]
+    except Exception:
+        row = {"user_id": str(record.get("user_id") or "")}
+    row["raw_record"] = record
+    return row
 
 
 def load_latest_record_from_database(user_id: str) -> dict | None:
