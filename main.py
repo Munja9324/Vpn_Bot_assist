@@ -5923,7 +5923,12 @@ def build_live_root_panel_html() -> str:
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div style="display:flex;gap:8px;padding:12px 12px 0">
+    <button id="tabUsers" type="button">Пользователи</button>
+    <button id="tabServices" type="button">Сервисы на сервере</button>
+    <button id="tabState" type="button">Состояние служб</button>
+  </div>
+  <div class="wrap" id="viewUsers">
     <section class="panel">
       <h1>Пользователи</h1>
       <input id="search" placeholder="Поиск: ID или @username">
@@ -5949,6 +5954,22 @@ def build_live_root_panel_html() -> str:
         <div class="status" id="status">Выбери пользователя слева.</div>
       </div>
     </section>
+  </div>
+  <div class="panel" id="viewServices" style="display:none;margin:12px;">
+    <h1>Сервисы на сервере</h1>
+    <div class="muted" id="servicesUpdatedAt">-</div>
+    <table style="width:100%;margin-top:8px;border-collapse:collapse">
+      <thead><tr><th style="text-align:left">Сервис</th><th style="text-align:left">Статус</th></tr></thead>
+      <tbody id="servicesBody"></tbody>
+    </table>
+  </div>
+  <div class="panel" id="viewState" style="display:none;margin:12px;">
+    <h1>Состояние служб</h1>
+    <div class="muted" id="stateUpdatedAt">-</div>
+    <table style="width:100%;margin-top:8px;border-collapse:collapse">
+      <thead><tr><th style="text-align:left">Параметр</th><th style="text-align:left">Значение</th></tr></thead>
+      <tbody id="stateBody"></tbody>
+    </table>
   </div>
   <script>
     const users = {users_json};
@@ -6069,6 +6090,53 @@ def build_live_root_panel_html() -> str:
       statusBox.textContent = "Сценарий подставлен. Нажмите Mail или Wizard.";
     }}
 
+    async function loadServices() {{
+      const body = document.getElementById("servicesBody");
+      const updated = document.getElementById("servicesUpdatedAt");
+      try {{
+        const r = await fetch(`${{actionApiBase}}/services`, {{ cache: "no-store" }});
+        const p = await r.json();
+        if (!r.ok || !p.ok || !p.services) throw new Error("bad_response");
+        const data = p.services;
+        updated.textContent = `Обновлено: ${{data.generated_at || "-"}}`;
+        body.innerHTML = (data.services || []).map(s => `<tr><td>${{esc(s.service)}}</td><td>${{esc(s.status)}}</td></tr>`).join("") || "<tr><td colspan='2'>Нет данных</td></tr>";
+      }} catch (e) {{
+        body.innerHTML = `<tr><td colspan='2'>Ошибка: ${{esc(e)}}</td></tr>`;
+      }}
+    }}
+
+    async function loadState() {{
+      const body = document.getElementById("stateBody");
+      const updated = document.getElementById("stateUpdatedAt");
+      try {{
+        const r = await fetch(`${{actionApiBase}}/overview`, {{ cache: "no-store" }});
+        const p = await r.json();
+        if (!r.ok || !p.ok || !p.overview) throw new Error("bad_response");
+        const ov = p.overview;
+        const proc = ov.processes || {{}};
+        updated.textContent = `Обновлено: ${{ov.generated_at || "-"}}`;
+        const rows = [
+          ["Admin flow", proc.admin_flow || "-"],
+          ["Scan active", proc.scan_active ? "да" : "нет"],
+          ["Mail2 active", proc.mail2_active ? "да" : "нет"],
+          ["Wizard pending", proc.wizard_pending ?? "-"],
+          ["GPT active/pending", `${{proc.gpt_active ?? 0}} / ${{proc.gpt_pending ?? 0}}`],
+          ["Unresolved open", ov.unresolved_open_count ?? 0],
+        ];
+        body.innerHTML = rows.map(([k,v]) => `<tr><td>${{esc(k)}}</td><td>${{esc(v)}}</td></tr>`).join("");
+      }} catch (e) {{
+        body.innerHTML = `<tr><td colspan='2'>Ошибка: ${{esc(e)}}</td></tr>`;
+      }}
+    }}
+
+    function switchTab(name) {{
+      document.getElementById("viewUsers").style.display = name === "users" ? "grid" : "none";
+      document.getElementById("viewServices").style.display = name === "services" ? "block" : "none";
+      document.getElementById("viewState").style.display = name === "state" ? "block" : "none";
+      if (name === "services") loadServices();
+      if (name === "state") loadState();
+    }}
+
     list.addEventListener("click", (e) => {{
       const row = e.target.closest(".item[data-id]");
       if (!row) return;
@@ -6086,6 +6154,9 @@ def build_live_root_panel_html() -> str:
     document.getElementById("scPay").addEventListener("click", () => applyScenario("pay"));
     document.getElementById("scIos").addEventListener("click", () => applyScenario("ios"));
     document.getElementById("scAndroid").addEventListener("click", () => applyScenario("android"));
+    document.getElementById("tabUsers").addEventListener("click", () => switchTab("users"));
+    document.getElementById("tabServices").addEventListener("click", () => switchTab("services"));
+    document.getElementById("tabState").addEventListener("click", () => switchTab("state"));
     renderList();
     renderMeta();
   </script>
@@ -6638,6 +6709,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             if len(api_parts) == 1 and api_parts[0] == "overview":
                 self.send_json(
                     {"ok": True, "overview": dashboard_live_overview_payload()},
+                    HTTPStatus.OK,
+                    send_body=send_body,
+                )
+                return True
+            if len(api_parts) == 1 and api_parts[0] == "services":
+                self.send_json(
+                    {"ok": True, "services": dashboard_server_services_payload()},
                     HTTPStatus.OK,
                     send_body=send_body,
                 )
@@ -7881,6 +7959,28 @@ def load_latest_record_from_database_with_conn(conn: sqlite3.Connection, user_id
             }
             for sub_row in sub_rows
         ],
+    }
+
+
+def dashboard_server_services_payload() -> dict[str, object]:
+    services = ["vol29app", "xray", "ssh", "cron", "nginx"]
+    rows: list[dict[str, str]] = []
+    for name in services:
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", f"{name}.service"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            status = (result.stdout or result.stderr or "unknown").strip().splitlines()[0]
+        except Exception:
+            status = "error"
+        rows.append({"service": name, "status": status})
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "services": rows,
     }
 
 
