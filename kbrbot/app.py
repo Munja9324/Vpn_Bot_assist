@@ -840,6 +840,18 @@ def sanitize_outgoing_text(text: str) -> str:
     return repaired.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def sanitize_outgoing_payload(value):
+    if isinstance(value, str):
+        return sanitize_outgoing_text(value)
+    if isinstance(value, list):
+        return [sanitize_outgoing_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(sanitize_outgoing_payload(item) for item in value)
+    if isinstance(value, dict):
+        return {key: sanitize_outgoing_payload(item) for key, item in value.items()}
+    return value
+
+
 def assistant_user_message(text: str) -> str:
     body = sanitize_outgoing_text(text).strip()
     if not body:
@@ -7285,7 +7297,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         return parts
 
     def send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK, *, send_body: bool = True) -> None:
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        safe_payload = sanitize_outgoing_payload(payload)
+        raw = json.dumps(safe_payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
@@ -7457,6 +7470,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
 
         content = file_path.read_bytes()
+        if suffix == ".html":
+            try:
+                content = sanitize_outgoing_text(content.decode("utf-8", errors="replace")).encode("utf-8")
+            except Exception:
+                logging.exception("Failed to sanitize html file %s", file_path)
         self.send_response(HTTPStatus.OK)
         content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         if suffix == ".html":
@@ -7470,10 +7488,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def serve_live_admin_dashboard(self, *, send_body: bool) -> None:
         try:
-            content = build_live_admin_dashboard_html().encode("utf-8")
+            content = sanitize_outgoing_text(build_live_admin_dashboard_html()).encode("utf-8")
         except Exception:
             logging.exception("Failed to build live admin dashboard")
-            content = build_dashboard_empty_admin_html("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР±СЂР°С‚СЊ Р¶РёРІСѓСЋ Р°РґРјРёРЅ-РїР°РЅРµР»СЊ. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.").encode("utf-8")
+            content = sanitize_outgoing_text(build_dashboard_empty_admin_html("Не удалось собрать живую админ-панель. Подробности записаны в лог.")).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
@@ -7484,10 +7502,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def serve_live_root_panel(self, *, send_body: bool) -> None:
         try:
-            content = build_live_root_panel_html().encode("utf-8")
+            content = sanitize_outgoing_text(build_live_root_panel_html()).encode("utf-8")
         except Exception:
             logging.exception("Failed to build live root panel")
-            content = build_dashboard_empty_admin_html("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР±СЂР°С‚СЊ root-РїР°РЅРµР»СЊ. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі.").encode("utf-8")
+            content = sanitize_outgoing_text(build_dashboard_empty_admin_html("Не удалось собрать root-панель. Подробности записаны в лог.")).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
