@@ -6239,6 +6239,23 @@ def build_live_root_panel_html() -> str:
     function filteredUsers() {{
       const q = String(search.value || "").trim().toLowerCase();
       const status = String(filterStatus?.value || "all");
+      const qDigits = q.replace(/\D+/g, "");
+
+      // Exact ID/username lookup should not be blocked by status filter.
+      if (q) {{
+        const exact = users.find((u) => {{
+          const id = String(u.user_id || "").trim();
+          const un = String(u.username || "").trim().toLowerCase();
+          return (
+            id === q ||
+            (qDigits && id === qDigits) ||
+            un === q.replace(/^@/, "") ||
+            ("@" + un) === q
+          );
+        }});
+        if (exact) return [exact];
+      }}
+
       let rows = users.filter(u => {{
         const id = String(u.user_id || "");
         const un = String(u.username || "").toLowerCase();
