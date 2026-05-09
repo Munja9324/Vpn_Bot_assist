@@ -9673,6 +9673,9 @@ def build_scan_dashboard_html(stats: dict) -> str:
       const overviewGeneratedAt = document.getElementById("overviewGeneratedAt");
       const unresolvedBody = document.getElementById("unresolvedBody");
       const actionApiBase = "admin-api";
+      let operatorUserInput = null;
+      let operatorMessageInput = null;
+      let operatorStatusBox = null;
       let currentPage = 1;
       let activeJobId = "";
       let activeJobPollTimer = null;
@@ -9688,6 +9691,85 @@ def build_scan_dashboard_html(stats: dict) -> str:
 
       function escapeText(value) {{
         return String(value ?? "").replace(/[&<>"']/g, ch => ({{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}}[ch]));
+      }}
+
+      function initOperatorMode() {{
+        const sideNav = document.querySelector(".side-nav");
+        const usersPanel = document.querySelector('[data-panel="users"]');
+        if (!sideNav || !usersPanel) return;
+
+        const opButton = document.createElement("button");
+        opButton.className = "nav-btn active";
+        opButton.dataset.tab = "operator";
+        opButton.textContent = "Оператор";
+        sideNav.insertBefore(opButton, sideNav.firstChild);
+
+        const usersTabButton = sideNav.querySelector('[data-tab="users"]');
+        if (usersTabButton) usersTabButton.classList.remove("active");
+        usersPanel.classList.remove("active");
+
+        const operatorPanel = document.createElement("section");
+        operatorPanel.className = "tab-panel active";
+        operatorPanel.dataset.panel = "operator";
+        operatorPanel.innerHTML = `
+          <div class="grid">
+            <div class="card"><div class="k">Открытых обращений</div><div class="v warn" id="opUnresolvedCount">0</div></div>
+            <div class="card"><div class="k">Стекают за 7 дней</div><div class="v warn" id="opExpiring7">0</div></div>
+            <div class="card"><div class="k">Без подписки</div><div class="v" id="opNoSubs">0</div></div>
+            <div class="card"><div class="k">Подписок всего</div><div class="v" id="opSubsTotal">0</div></div>
+          </div>
+          <div class="action-panel">
+            <h2>Быстрые действия оператора</h2>
+            <div class="action-grid">
+              <input id="opUser" placeholder="ID или @username">
+              <textarea id="opMessage" placeholder="Текст для сообщения или Wizard"></textarea>
+            </div>
+            <div class="action-buttons">
+              <button class="action-btn" id="opUserStatus">Статус</button>
+              <button class="action-btn primary" id="opMail">Mail</button>
+              <button class="action-btn good" id="opWizardCard">Wizard карточка</button>
+              <button class="action-btn warn" id="opWizardText">Wizard текст</button>
+              <button class="action-btn" id="opPromo">Промо</button>
+              <button class="action-btn warn" id="opDeleteAccess">Снять доступ</button>
+            </div>
+            <div class="action-status" id="opStatus">Заполни ID и нужный текст, затем выбери действие.</div>
+          </div>
+          <div class="panel">
+            <h2>Горячие переходы</h2>
+            <div class="action-buttons">
+              <button class="action-btn" id="gotoUsers">Полная база пользователей</button>
+              <button class="action-btn" id="gotoAttention">Зона риска</button>
+              <button class="action-btn" id="gotoProcesses">Процессы бота</button>
+              <button class="action-btn" id="gotoUnresolved">Неразобранное</button>
+            </div>
+          </div>
+        `;
+        usersPanel.parentElement.insertBefore(operatorPanel, usersPanel);
+        operatorUserInput = operatorPanel.querySelector("#opUser");
+        operatorMessageInput = operatorPanel.querySelector("#opMessage");
+        operatorStatusBox = operatorPanel.querySelector("#opStatus");
+
+        const copyToMain = () => {{
+          actionUser.value = String(operatorUserInput.value || "").trim();
+          actionMessage.value = String(operatorMessageInput.value || "").trim();
+        }};
+        const run = (actionName, needUser, needMessage) => {{
+          copyToMain();
+          submitDashboardAction(actionName, needUser, needMessage);
+          if (operatorStatusBox) operatorStatusBox.textContent = actionStatus.textContent;
+        }};
+
+        operatorPanel.querySelector("#opUserStatus").addEventListener("click", () => run("user_status", true, false));
+        operatorPanel.querySelector("#opMail").addEventListener("click", () => run("mail", true, true));
+        operatorPanel.querySelector("#opWizardCard").addEventListener("click", () => run("wizard_card", true, false));
+        operatorPanel.querySelector("#opWizardText").addEventListener("click", () => run("wizard_text", false, true));
+        operatorPanel.querySelector("#opPromo").addEventListener("click", () => run("promo", true, false));
+        operatorPanel.querySelector("#opDeleteAccess").addEventListener("click", () => run("delete_access", true, false));
+
+        operatorPanel.querySelector("#gotoUsers").addEventListener("click", () => document.querySelector('[data-tab="users"]')?.click());
+        operatorPanel.querySelector("#gotoAttention").addEventListener("click", () => document.querySelector('[data-tab="attention"]')?.click());
+        operatorPanel.querySelector("#gotoProcesses").addEventListener("click", () => document.querySelector('[data-tab="processes"]')?.click());
+        operatorPanel.querySelector("#gotoUnresolved").addEventListener("click", () => document.querySelector('[data-tab="unresolved"]')?.click());
       }}
 
       function numericId(value) {{
@@ -9782,6 +9864,12 @@ def build_scan_dashboard_html(stats: dict) -> str:
         prevButton.disabled = currentPage <= 1;
         nextButton.disabled = currentPage >= totalPages;
         renderKpis(rows);
+        const opExpiring7 = document.getElementById("opExpiring7");
+        const opNoSubs = document.getElementById("opNoSubs");
+        const opSubsTotal = document.getElementById("opSubsTotal");
+        if (opExpiring7) opExpiring7.textContent = String(adminUsers.filter(row => row.status === "expiring_7").length);
+        if (opNoSubs) opNoSubs.textContent = String(adminUsers.filter(row => row.status === "no_subs").length);
+        if (opSubsTotal) opSubsTotal.textContent = String(adminUsers.reduce((acc, row) => acc + (Number(row.subscriptions || 0) || 0), 0));
         body.innerHTML = pageRows.map(row => `
           <tr data-user-id="${{escapeText(row.user_id)}}">
             <td>${{escapeText(row.user_id)}}</td>
@@ -9843,6 +9931,8 @@ def build_scan_dashboard_html(stats: dict) -> str:
 
       function renderUnresolved() {{
         unresolvedOpenCount.textContent = escapeText(adminOverview.unresolved_open_count || 0);
+        const opUnresolvedCount = document.getElementById("opUnresolvedCount");
+        if (opUnresolvedCount) opUnresolvedCount.textContent = String(adminOverview.unresolved_open_count || 0);
         overviewGeneratedAt.textContent = escapeText(adminOverview.generated_at || "-");
         const rows = Array.isArray(adminOverview.unresolved_rows) ? adminOverview.unresolved_rows : [];
         unresolvedBody.innerHTML = rows.map(row => `
@@ -9903,6 +9993,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
           job.result_text ? `Результат: ${{String(job.result_text).slice(0, 500)}}` : "",
         ].filter(Boolean);
         actionStatus.textContent = lines.join("\\n");
+        if (operatorStatusBox) operatorStatusBox.textContent = actionStatus.textContent;
       }}
 
       function stopJobPolling() {{
@@ -9947,6 +10038,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
           return;
         }}
         setActionBusy(true);
+        if (operatorStatusBox) operatorStatusBox.textContent = actionStatus.textContent;
         actionStatus.textContent = "Задача отправлена. Ожидаю ответ...";
         try {{
           const response = await fetch(`${{actionApiBase}}/action`, {{
@@ -10023,6 +10115,7 @@ def build_scan_dashboard_html(stats: dict) -> str:
       actionPauseScanButton.addEventListener("click", () => submitDashboardAction("pause_scan", false, false));
       actionStopMail2Button.addEventListener("click", () => submitDashboardAction("stop_mail2", false, false));
       fillDynamicFilters();
+      initOperatorMode();
       renderUsersEnhanced();
       renderAttention();
       renderSegments();
