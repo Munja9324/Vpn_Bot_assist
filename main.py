@@ -9138,11 +9138,24 @@ def build_scan_dashboard_html(stats: dict) -> str:
       background: rgba(11,16,32,.35);
     }}
     .legend {{ color: var(--muted); font-size: 12px; margin-top: 4px; }}
-    .admin-shell {{ display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: start; }}
-    .side-nav {{ position: sticky; top: 12px; display: grid; gap: 8px; }}
+    .admin-shell {{
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }}
+    .side-nav {{
+      position: sticky;
+      top: 12px;
+      display: grid;
+      gap: 8px;
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      padding-right: 2px;
+    }}
     .nav-btn, .filter-btn {{
       border: 1px solid var(--border);
-      background: rgba(255,255,255,.04);
+      background: #fff;
       color: var(--text);
       border-radius: 8px;
       padding: 10px 12px;
@@ -9153,15 +9166,21 @@ def build_scan_dashboard_html(stats: dict) -> str:
     .nav-btn.active, .filter-btn.active {{
       border-color: var(--accent);
       color: var(--accent);
-      background: rgba(86,212,255,.10);
+      background: rgba(0,113,227,.08);
     }}
     .tab-panel {{ display: none; }}
     .tab-panel.active {{ display: block; }}
-    .toolbar {{ display: grid; grid-template-columns: minmax(180px, 1fr) repeat(5, minmax(130px, 170px)); gap: 10px; margin: 10px 0 12px; }}
+    .toolbar {{
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) repeat(5, minmax(130px, 170px));
+      gap: 10px;
+      margin: 10px 0 12px;
+      align-items: stretch;
+    }}
     .toolbar input, .toolbar select {{
       width: 100%;
       border: 1px solid var(--border);
-      background: rgba(255,255,255,.05);
+      background: #fff;
       color: var(--text);
       border-radius: 8px;
       padding: 10px 12px;
@@ -9181,17 +9200,28 @@ def build_scan_dashboard_html(stats: dict) -> str:
     }}
     .table-scroll table {{ min-width: 860px; }}
     .admin-kpis {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }}
-    .admin-kpi {{ border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(255,255,255,.03); }}
+    .admin-kpi {{ border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: #fff; }}
     .admin-kpi b {{ display: block; font-size: 22px; line-height: 1.1; margin-top: 4px; }}
     .pager {{ display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; flex-wrap: wrap; }}
-    .pager-btn {{ border: 1px solid var(--border); background: rgba(255,255,255,.04); color: var(--text); border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit; }}
+    .pager-btn {{ border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit; }}
     .pager-btn[disabled] {{ opacity: .45; cursor: default; }}
-    .action-panel {{ border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255,255,255,.03); margin-bottom: 12px; }}
-    .action-grid {{ display: grid; grid-template-columns: minmax(160px, 220px) 1fr; gap: 10px; margin-bottom: 10px; }}
+    .action-panel {{
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+      margin-bottom: 12px;
+    }}
+    .action-grid {{
+      display: grid;
+      grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+      gap: 10px;
+      margin-bottom: 10px;
+    }}
     .action-grid input, .action-grid textarea {{
       width: 100%;
       border: 1px solid var(--border);
-      background: rgba(255,255,255,.05);
+      background: #fff;
       color: var(--text);
       border-radius: 8px;
       padding: 10px 12px;
@@ -9201,20 +9231,20 @@ def build_scan_dashboard_html(stats: dict) -> str:
     .action-buttons {{ display: flex; flex-wrap: wrap; gap: 8px; }}
     .action-btn {{
       border: 1px solid var(--border);
-      background: rgba(255,255,255,.05);
+      background: #fff;
       color: var(--text);
       border-radius: 8px;
       padding: 9px 12px;
       cursor: pointer;
       font: inherit;
     }}
-    .action-btn.primary {{ border-color: rgba(86,212,255,.65); background: rgba(86,212,255,.14); color: var(--accent); }}
-    .action-btn.good {{ border-color: rgba(52,211,153,.65); background: rgba(52,211,153,.14); color: var(--good); }}
-    .action-btn.warn {{ border-color: rgba(245,158,11,.65); background: rgba(245,158,11,.14); color: var(--warn); }}
+    .action-btn.primary {{ border-color: rgba(0,113,227,.45); background: rgba(0,113,227,.08); color: var(--accent); }}
+    .action-btn.good {{ border-color: rgba(29,157,98,.45); background: rgba(29,157,98,.08); color: var(--good); }}
+    .action-btn.warn {{ border-color: rgba(178,106,0,.45); background: rgba(178,106,0,.08); color: var(--warn); }}
     .action-btn[disabled] {{ opacity: .5; cursor: default; }}
     .action-status {{
       margin-top: 10px;
-      border: 1px dashed var(--border);
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px;
       color: var(--muted);
@@ -9225,7 +9255,17 @@ def build_scan_dashboard_html(stats: dict) -> str:
     .muted {{ color: var(--muted); }}
     @media (max-width: 980px) {{
       .admin-shell {{ grid-template-columns: 1fr; }}
-      .side-nav {{ position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .side-nav {{
+        position: static;
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        max-height: none;
+      }}
+      .side-nav .nav-btn {{
+        white-space: nowrap;
+        flex: 0 0 auto;
+      }}
       .toolbar {{ grid-template-columns: 1fr; }}
       .action-grid {{ grid-template-columns: 1fr; }}
     }}
