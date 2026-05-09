@@ -5726,7 +5726,7 @@ def fallback_dashboard_loader_html() -> str:
       const startedAt = performance.now();
       const tick = () => {
         const elapsed = Math.min(5, (performance.now() - startedAt) / 1000);
-        percent.textContent = `${Math.round((elapsed / 5) * 100).toString().padStart(3, "0")}%`;
+        percent.textContent = `${{Math.round((elapsed / 5) * 100).toString().padStart(3, "0")}}%`;
         requestAnimationFrame(tick);
       };
       tick();
@@ -6289,10 +6289,10 @@ def build_live_root_panel_html() -> str:
         const expiring = rows.filter(u => ["expiring_7","expiring_30"].includes(String(u.status || ""))).length;
         const expired = rows.filter(u => String(u.status || "") === "expired").length;
         miniKpis.innerHTML = `
-          <div class="mini-kpi">Всего<b>${esc(rows.length)}</b></div>
-          <div class="mini-kpi">Активные<b>${esc(active)}</b></div>
-          <div class="mini-kpi">На грани<b>${esc(expiring)}</b></div>
-          <div class="mini-kpi">Истекли<b>${esc(expired)}</b></div>
+          <div class="mini-kpi">Всего<b>${{esc(rows.length)}}</b></div>
+          <div class="mini-kpi">Активные<b>${{esc(active)}}</b></div>
+          <div class="mini-kpi">На грани<b>${{esc(expiring)}}</b></div>
+          <div class="mini-kpi">Истекли<b>${{esc(expired)}}</b></div>
         `;
       }}
     }}
@@ -6309,7 +6309,7 @@ def build_live_root_panel_html() -> str:
         String(u.registration_date || ""),
       ]);
       const all = [head, ...body];
-      const escCsv = (v) => `"${String(v).replace(/"/g, '""')}"`;
+      const escCsv = (v) => `"${{String(v).replace(/"/g, '""')}}"`;
       const csv = all.map((r) => r.map(escCsv).join(",")).join("\\n");
       const blob = new Blob([csv], {{ type: "text/csv;charset=utf-8;" }});
       const url = URL.createObjectURL(blob);
@@ -6357,7 +6357,7 @@ def build_live_root_panel_html() -> str:
       if (!eventLog) return;
       const ts = new Date().toLocaleTimeString();
       const line = document.createElement("div");
-      line.textContent = `[${ts}] ${text}`;
+      line.textContent = `[${{ts}}] ${{text}}`;
       eventLog.prepend(line);
       while (eventLog.childElementCount > 12) {{
         eventLog.removeChild(eventLog.lastChild);
