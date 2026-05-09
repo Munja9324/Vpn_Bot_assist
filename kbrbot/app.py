@@ -6756,6 +6756,24 @@ def admin_user_rows_json(records: list[dict]) -> str:
                     return candidate
         return ""
 
+    def split_locations(value: str) -> list[str]:
+        text = normalize_profile_text(value).strip()
+        if not text:
+            return []
+        parts = re.split(r"[,;|/]+", text)
+        cleaned: list[str] = []
+        for item in parts:
+            candidate = re.sub(r"\s+", " ", item).strip(" .")
+            if not candidate:
+                continue
+            if candidate.casefold() in {"локация", "локации", "location", "country", "server"}:
+                continue
+            cleaned.append(candidate)
+        if cleaned:
+            return cleaned
+        single = re.sub(r"\s+", " ", text).strip(" .")
+        return [single] if single else []
+
     for record in records:
         user_id = str(record.get("user_id") or "").strip()
         if not user_id:
@@ -6799,13 +6817,24 @@ def admin_user_rows_json(records: list[dict]) -> str:
             sub_copy["detail_text"] = normalize_profile_text(str(sub.get("detail_text") or ""))
             deduped_subscriptions.append(sub_copy)
         subscriptions = deduped_subscriptions
-        locations = sorted(
-            {
-                str(sub.get("location") or "").strip()
-                for sub in subscriptions
-                if str(sub.get("location") or "").strip()
-            }
-        )
+        locations_set: set[str] = set()
+        for sub in subscriptions:
+            loc_text = str(sub.get("location") or "").strip()
+            for loc_item in split_locations(loc_text):
+                locations_set.add(loc_item)
+
+            detail_text = normalize_profile_text(str(sub.get("detail_text") or ""))
+            for pattern in (
+                r"(?:локации|локация|страны|страна)\s*[:\-]\s*([^\n\r]{2,100})",
+                r"(?:locations?|countries?)\s*[:\-]\s*([^\n\r]{2,100})",
+            ):
+                match = re.search(pattern, detail_text, flags=re.IGNORECASE)
+                if not match:
+                    continue
+                for loc_item in split_locations(match.group(1)):
+                    locations_set.add(loc_item)
+
+        locations = sorted(locations_set)
         nearest_expiration: datetime | None = None
         for sub in subscriptions:
             expires_at = extract_expiration_date(str(sub.get("detail_text") or ""))
