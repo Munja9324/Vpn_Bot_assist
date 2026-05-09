@@ -5900,9 +5900,12 @@ def build_live_root_panel_html() -> str:
       --primary:#0071e3; --good:#34c759; --warn:#ff9f0a;
     }}
     * {{ box-sizing:border-box; }}
+    html {{ scroll-behavior: smooth; }}
     body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }}
+    .top-tabs {{ position: sticky; top: 0; z-index: 20; background: rgba(245,245,247,.92); backdrop-filter: blur(8px); border-bottom: 2px solid var(--border); }}
     .wrap {{ display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:12px; min-height:100vh; }}
-    .panel {{ background:var(--panel); border:2px solid var(--border); border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.03); }}
+    .panel {{ background:var(--panel); border:2px solid var(--border); border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.03); transition: box-shadow .18s ease, border-color .18s ease; }}
+    .panel:has(.item.active) {{ border-color: rgba(0,113,227,.55); box-shadow:0 1px 2px rgba(0,0,0,.04), 0 10px 24px rgba(0,113,227,.10); }}
     .panel + .panel {{ margin-top: 10px; }}
     h1 {{ margin:0 0 10px; font-size:17px; font-weight:600; letter-spacing:0; }}
     h1 {{
@@ -5930,7 +5933,12 @@ def build_live_root_panel_html() -> str:
     .item {{ padding:10px; border-bottom:2px solid #e3e3e8; cursor:pointer; transition:background .16s ease; }}
     .item:last-child {{ border-bottom:none; }}
     .item:hover {{ background:#f7f7f9; }}
-    .item.active {{ background:#eef4ff; }}
+    .item.active {{ background:#eef4ff; border-left:4px solid var(--primary); }}
+    .item .chips {{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }}
+    .chip {{ border:2px solid var(--border); border-radius:999px; padding:2px 7px; font-size:11px; font-weight:600; background:#fff; color:#555; }}
+    .chip.good {{ border-color: rgba(52,199,89,.6); color:#127a3a; }}
+    .chip.warn {{ border-color: rgba(255,159,10,.65); color:#9a5a00; }}
+    .chip.bad {{ border-color: rgba(255,59,48,.55); color:#a12822; }}
     .muted {{ color:var(--muted); font-size:12px; }}
     .grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
     .card {{ border:2px solid var(--border); border-radius:10px; padding:10px; background:#fbfbfd; }}
@@ -5943,6 +5951,84 @@ def build_live_root_panel_html() -> str:
     button:hover {{ box-shadow:0 2px 10px rgba(0,0,0,.06); }}
     button:active {{ transform:translateY(1px); }}
     .status {{ margin-top:10px; white-space:pre-wrap; font-size:13px; color:var(--muted); border:2px solid var(--border); border-radius:10px; padding:10px; background:#fafafa; }}
+    .section-tag {{
+      display:inline-block;
+      margin:0 0 8px;
+      padding:4px 8px;
+      border:2px solid var(--border);
+      border-radius:999px;
+      font-size:11px;
+      font-weight:700;
+      color:#4f4f55;
+      background:#fff;
+      text-transform:uppercase;
+    }}
+    .quick-row {{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }}
+    .quick-btn {{ width:auto; padding:8px 10px; font-size:12px; font-weight:700; }}
+    .event-log {{
+      margin-top:8px;
+      border:2px solid var(--border);
+      border-radius:10px;
+      background:#fff;
+      padding:8px;
+      max-height:120px;
+      overflow:auto;
+      font-size:12px;
+      color:#4a4a50;
+      line-height:1.4;
+    }}
+    .risk-preview {{
+      margin-top:8px;
+      border:2px solid var(--border);
+      border-radius:10px;
+      background:#fff;
+      padding:8px;
+      font-size:12px;
+      color:#45454b;
+    }}
+    .risk-preview b {{ color:#9a5a00; }}
+    .quick-dock {{
+      position: fixed;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      z-index: 40;
+      display: none;
+      gap: 8px;
+      padding: 8px;
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255,255,255,.96);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 10px 26px rgba(0,0,0,.12);
+    }}
+    .quick-dock button {{ min-height: 42px; font-weight: 700; }}
+    .selection-hint {{
+      margin: 8px 12px 0;
+      padding: 8px 10px;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      background:#fff;
+      color:#3a3a3f;
+      font-size:12px;
+      font-weight:600;
+    }}
+    .mini-kpis {{
+      margin: 8px 12px 0;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 8px;
+    }}
+    .mini-kpi {{
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      background:#fff;
+      padding:8px;
+      text-align:center;
+      font-size:11px;
+      color:#63636a;
+    }}
+    .mini-kpi b {{ display:block; margin-top:4px; font-size:16px; color:#1d1d1f; }}
     #tabUsers, #tabServices, #tabState, #tabConsole {{
       width: auto;
       min-width: 140px;
@@ -5960,20 +6046,36 @@ def build_live_root_panel_html() -> str:
       .wrap {{ grid-template-columns:1fr; }}
       .actions {{ grid-template-columns:1fr; }}
       .list {{ max-height: 40vh; }}
+      .top-tabs {{ padding-top: 2px; }}
+      #tabUsers, #tabServices, #tabState, #tabConsole {{ min-height: 44px; font-size: 14px; }}
+      .btn-primary, .btn-good, .btn-warn {{ min-height: 44px; font-weight: 700; }}
     }}
     @media (max-width: 640px) {{
+      .mini-kpis {{ grid-template-columns: 1fr 1fr; }}
       .list {{ max-height: 32vh; }}
+      .actions {{
+        position: sticky;
+        bottom: 0;
+        background: var(--panel);
+        padding-top: 8px;
+        border-top: 2px solid var(--border);
+      }}
+      .status {{ margin-bottom: 72px; }}
+      .quick-dock {{ display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); }}
     }}
   </style>
 </head>
 <body>
-  <div style="display:flex;gap:8px;padding:12px 12px 0">
+  <div class="top-tabs" style="display:flex;gap:8px;padding:12px 12px 10px">
     <button id="tabUsers" type="button">Пользователи</button>
     <button id="tabServices" type="button">Сервисы на сервере</button>
     <button id="tabState" type="button">Состояние служб</button>
   </div>
+  <div id="selectionHint" class="selection-hint">Выберите пользователя слева, чтобы открыть детальную карточку и быстрые действия.</div>
+  <div id="miniKpis" class="mini-kpis"></div>
   <div class="wrap" id="viewUsers">
     <section class="panel">
+      <div class="section-tag">Users</div>
       <h1>Пользователи</h1>
       <input id="search" placeholder="Поиск: ID или @username">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
@@ -5992,10 +6094,21 @@ def build_live_root_panel_html() -> str:
           <option value="days_asc">Дней до конца ↑</option>
         </select>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <button id="btnExportCsv" type="button">Экспорт CSV</button>
+        <button id="btnResetFilters" type="button">Сброс фильтров</button>
+      </div>
+      <div class="quick-row">
+        <button id="qRisk" class="quick-btn" type="button">Риск</button>
+        <button id="qNoSubs" class="quick-btn" type="button">Без подписки</button>
+        <button id="qActive" class="quick-btn" type="button">Активные</button>
+      </div>
       <div class="grid" style="margin-top:8px" id="userKpis"></div>
+      <div id="riskPreview" class="risk-preview"></div>
       <div class="list" id="list"></div>
     </section>
     <section class="panel">
+      <div class="section-tag">Profile</div>
       <h1>Карточка пользователя</h1>
       <div class="grid" id="meta"></div>
       <div class="panel" style="margin-top:10px;padding:10px">
@@ -6012,11 +6125,23 @@ def build_live_root_panel_html() -> str:
           <button class="btn-primary" id="btnMail">Написать Mail</button>
           <button class="btn-warn" id="btnPromo">Подготовить Promo</button>
         </div>
+        <div class="actions" style="margin-top:8px">
+          <button id="btnCopyId" type="button">Копировать ID</button>
+          <button id="btnCopyUsername" type="button">Копировать @username</button>
+          <button id="btnFillTemplate" type="button">Шаблон ответа</button>
+        </div>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn-good" id="btnWizardFromTemplate" type="button">Wizard из шаблона</button>
+          <button id="btnClearText" type="button">Очистить текст</button>
+          <button id="btnToTop" type="button">Наверх</button>
+        </div>
         <div class="status" id="status">Выбери пользователя слева.</div>
+        <div id="eventLog" class="event-log"></div>
       </div>
     </section>
   </div>
   <div class="panel" id="viewServices" style="display:none;margin:12px;">
+    <div class="section-tag">Services</div>
     <h1>Сервисы на сервере</h1>
     <div class="muted" id="servicesUpdatedAt">-</div>
     <table style="width:100%;margin-top:8px;border-collapse:collapse">
@@ -6025,12 +6150,18 @@ def build_live_root_panel_html() -> str:
     </table>
   </div>
   <div class="panel" id="viewState" style="display:none;margin:12px;">
+    <div class="section-tag">State</div>
     <h1>Состояние служб</h1>
     <div class="muted" id="stateUpdatedAt">-</div>
     <table style="width:100%;margin-top:8px;border-collapse:collapse">
       <thead><tr><th style="text-align:left">Параметр</th><th style="text-align:left">Значение</th></tr></thead>
       <tbody id="stateBody"></tbody>
     </table>
+  </div>
+  <div class="quick-dock" id="quickDock">
+    <button id="dockRisk" type="button">Риск</button>
+    <button id="dockActive" type="button">Активные</button>
+    <button id="dockNoSubs" type="button">Без подписки</button>
   </div>
   <script>
     const users = {users_json};
@@ -6039,9 +6170,13 @@ def build_live_root_panel_html() -> str:
     const filterStatus = document.getElementById("filterStatus");
     const sortUsers = document.getElementById("sortUsers");
     const userKpis = document.getElementById("userKpis");
+    const riskPreview = document.getElementById("riskPreview");
     const meta = document.getElementById("meta");
     const message = document.getElementById("message");
     const statusBox = document.getElementById("status");
+    const selectionHint = document.getElementById("selectionHint");
+    const miniKpis = document.getElementById("miniKpis");
+    const eventLog = document.getElementById("eventLog");
     let selected = null;
     let activeJobId = "";
     let pollTimer = null;
@@ -6136,6 +6271,95 @@ def build_live_root_panel_html() -> str:
         <div class="card"><div class="muted">Зона риска</div><b>${{esc(risk)}}</b></div>
         <div class="card"><div class="muted">Без подписки</div><b>${{esc(noSubs)}}</b></div>
       `;
+      if (riskPreview) {{
+        const risky = rows
+          .filter(u => ["expired", "expiring_7", "expiring_30"].includes(String(u.status || "")))
+          .sort((a,b) => (Number(a.days_left ?? 9999) - Number(b.days_left ?? 9999)))
+          .slice(0, 3);
+        if (!risky.length) {{
+          riskPreview.innerHTML = "<b>ТОП риск:</b> сейчас критичных пользователей нет";
+        }} else {{
+          riskPreview.innerHTML = "<b>ТОП риск:</b> " + risky.map(u => `ID ${esc(u.user_id)} (${esc(u.days_left ?? "-")} дн.)`).join(" | ");
+        }}
+      }}
+      if (miniKpis) {{
+        const active = rows.filter(u => String(u.status || "") === "active").length;
+        const expiring = rows.filter(u => ["expiring_7","expiring_30"].includes(String(u.status || ""))).length;
+        const expired = rows.filter(u => String(u.status || "") === "expired").length;
+        miniKpis.innerHTML = `
+          <div class="mini-kpi">Всего<b>${esc(rows.length)}</b></div>
+          <div class="mini-kpi">Активные<b>${esc(active)}</b></div>
+          <div class="mini-kpi">На грани<b>${esc(expiring)}</b></div>
+          <div class="mini-kpi">Истекли<b>${esc(expired)}</b></div>
+        `;
+      }}
+    }}
+
+    function downloadFilteredCsv() {{
+      const rows = filteredUsers();
+      const head = ["user_id","username","subscriptions","status","days_left","registration_date"];
+      const body = rows.map((u) => [
+        String(u.user_id || ""),
+        String(u.username || ""),
+        String(u.subscriptions ?? ""),
+        String(u.status_label || u.status || ""),
+        String(u.days_left ?? ""),
+        String(u.registration_date || ""),
+      ]);
+      const all = [head, ...body];
+      const escCsv = (v) => `"${String(v).replace(/"/g, '""')}"`;
+      const csv = all.map((r) => r.map(escCsv).join(",")).join("\\n");
+      const blob = new Blob([csv], {{ type: "text/csv;charset=utf-8;" }});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `users-${{new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      statusBox.textContent = `Экспортировано пользователей: ${{rows.length}}`;
+    }}
+
+    function copySelected(kind) {{
+      if (!selected) {{
+        statusBox.textContent = "Сначала выбери пользователя.";
+        return;
+      }}
+      let value = "";
+      if (kind === "id") value = String(selected.user_id || "");
+      if (kind === "username") value = selected.username ? `@${{selected.username}}` : "";
+      if (!value) {{
+        statusBox.textContent = "Данные для копирования отсутствуют.";
+        return;
+      }}
+      navigator.clipboard.writeText(value).then(() => {{
+        statusBox.textContent = `Скопировано: ${{value}}`;
+      }}).catch(() => {{
+        statusBox.textContent = "Не удалось скопировать в буфер.";
+      }});
+    }}
+
+    function fillSupportTemplate() {{
+      if (!selected) {{
+        statusBox.textContent = "Сначала выбери пользователя.";
+        return;
+      }}
+      const uname = selected.username ? `@${{selected.username}}` : "-";
+      message.value = `Здравствуйте!\\nПроверяю обращение пользователя ID: ${{selected.user_id}} (${{uname}}).\\nОпишите, пожалуйста, что именно не работает и приложите скрин ошибки.`;
+      statusBox.textContent = "Шаблон заполнен.";
+      pushEvent("Шаблон ответа заполнен");
+    }}
+
+    function pushEvent(text) {{
+      if (!eventLog) return;
+      const ts = new Date().toLocaleTimeString();
+      const line = document.createElement("div");
+      line.textContent = `[${ts}] ${text}`;
+      eventLog.prepend(line);
+      while (eventLog.childElementCount > 12) {{
+        eventLog.removeChild(eventLog.lastChild);
+      }}
     }}
 
     function renderList() {{
@@ -6334,6 +6558,28 @@ def build_live_root_panel_html() -> str:
       if (name === "state") loadState();
     }}
 
+    // Mobile-friendly renderer with clear chips for subscription/status
+    renderList = function() {{
+      const rows = filteredUsers();
+      renderKpis(rows);
+      const statusChipClass = (s) => {{
+        const v = String(s || "");
+        if (v === "active") return "good";
+        if (v === "expired") return "bad";
+        if (v === "expiring_7" || v === "expiring_30") return "warn";
+        return "";
+      }};
+      list.innerHTML = rows.map(u => `
+        <div class="item ${{selected && String(selected.user_id) === String(u.user_id) ? "active" : ""}}" data-id="${{esc(u.user_id)}}">
+          <div>${{esc(userLabel(u))}}</div>
+          <div class="chips">
+            <span class="chip">Подписок: ${{esc(u.subscriptions)}}</span>
+            <span class="chip ${{statusChipClass(u.status)}}">${{esc(u.status_label)}}</span>
+          </div>
+        </div>
+      `).join("") || `<div class="item"><div class="muted">Ничего не найдено</div></div>`;
+    }}
+
     list.addEventListener("click", (e) => {{
       const row = e.target.closest(".item[data-id]");
       if (!row) return;
@@ -6342,6 +6588,14 @@ def build_live_root_panel_html() -> str:
       renderList();
       renderMeta();
       statusBox.textContent = selected ? `Выбран пользователь ${{selected.user_id}}.` : "Пользователь не выбран.";
+    }});
+    list.addEventListener("click", () => {{
+      if (!selectionHint) return;
+      if (selected) {{
+        selectionHint.textContent = `Выбран пользователь: ID ${{selected.user_id}}${{selected.username ? " | @" + selected.username : ""}}`;
+      }} else {{
+        selectionHint.textContent = "Выберите пользователя слева, чтобы открыть детальную карточку и быстрые действия.";
+      }}
     }});
     search.addEventListener("input", renderList);
     filterStatus.addEventListener("change", renderList);
@@ -6353,9 +6607,62 @@ def build_live_root_panel_html() -> str:
     document.getElementById("scPay").addEventListener("click", () => applyScenario("pay"));
     document.getElementById("scIos").addEventListener("click", () => applyScenario("ios"));
     document.getElementById("scAndroid").addEventListener("click", () => applyScenario("android"));
+    document.getElementById("btnExportCsv").addEventListener("click", downloadFilteredCsv);
+    document.getElementById("btnResetFilters").addEventListener("click", () => {{
+      search.value = "";
+      filterStatus.value = "all";
+      sortUsers.value = "id_asc";
+      renderList();
+      statusBox.textContent = "Фильтры сброшены.";
+      pushEvent("Фильтры сброшены");
+    }});
+    document.getElementById("qRisk").addEventListener("click", () => {{
+      filterStatus.value = "expiring_7";
+      renderList();
+      pushEvent("Применен фильтр: риск");
+    }});
+    document.getElementById("qNoSubs").addEventListener("click", () => {{
+      filterStatus.value = "no_subs";
+      renderList();
+      pushEvent("Применен фильтр: без подписки");
+    }});
+    document.getElementById("qActive").addEventListener("click", () => {{
+      filterStatus.value = "active";
+      renderList();
+      pushEvent("Применен фильтр: активные");
+    }});
+    const dockRisk = document.getElementById("dockRisk");
+    const dockActive = document.getElementById("dockActive");
+    const dockNoSubs = document.getElementById("dockNoSubs");
+    if (dockRisk) dockRisk.addEventListener("click", () => document.getElementById("qRisk").click());
+    if (dockActive) dockActive.addEventListener("click", () => document.getElementById("qActive").click());
+    if (dockNoSubs) dockNoSubs.addEventListener("click", () => document.getElementById("qNoSubs").click());
+    document.getElementById("btnCopyId").addEventListener("click", () => copySelected("id"));
+    document.getElementById("btnCopyUsername").addEventListener("click", () => copySelected("username"));
+    document.getElementById("btnFillTemplate").addEventListener("click", fillSupportTemplate);
+    document.getElementById("btnClearText").addEventListener("click", () => {{
+      message.value = "";
+      pushEvent("Текст очищен");
+    }});
+    document.getElementById("btnToTop").addEventListener("click", () => {{
+      window.scrollTo({{ top: 0, behavior: "smooth" }});
+      pushEvent("Прокрутка вверх");
+    }});
+    document.getElementById("btnWizardFromTemplate").addEventListener("click", async () => {{
+      if (!String(message.value || "").trim()) fillSupportTemplate();
+      await submit("wizard_card", false);
+      pushEvent("Отправка в Wizard из шаблона");
+    }});
     document.getElementById("tabUsers").addEventListener("click", () => switchTab("users"));
     document.getElementById("tabServices").addEventListener("click", () => switchTab("services"));
     document.getElementById("tabState").addEventListener("click", () => switchTab("state"));
+    if (selectionHint) {{
+      selectionHint.addEventListener("click", () => {{
+        sortUsers.value = "days_asc";
+        renderList();
+        pushEvent("Умная сортировка по риску");
+      }});
+    }}
     setupConsoleTab();
     renderList();
     renderMeta();
@@ -6591,7 +6898,8 @@ def build_dashboard_operator_request(
 
 
 async def dashboard_execute_job(job_id: str) -> None:
-    global active_mail2_cancel_event
+    global active_mail2_cancel_event, active_scan_cancel_event, active_scan_owner_id
+    global active_scan_reset_requested, active_scan_action_delay_seconds, active_scan_base_delay_seconds
 
     job = dashboard_get_job(job_id)
     if not job:
@@ -6746,6 +7054,88 @@ async def dashboard_execute_job(job_id: str) -> None:
                 status="done",
                 resolved_user_id=resolved_user_id,
                 result_text=final_text[:1200],
+                error_text="",
+            )
+            return
+
+        if action in {"scan_new", "scan_continue"}:
+            if active_scan_cancel_event and not active_scan_cancel_event.is_set():
+                raise ValueError("Scan already running. Stop it first or wait for completion.")
+            if action == "scan_new":
+                clear_scan_checkpoint()
+                reset_scan_database()
+
+            active_scan_cancel_event = asyncio.Event()
+            active_scan_owner_id = 0
+            active_scan_reset_requested = False
+            active_scan_base_delay_seconds = max(
+                0.08,
+                min(settings.scan_action_delay_seconds, settings.scan_turbo_delay_seconds),
+            )
+            active_scan_action_delay_seconds = active_scan_base_delay_seconds
+            try:
+                result_text = await scan_all_users_in_admin_bot(
+                    progress_callback=None,
+                    progress_interval_seconds=max(0.25, env_float("SCAN_PROGRESS_INTERVAL_SECONDS", 0.5)),
+                    cancel_event=active_scan_cancel_event,
+                )
+            finally:
+                active_scan_cancel_event = None
+                active_scan_owner_id = None
+                active_scan_reset_requested = False
+                active_scan_action_delay_seconds = settings.scan_action_delay_seconds
+                active_scan_base_delay_seconds = settings.scan_action_delay_seconds
+            dashboard_update_job(
+                job_id,
+                status="done",
+                resolved_user_id="",
+                result_text=result_text[:1200],
+                error_text="",
+            )
+            return
+
+        if action == "scan_results":
+            result_text = build_scan_results_text()
+            dashboard_update_job(
+                job_id,
+                status="done",
+                resolved_user_id="",
+                result_text=result_text[:1200],
+                error_text="",
+            )
+            return
+
+        if action == "scan_reset":
+            if active_scan_cancel_event and not active_scan_cancel_event.is_set():
+                active_scan_reset_requested = True
+                active_scan_cancel_event.set()
+                clear_scan_checkpoint()
+                reset_scan_database()
+                result_text = "Scan reset requested. Active scan is stopping, checkpoint and SQL data are cleared."
+            else:
+                clear_scan_checkpoint()
+                reset_scan_database()
+                result_text = "Scan checkpoint and SQL data are cleared."
+            dashboard_update_job(
+                job_id,
+                status="done",
+                resolved_user_id="",
+                result_text=result_text,
+                error_text="",
+            )
+            return
+
+        if action == "scan_pause":
+            if not active_scan_cancel_event or active_scan_cancel_event.is_set():
+                result_text = "Scan is not active."
+            else:
+                active_scan_cancel_event.set()
+                result_text = "Scan pause requested."
+            dashboard_update_job(
+                job_id,
+                status="done",
+                resolved_user_id="",
+                result_text=result_text,
                 error_text="",
             )
             return
@@ -6982,6 +7372,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 "delete_access",
                 "wizard_card",
                 "wizard_text",
+                "scan_new",
+                "scan_continue",
+                "scan_results",
+                "scan_reset",
+                "scan_pause",
                 "pause_scan",
                 "stop_mail2",
             }:
