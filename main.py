@@ -7090,7 +7090,7 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
                     subscriptions_count,
                     raw_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -9224,6 +9224,24 @@ def build_scan_dashboard_html(stats: dict) -> str:
       .side-nav {{ position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .toolbar {{ grid-template-columns: 1fr; }}
       .action-grid {{ grid-template-columns: 1fr; }}
+    }}
+    @media (max-width: 768px) {{
+      .wrap {{ padding: 16px 10px 24px; }}
+      .header {{ gap: 10px; }}
+      .logo, .logo-badge {{ width: 46px; height: 46px; min-width: 46px; }}
+      h1 {{ font-size: 24px; margin-bottom: 4px; }}
+      .sub {{ font-size: 12px; margin-bottom: 12px; }}
+      .grid {{ grid-template-columns: 1fr; gap: 10px; }}
+      .card {{ padding: 12px; min-height: 0; }}
+      .v {{ font-size: 24px; }}
+      .panel {{ padding: 12px; margin-top: 10px; }}
+      .cols {{ grid-template-columns: 1fr; gap: 10px; }}
+      th, td {{ padding: 7px 8px; font-size: 13px; }}
+      .side-nav {{ grid-template-columns: 1fr; }}
+      .nav-btn, .filter-btn, .action-btn, .pager-btn {{ min-height: 40px; }}
+      .admin-kpis {{ grid-template-columns: 1fr 1fr; }}
+      .admin-kpi b {{ font-size: 20px; }}
+      .table-scroll table {{ min-width: 620px; }}
     }}
     code {{
       background: #101735;
