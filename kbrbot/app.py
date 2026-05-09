@@ -354,7 +354,7 @@ def load_settings() -> Settings:
         or "gpt-4o-mini-transcribe",
         openai_voice_language=os.getenv("OPENAI_VOICE_LANGUAGE", "ru").strip() or "ru",
         openai_voice_max_bytes=max(512_000, env_int("OPENAI_VOICE_MAX_BYTES", 25_000_000)),
-        smart_controller_enabled=env_bool("SMART_CONTROLLER_ENABLED", True),
+        smart_controller_enabled=env_bool("SMART_CONTROLLER_ENABLED", False),
         admin_bot_username=os.getenv("ADMIN_BOT_USERNAME", "vpn_kbr_bot"),
         admin_command=os.getenv("ADMIN_COMMAND", "/admin"),
         users_button_text=env_text("USERS_BUTTON_TEXT", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438"),
@@ -2141,17 +2141,7 @@ def parse_mail2_command(text: str) -> str | None:
 
 
 def parse_gpt_command(text: str) -> GPTCommand | None:
-    match = re.match(
-        rf"^\s*/?(?:{command_alias_pattern('gpt', 'chatgpt', 'ai', 'openai', 'РёРё', 'С‡РіРїС‚')})(?:\s+([\s\S]+))?\s*$",
-        text or "",
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return None
-    prompt = (match.group(1) or "").strip()
-    if prompt.casefold() in {"reset", "clear", "new", "СЃР±СЂРѕСЃ", "РѕС‡РёСЃС‚РёС‚СЊ", "РЅРѕРІС‹Р№"}:
-        return GPTCommand(action="reset", prompt="")
-    return GPTCommand(action="ask", prompt=prompt)
+    return None
 
 
 def extract_openai_response_text(response_data: dict) -> str:
@@ -2533,6 +2523,43 @@ PROBLEM_REPORT_KEYWORDS = (
     "РєР»СЋС‡",
     "РїРѕРґРїРёСЃРє",
     "vpn",
+    "впн",
+    "не работает впн",
+    "vpn не работает",
+    "отвал",
+    "отвалился",
+    "не грузит",
+    "не открывает",
+    "не подключается",
+    "подключение не удалось",
+    "connection failed",
+    "timed out",
+    "timeout",
+    "таймаут",
+    "ошибка сети",
+    "сеть недоступна",
+    "нет доступа",
+    "не пускает",
+    "не получается войти",
+    "пропал интернет",
+    "не проходит",
+    "не активируется",
+    "невалидный ключ",
+    "invalid key",
+    "ключ не подходит",
+    "ключ не работает",
+    "конфиг не работает",
+    "не видит подписку",
+    "подписка не активна",
+    "подписка истекла",
+    "списали деньги",
+    "деньги списали",
+    "оплата не прошла",
+    "платеж не прошел",
+    "платеж не прошёл",
+    "чек есть",
+    "нужна помощь",
+    "помогите",
 )
 
 SUPPORT_KEY_ISSUE_KEYWORDS = (
@@ -2601,6 +2628,17 @@ NON_REQUESTER_GREETING_KEYWORDS = (
     "СЃР°Р»Р°Рј",
     "hello",
     "hi",
+    "здравствуйте",
+    "доброе утро",
+    "доброй ночи",
+    "ку",
+    "дарова",
+    "салам алейкум",
+    "здарова",
+    "хай",
+    "приветик",
+    "yo",
+    "hey",
 )
 
 NON_REQUESTER_THANKS_KEYWORDS = (
@@ -2608,6 +2646,12 @@ NON_REQUESTER_THANKS_KEYWORDS = (
     "Р±Р»Р°РіРѕРґР°СЂСЋ",
     "thanks",
     "thx",
+    "благодарен",
+    "спс",
+    "спасибо большое",
+    "от души",
+    "огромное спасибо",
+    "мерси",
 )
 
 NON_REQUESTER_VPN_SETUP_KEYWORDS = (
@@ -2624,6 +2668,27 @@ NON_REQUESTER_VPN_SETUP_KEYWORDS = (
     "РїРѕРґРєР»СЋС‡РµРЅРёРµ vpn",
     "РїРѕРґРєР»СЋС‡РµРЅРёРµ РІРїРЅ",
     "РіРґРµ РёРЅСЃС‚СЂСѓРєС†РёСЏ",
+    "как подключить",
+    "как настроить",
+    "как включить",
+    "как пользоваться vpn",
+    "как запустить vpn",
+    "как зайти через vpn",
+    "настройка впн",
+    "настройка vpn",
+    "помощь с vpn",
+    "инструкция по vpn",
+    "мануал",
+    "гайд",
+    "guide",
+    "setup vpn",
+    "vpn setup",
+    "как добавить ключ",
+    "куда вставить ключ",
+    "как импортировать ключ",
+    "какое приложение",
+    "какой клиент",
+    "где скачать",
 )
 
 NON_REQUESTER_PROFILE_ID_HELP_KEYWORDS = (
@@ -2636,6 +2701,19 @@ NON_REQUESTER_PROFILE_ID_HELP_KEYWORDS = (
     "РјРѕР№ id",
     "id РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
     "id РІ РїСЂРѕС„РёР»Рµ",
+    "где id",
+    "мой айди",
+    "мой id",
+    "как узнать айди",
+    "как узнать id",
+    "как найти айди",
+    "нужен айди",
+    "покажи id",
+    "покажи айди",
+    "id где смотреть",
+    "id в боте",
+    "telegram id или bot id",
+    "мой номер пользователя",
 )
 
 
@@ -2725,7 +2803,7 @@ def detect_non_requester_intent(text: str) -> str:
         return "greeting"
     if words_count <= 4 and any(keyword in cleaned for keyword in NON_REQUESTER_THANKS_KEYWORDS):
         return "thanks"
-    return "assistant_chat"
+    return "unknown"
 
 
 def support_intake_message() -> str:
@@ -3491,6 +3569,15 @@ async def handle_support_issue_flow(
 
 
 async def handle_non_requester_voice_message(event, sender, sender_id: int, incoming_text: str) -> None:
+    await safe_event_reply(
+        event,
+        assistant_compact_reply(
+            "Голосовые команды отключены.",
+            "Опишите вопрос текстом, я передам его в поддержку VPN_KBR.",
+        ),
+    )
+    return
+
     status_message = await safe_event_reply(
         event,
         support_voice_processing_message(),
@@ -3598,18 +3685,7 @@ async def handle_non_requester_text_message(event, sender, sender_id: int, incom
         await safe_event_reply(event, non_requester_restricted_action_message())
         return
 
-    status_message = await safe_event_reply(
-        event,
-        support_processing_message(),
-    )
-    await handle_gpt_prompt(
-        event,
-        sender_id,
-        incoming_text,
-        status_message=status_message,
-        compact_status=True,
-        reveal_unavailable=False,
-    )
+    await safe_event_reply(event, support_operator_contact_text())
 
 
 async def handle_non_requester_message(event, sender, sender_id: int, incoming_text: str) -> bool:
@@ -13990,6 +14066,15 @@ async def handle_gpt_prompt(
     compact_status: bool = False,
     reveal_unavailable: bool = True,
 ) -> None:
+    await safe_event_reply(
+        event,
+        assistant_compact_reply(
+            "Функция KBR_GPT отключена.",
+            "Используйте команды бота и инструменты поддержки.",
+        ),
+    )
+    return
+
     log_action_event(
         "gpt_request_start",
         sender_id=sender_id,
