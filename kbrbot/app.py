@@ -5932,13 +5932,32 @@ def build_live_root_panel_html() -> str:
       border-color: rgba(0,113,227,.5);
       box-shadow: 0 0 0 3px rgba(0,113,227,.12);
     }}
+    .search-wrap {{
+      margin-top: 8px;
+      padding: 10px;
+      border: 2px solid rgba(0,113,227,.45);
+      border-radius: 12px;
+      background: #f7faff;
+      box-shadow: 0 6px 18px rgba(0,113,227,.12);
+    }}
+    .search-label {{
+      font-size: 12px;
+      font-weight: 700;
+      color: #0a5bc4;
+      margin-bottom: 6px;
+    }}
     #search {{
-      border-color: rgba(0,113,227,.30);
+      border: 2px solid #9fc2f4;
       background: #fff;
       box-shadow: inset 0 0 0 1px rgba(0,113,227,.06);
+      font-weight: 600;
+    }}
+    #search:focus {{
+      border-color: #0071e3;
+      box-shadow: 0 0 0 3px rgba(0,113,227,.14);
     }}
     #search::placeholder {{
-      color: #8a8a90;
+      color: #6d7b90;
     }}
     textarea {{ min-height:88px; resize:vertical; }}
     .list {{ margin-top:10px; max-height:52vh; overflow:auto; border:2px solid var(--border); border-radius:10px; background:#fff; }}
@@ -6065,6 +6084,11 @@ def build_live_root_panel_html() -> str:
     @media (max-width: 640px) {{
       .mini-kpis {{ grid-template-columns: 1fr 1fr; }}
       .list {{ max-height: 32vh; }}
+      .search-wrap {{
+        position: sticky;
+        top: 0;
+        z-index: 4;
+      }}
       .actions {{
         position: sticky;
         bottom: 0;
@@ -6116,7 +6140,10 @@ def build_live_root_panel_html() -> str:
       </div>
       <div class="grid" style="margin-top:8px" id="userKpis"></div>
       <div id="riskPreview" class="risk-preview"></div>
-      <input id="search" placeholder="РџРѕРёСЃРє: ID РёР»Рё @username" style="margin-top:8px">
+      <div class="search-wrap">
+        <div class="search-label">Поиск пользователя</div>
+        <input id="search" placeholder="Введите ID или @username">
+      </div>
       <div class="list" id="list"></div>
     </section>
     <section class="panel">
@@ -6735,13 +6762,17 @@ def admin_user_rows_json(records: list[dict]) -> str:
         return f"{value:.2f} в‚Ѕ"
 
     def derive_location(sub: dict) -> str:
+        def is_location_id_like(value: str) -> bool:
+            token = normalize_profile_text(value).strip()
+            return bool(token) and bool(re.fullmatch(r"\d{1,8}", token))
+
         raw_location = normalize_profile_text(str(sub.get("location") or "")).strip()
-        if raw_location and raw_location.casefold() not in {"-", "без локации", "unknown"}:
+        if raw_location and raw_location.casefold() not in {"-", "без локации", "unknown"} and not is_location_id_like(raw_location):
             return raw_location
 
         button_text = normalize_profile_text(str(sub.get("button_text") or "")).strip()
         button_loc = extract_location_from_subscription_button(button_text).strip()
-        if button_loc and button_loc.casefold() not in {"-", "без локации", "unknown"}:
+        if button_loc and button_loc.casefold() not in {"-", "без локации", "unknown"} and not is_location_id_like(button_loc):
             return button_loc
 
         detail_text = normalize_profile_text(str(sub.get("detail_text") or ""))
@@ -6752,7 +6783,7 @@ def admin_user_rows_json(records: list[dict]) -> str:
             match = re.search(pattern, detail_text, flags=re.IGNORECASE)
             if match:
                 candidate = normalize_profile_text(match.group(1)).strip(" .")
-                if candidate and candidate.casefold() not in {"-", "без локации", "unknown"}:
+                if candidate and candidate.casefold() not in {"-", "без локации", "unknown"} and not is_location_id_like(candidate):
                     return candidate
         return ""
 
@@ -6767,6 +6798,8 @@ def admin_user_rows_json(records: list[dict]) -> str:
             if not candidate:
                 continue
             if candidate.casefold() in {"локация", "локации", "location", "country", "server"}:
+                continue
+            if re.fullmatch(r"\d{1,8}", candidate):
                 continue
             cleaned.append(candidate)
         if cleaned:
