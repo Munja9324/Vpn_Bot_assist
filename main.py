@@ -5896,30 +5896,54 @@ def build_live_root_panel_html() -> str:
   <title>{brand} — Root Panel</title>
   <style>
     :root {{
-      --bg:#f5f5f7; --panel:#fff; --border:#d2d2d7; --text:#1d1d1f; --muted:#6e6e73;
+      --bg:#f5f5f7; --panel:#ffffff; --border:#e5e5ea; --text:#1d1d1f; --muted:#6e6e73;
       --primary:#0071e3; --good:#34c759; --warn:#ff9f0a;
     }}
     * {{ box-sizing:border-box; }}
-    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }}
-    .wrap {{ display:grid; grid-template-columns: 360px 1fr; gap:12px; padding:12px; min-height:100vh; }}
-    .panel {{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:12px; }}
-    h1 {{ margin:0 0 10px; font-size:18px; }}
-    input, textarea, button {{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px; font:inherit; }}
+    body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }}
+    .wrap {{ display:grid; grid-template-columns: 340px 1fr; gap:12px; padding:12px; min-height:100vh; }}
+    .panel {{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.03); }}
+    h1 {{ margin:0 0 10px; font-size:17px; font-weight:600; letter-spacing:0; }}
+    input, textarea, button, select {{ width:100%; border:1px solid var(--border); border-radius:10px; padding:10px; font:inherit; background:#fff; color:var(--text); }}
+    input:focus, textarea:focus, select:focus {{
+      outline: none;
+      border-color: rgba(0,113,227,.5);
+      box-shadow: 0 0 0 3px rgba(0,113,227,.12);
+    }}
+    #search {{
+      border-color: rgba(0,113,227,.30);
+      background: #fff;
+      box-shadow: inset 0 0 0 1px rgba(0,113,227,.06);
+    }}
+    #search::placeholder {{
+      color: #8a8a90;
+    }}
     textarea {{ min-height:88px; resize:vertical; }}
-    .list {{ margin-top:10px; max-height:calc(100vh - 170px); overflow:auto; border:1px solid var(--border); border-radius:10px; }}
-    .item {{ padding:10px; border-bottom:1px solid var(--border); cursor:pointer; }}
+    .list {{ margin-top:10px; max-height:52vh; overflow:auto; border:1px solid var(--border); border-radius:10px; background:#fff; }}
+    .item {{ padding:10px; border-bottom:1px solid var(--border); cursor:pointer; transition:background .16s ease; }}
     .item:last-child {{ border-bottom:none; }}
-    .item:hover, .item.active {{ background:#eef5ff; }}
+    .item:hover {{ background:#f7f7f9; }}
+    .item.active {{ background:#eef4ff; }}
     .muted {{ color:var(--muted); font-size:12px; }}
     .grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
-    .card {{ border:1px solid var(--border); border-radius:10px; padding:10px; background:#fafafa; }}
+    .card {{ border:1px solid var(--border); border-radius:10px; padding:10px; background:#fbfbfd; }}
     .actions {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }}
     .scenarios {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }}
     .btn-primary {{ background:var(--primary); color:#fff; border-color:var(--primary); }}
     .btn-good {{ background:var(--good); color:#fff; border-color:var(--good); }}
     .btn-warn {{ background:var(--warn); color:#fff; border-color:var(--warn); }}
+    button {{ transition:transform .06s ease, box-shadow .16s ease, background .16s ease; }}
+    button:hover {{ box-shadow:0 2px 10px rgba(0,0,0,.06); }}
+    button:active {{ transform:translateY(1px); }}
     .status {{ margin-top:10px; white-space:pre-wrap; font-size:13px; color:var(--muted); }}
-    @media (max-width: 980px) {{ .wrap {{ grid-template-columns:1fr; }} .actions {{ grid-template-columns:1fr; }} }}
+    @media (max-width: 980px) {{
+      .wrap {{ grid-template-columns:1fr; }}
+      .actions {{ grid-template-columns:1fr; }}
+      .list {{ max-height: 40vh; }}
+    }}
+    @media (max-width: 640px) {{
+      .list {{ max-height: 32vh; }}
+    }}
   </style>
 </head>
 <body>
