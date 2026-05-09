@@ -6089,7 +6089,6 @@ def build_live_root_panel_html() -> str:
     <section class="panel">
       <div class="section-tag">Users</div>
       <h1>РџРѕР»СЊР·РѕРІР°С‚РµР»Рё</h1>
-      <input id="search" placeholder="РџРѕРёСЃРє: ID РёР»Рё @username">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
         <select id="filterStatus">
           <option value="all">Р’СЃРµ СЃС‚Р°С‚СѓСЃС‹</option>
@@ -6117,6 +6116,7 @@ def build_live_root_panel_html() -> str:
       </div>
       <div class="grid" style="margin-top:8px" id="userKpis"></div>
       <div id="riskPreview" class="risk-preview"></div>
+      <input id="search" placeholder="РџРѕРёСЃРє: ID РёР»Рё @username" style="margin-top:8px">
       <div class="list" id="list"></div>
     </section>
     <section class="panel">
