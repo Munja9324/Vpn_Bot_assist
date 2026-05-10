@@ -1520,8 +1520,8 @@ async def reply_with_text_file(event, text: str, **kwargs):
         preview = preview[:520].rstrip() + "..."
     short_text = "\n".join(
         (
-            "РџРѕР»РЅС‹Р№ С‚РµРєСЃС‚ СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ РґР»СЏ Telegram. РћС‚РїСЂР°РІР»СЏСЋ С„Р°Р№Р»РѕРј.",
-            f"Р¤Р°Р№Р»: {path.name}",
+            "\u041f\u043e\u043b\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442 \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u0431\u043e\u043b\u044c\u0448\u043e\u0439 \u0434\u043b\u044f Telegram. \u041e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u044e \u0444\u0430\u0439\u043b\u043e\u043c.",
+            f"\u0424\u0430\u0439\u043b: {path.name}",
             "",
             preview,
         )
@@ -1531,7 +1531,11 @@ async def reply_with_text_file(event, text: str, **kwargs):
     except MediaCaptionTooLongError:
         logging.warning("File caption is too long; retrying with minimal caption")
         try:
-            return await event.reply(f"РџРѕР»РЅС‹Р№ С‚РµРєСЃС‚ РІ С„Р°Р№Р»Рµ: {path.name}", file=str(path), **file_kwargs)
+            return await event.reply(
+                f"\u041f\u043e\u043b\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442 \u0432 \u0444\u0430\u0439\u043b\u0435: {path.name}",
+                file=str(path),
+                **file_kwargs,
+            )
         except MediaCaptionTooLongError:
             logging.warning("Minimal file caption is too long; retrying without caption")
             return await event.reply(file=str(path), **file_kwargs)
@@ -13287,7 +13291,10 @@ async def scan_all_users_in_admin_bot(
         session_restarts = 0
         current_user_id = start_user_id
         user_failures: dict[str, int] = {}
-        skipped_users: set[str] = set()
+        scan_db_conn: sqlite3.Connection | None = None
+        pending_db_writes = 0
+        db_commit_batch = 25
+        db_last_commit_at = 0.0
 
         def remember_scan_error(user_id: str, stage: str, error: Exception) -> None:
             scan_errors.append(
@@ -13324,36 +13331,40 @@ async def scan_all_users_in_admin_bot(
         else:
             await emit_progress("РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ РїРѕ ID Р·Р°РїСѓС‰РµРЅРѕ СЃ С‡РёСЃС‚РѕРіРѕ СЃРѕСЃС‚РѕСЏРЅРёСЏ.", force=True)
 
-        while current_user_id <= (total_users or current_user_id):
-            if cancel_event and cancel_event.is_set():
-                reset_requested = active_scan_reset_requested
-                paused = not reset_requested
-                break
+        try:
+            scan_db_conn = connect_database()
+            initialize_database(scan_db_conn)
 
-            try:
-                async with admin_conversation(bot) as conv:
-                    if not total_users:
-                        await emit_progress("РћС‚РєСЂС‹РІР°СЋ /admin СЃС‚Р°С‚РёСЃС‚РёРєСѓ Рё СЃС‡РёС‚С‹РІР°СЋ РѕР±С‰РµРµ С‡РёСЃР»Рѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.", force=True)
-                        try:
-                            total_users, admin_statistics_snapshot = await retry_async(
-                                "get admin statistics",
-                                lambda: get_admin_statistics_snapshot(conv, bot),
-                            )
-                        except Exception:
-                            total_users = int((checkpoint or {}).get("total_users_hint") or 0)
-                            if not total_users:
-                                raise
-                            logging.exception(
-                                "Failed to refresh admin statistics; using checkpoint total_users_hint=%s",
-                                total_users,
-                            )
-                            await emit_progress(
-                                f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЃС‚Р°С‚РёСЃС‚РёРєСѓ, РїСЂРѕРґРѕР»Р¶Р°СЋ РїРѕ checkpoint total={total_users}.",
-                                force=True,
-                            )
-                        await emit_progress(f"Р’СЃРµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РїРѕ СЃС‚Р°С‚РёСЃС‚РёРєРµ: {total_users}.", force=True)
-                        if current_user_id > total_users:
-                            current_user_id = total_users + 1
+            while current_user_id <= (total_users or current_user_id):
+                if cancel_event and cancel_event.is_set():
+                    reset_requested = active_scan_reset_requested
+                    paused = not reset_requested
+                    break
+
+                try:
+                    async with admin_conversation(bot) as conv:
+                        if not total_users:
+                            await emit_progress("РћС‚РєСЂС‹РІР°СЋ /admin СЃС‚Р°С‚РёСЃС‚РёРєСѓ Рё СЃС‡РёС‚С‹РІР°СЋ РѕР±С‰РµРµ С‡РёСЃР»Рѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№.", force=True)
+                            try:
+                                total_users, admin_statistics_snapshot = await retry_async(
+                                    "get admin statistics",
+                                    lambda: get_admin_statistics_snapshot(conv, bot),
+                                )
+                            except Exception:
+                                total_users = int((checkpoint or {}).get("total_users_hint") or 0)
+                                if not total_users:
+                                    raise
+                                logging.exception(
+                                    "Failed to refresh admin statistics; using checkpoint total_users_hint=%s",
+                                    total_users,
+                                )
+                                await emit_progress(
+                                    f"РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЃС‚Р°С‚РёСЃС‚РёРєСѓ, РїСЂРѕРґРѕР»Р¶Р°СЋ РїРѕ checkpoint total={total_users}.",
+                                    force=True,
+                                )
+                            await emit_progress(f"Р’СЃРµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РїРѕ СЃС‚Р°С‚РёСЃС‚РёРєРµ: {total_users}.", force=True)
+                            if current_user_id > total_users:
+                                current_user_id = total_users + 1
 
                     users_page_message = await retry_async("open users page", lambda: open_users_page(conv, bot))
 
@@ -13424,6 +13435,10 @@ async def scan_all_users_in_admin_bot(
                                 admin_statistics=admin_statistics_snapshot,
                                 scan_errors=scan_errors,
                             )
+                            if scan_db_conn and pending_db_writes > 0:
+                                scan_db_conn.commit()
+                                pending_db_writes = 0
+                                db_last_commit_at = loop.time()
                             await emit_progress(
                                 (
                                     f"ID {user_id}: РѕС€РёР±РєР°, РїСЂРѕР±СѓСЋ РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊСЃСЏ. "
@@ -13431,15 +13446,6 @@ async def scan_all_users_in_admin_bot(
                                 ),
                                 force=True,
                             )
-                            if user_failures.get(user_id, 0) >= 3:
-                                skipped_users.add(user_id)
-                                seen_users.add(user_id)
-                                await emit_progress(
-                                    f"ID {user_id}: пропускаю после {user_failures[user_id]} неудачных попыток.",
-                                    force=True,
-                                )
-                                current_user_id += 1
-                                continue
                             if consecutive_failures >= SCAN_MAX_CONSECUTIVE_FAILURES:
                                 logging.warning(
                                     "Restarting admin conversation after %s consecutive failures at user_id=%s",
@@ -13464,7 +13470,10 @@ async def scan_all_users_in_admin_bot(
                                 set_admin_bot_health("[WAIT]", "РїРµСЂРµР·Р°РїСѓСЃРє", "СЃС‚СЂР°РЅРёС†Р° РЅРµ РІРѕСЃСЃС‚Р°РЅРѕРІРёР»Р°СЃСЊ")
                                 await asyncio.sleep(SCAN_SESSION_RESTART_DELAY_SECONDS)
                                 break
-                            current_user_id += 1
+                            await emit_progress(
+                                f"ID {user_id}: повторяю попытку без пропуска пользователя.",
+                                force=True,
+                            )
                             continue
 
                         if record:
@@ -13472,7 +13481,19 @@ async def scan_all_users_in_admin_bot(
                             seen_users.add(user_id)
                             user_failures.pop(user_id, None)
                             try:
-                                upsert_latest_record(record)
+                                if scan_db_conn:
+                                    upsert_latest_record_with_conn(scan_db_conn, record)
+                                    pending_db_writes += 1
+                                    now_monotonic = loop.time()
+                                    if (
+                                        pending_db_writes >= db_commit_batch
+                                        or (now_monotonic - db_last_commit_at) >= SCAN_CHECKPOINT_MIN_INTERVAL_SECONDS
+                                    ):
+                                        scan_db_conn.commit()
+                                        pending_db_writes = 0
+                                        db_last_commit_at = now_monotonic
+                                else:
+                                    upsert_latest_record(record)
                             except Exception:
                                 logging.exception("Failed to upsert latest SQL record for user_id=%s", user_id)
                         consecutive_failures = 0
@@ -13497,21 +13518,58 @@ async def scan_all_users_in_admin_bot(
                                 admin_statistics=admin_statistics_snapshot,
                                 scan_errors=scan_errors,
                             )
+                            if scan_db_conn and pending_db_writes > 0:
+                                scan_db_conn.commit()
+                                pending_db_writes = 0
+                                db_last_commit_at = now_monotonic
                             last_checkpoint_at = now_monotonic
                             last_checkpoint_checked_ids = checked_ids_total
 
                     if reset_requested or paused or current_user_id > total_users:
                         break
 
-            except Exception as session_error:
+                except Exception as session_error:
+                    session_restarts += 1
+                    remember_scan_error(str(current_user_id), "scan_session", session_error)
+                    logging.exception(
+                        "Scan session failed at user_id=%s; restart %s/%s",
+                        current_user_id,
+                        session_restarts,
+                        SCAN_MAX_SESSION_RESTARTS,
+                    )
+                    save_scan_checkpoint_best_effort(
+                        current_user_id,
+                        checked_ids_total,
+                        records,
+                        seen_users,
+                        status="running",
+                        next_user_id=current_user_id,
+                        total_users_hint=total_users or None,
+                        admin_statistics=admin_statistics_snapshot,
+                        scan_errors=scan_errors,
+                    )
+                    if scan_db_conn and pending_db_writes > 0:
+                        scan_db_conn.commit()
+                        pending_db_writes = 0
+                        db_last_commit_at = loop.time()
+                    await emit_progress(
+                        (
+                            f"РЎРµСЃСЃРёСЏ scan Р·Р°РІРёСЃР»Р°/СЃР»РѕРјР°Р»Р°СЃСЊ РЅР° ID {current_user_id}. "
+                            f"РџРµСЂРµР·Р°РїСѓСЃРє {session_restarts}/{SCAN_MAX_SESSION_RESTARTS}."
+                        ),
+                        force=True,
+                    )
+                    set_admin_bot_health("[WAIT]", "РїРµСЂРµР·Р°РїСѓСЃРє", f"scan session {session_restarts}")
+                    if session_restarts >= SCAN_MAX_SESSION_RESTARTS:
+                        paused = True
+                        break
+                    await asyncio.sleep(SCAN_SESSION_RESTART_DELAY_SECONDS)
+                    continue
+
+                if reset_requested or paused or current_user_id > total_users:
+                    break
+
                 session_restarts += 1
-                remember_scan_error(str(current_user_id), "scan_session", session_error)
-                logging.exception(
-                    "Scan session failed at user_id=%s; restart %s/%s",
-                    current_user_id,
-                    session_restarts,
-                    SCAN_MAX_SESSION_RESTARTS,
-                )
                 save_scan_checkpoint_best_effort(
                     current_user_id,
                     checked_ids_total,
@@ -13519,47 +13577,27 @@ async def scan_all_users_in_admin_bot(
                     seen_users,
                     status="running",
                     next_user_id=current_user_id,
-                    total_users_hint=total_users or None,
+                    total_users_hint=total_users,
                     admin_statistics=admin_statistics_snapshot,
                     scan_errors=scan_errors,
                 )
+                if scan_db_conn and pending_db_writes > 0:
+                    scan_db_conn.commit()
+                    pending_db_writes = 0
+                    db_last_commit_at = loop.time()
                 await emit_progress(
-                    (
-                        f"РЎРµСЃСЃРёСЏ scan Р·Р°РІРёСЃР»Р°/СЃР»РѕРјР°Р»Р°СЃСЊ РЅР° ID {current_user_id}. "
-                        f"РџРµСЂРµР·Р°РїСѓСЃРє {session_restarts}/{SCAN_MAX_SESSION_RESTARTS}."
-                    ),
+                    f"РџРµСЂРµР·Р°РїСѓСЃРєР°СЋ scan-СЃРµСЃСЃРёСЋ Рё РїСЂРѕРґРѕР»Р¶Р°СЋ СЃ ID {current_user_id}.",
                     force=True,
                 )
-                set_admin_bot_health("[WAIT]", "РїРµСЂРµР·Р°РїСѓСЃРє", f"scan session {session_restarts}")
                 if session_restarts >= SCAN_MAX_SESSION_RESTARTS:
                     paused = True
                     break
                 await asyncio.sleep(SCAN_SESSION_RESTART_DELAY_SECONDS)
-                continue
-
-            if reset_requested or paused or current_user_id > total_users:
-                break
-
-            session_restarts += 1
-            save_scan_checkpoint_best_effort(
-                current_user_id,
-                checked_ids_total,
-                records,
-                seen_users,
-                status="running",
-                next_user_id=current_user_id,
-                total_users_hint=total_users,
-                admin_statistics=admin_statistics_snapshot,
-                scan_errors=scan_errors,
-            )
-            await emit_progress(
-                f"РџРµСЂРµР·Р°РїСѓСЃРєР°СЋ scan-СЃРµСЃСЃРёСЋ Рё РїСЂРѕРґРѕР»Р¶Р°СЋ СЃ ID {current_user_id}.",
-                force=True,
-            )
-            if session_restarts >= SCAN_MAX_SESSION_RESTARTS:
-                paused = True
-                break
-            await asyncio.sleep(SCAN_SESSION_RESTART_DELAY_SECONDS)
+        finally:
+            if scan_db_conn:
+                if pending_db_writes > 0:
+                    scan_db_conn.commit()
+                scan_db_conn.close()
 
         if reset_requested:
             clear_scan_checkpoint()
@@ -13590,7 +13628,7 @@ async def scan_all_users_in_admin_bot(
             admin_statistics=admin_statistics_snapshot,
         )
         stats["scan_errors"] = scan_errors
-        stats["scan_skipped_users"] = sorted(skipped_users)
+        stats["scan_skipped_users"] = []
         detailed_text = build_detailed_scan_report(records_for_reports)
         txt_path, json_path, detailed_txt_path, dashboard_path = save_scan_report(summary_text, detailed_text, stats)
         logging.info(
