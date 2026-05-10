@@ -5450,12 +5450,12 @@ def get_users_menu_candidates(message) -> list[dict[str, int | str]]:
 def get_statistics_menu_button(message) -> dict[str, int | str] | None:
     weighted: list[tuple[int, dict[str, int | str]]] = []
     for button in extract_all_buttons(message):
-        text = str(button["text"])
+        text = sanitize_outgoing_text(str(button["text"]))
         lowered = text.casefold()
         score = 0
-        if "СЃС‚Р°С‚" in lowered or "stat" in lowered or "Р°РЅР°Р»РёС‚" in lowered:
+        if "стат" in lowered or "stat" in lowered or "аналит" in lowered:
             score += 40
-        if any(symbol in text for symbol in ("рџ“Љ", "рџ“€", "рџ“‰", "рџ§ѕ")):
+        if any(symbol in text for symbol in ("📊", "📈", "📉", "🧾")):
             score += 10
         if is_navigation_button_text(text):
             score -= 100
@@ -5468,9 +5468,10 @@ def get_statistics_menu_button(message) -> dict[str, int | str] | None:
 
 
 def extract_total_users_from_statistics_text(text: str) -> int | None:
+    text = sanitize_outgoing_text(text)
     patterns = (
-        r"РІСЃРµРіРѕ\s+РїРѕР»СЊР·РѕРІР°С‚РµР»[РµСЏР№]\s*[:\-]?\s*(\d+)",
-        r"РїРѕР»СЊР·РѕРІР°С‚РµР»[РµСЏР№]\s+РІСЃРµРіРѕ\s*[:\-]?\s*(\d+)",
+        r"всего\s+пользовател[еяй]\s*[:\-]?\s*(\d+)",
+        r"пользовател[еяй]\s+всего\s*[:\-]?\s*(\d+)",
         r"total\s+users\s*[:\-]?\s*(\d+)",
         r"users\s+total\s*[:\-]?\s*(\d+)",
     )
@@ -5490,7 +5491,7 @@ def extract_total_users_from_statistics_text(text: str) -> int | None:
         if not line:
             continue
         lowered = line.casefold()
-        if "РїРѕР»СЊР·" not in lowered and "user" not in lowered:
+        if "польз" not in lowered and "user" not in lowered:
             continue
         for match in re.finditer(r"\d+", line):
             try:
@@ -12899,8 +12900,8 @@ async def open_users_page(conv, bot):
 async def get_admin_statistics_snapshot(conv, bot) -> tuple[int, dict]:
     admin_message = await send_admin_and_get_menu(conv, bot)
     admin_message = await reset_admin_state_if_needed(conv, bot, admin_message)
-    if has_button_text(admin_message, "СЃС‚Р°С‚"):
-        stats_message = await click_and_read(bot, admin_message, "СЃС‚Р°С‚")
+    if has_button_text(admin_message, "стат"):
+        stats_message = await click_and_read(bot, admin_message, "стат")
     else:
         stats_button = get_statistics_menu_button(admin_message)
         if not stats_button:
