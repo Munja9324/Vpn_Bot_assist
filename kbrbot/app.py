@@ -8292,7 +8292,8 @@ def reset_scan_database() -> None:
 
 
 def clear_scan_outputs() -> None:
-    report_dir = reports_dir()
+    report_dir = Path(settings.report_dir)
+    report_dir.mkdir(parents=True, exist_ok=True)
     patterns = ("scan-*.txt", "scan-*.json", "scan-*-dashboard.html", "latest-scan-dashboard.html")
     for pattern in patterns:
         for path in report_dir.glob(pattern):
