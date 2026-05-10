@@ -6457,6 +6457,7 @@ def build_live_root_panel_html() -> str:
     <button id="tabState" type="button">РЎРѕСЃС‚РѕСЏРЅРёРµ СЃР»СѓР¶Р±</button>
   </div>
   <div id="selectionHint" class="selection-hint">Р’С‹Р±РµСЂРёС‚Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ СЃР»РµРІР°, С‡С‚РѕР±С‹ РѕС‚РєСЂС‹С‚СЊ РґРµС‚Р°Р»СЊРЅСѓСЋ РєР°СЂС‚РѕС‡РєСѓ Рё Р±С‹СЃС‚СЂС‹Рµ РґРµР№СЃС‚РІРёСЏ.</div>
+  <div id="scanNotice" class="selection-hint" style="display:none"></div>
   <div id="miniKpis" class="mini-kpis"></div>
   <div class="wrap" id="viewUsers">
     <section class="panel">
@@ -6539,6 +6540,7 @@ def build_live_root_panel_html() -> str:
     const message = document.getElementById("message");
     const statusBox = document.getElementById("status");
     const selectionHint = document.getElementById("selectionHint");
+    const scanNotice = document.getElementById("scanNotice");
     const miniKpis = document.getElementById("miniKpis");
     const eventLog = document.getElementById("eventLog");
     const actionsLog = document.getElementById("actionsLog");
@@ -6872,6 +6874,29 @@ def build_live_root_panel_html() -> str:
       }}
     }}
 
+    async function refreshScanNotice() {{
+      if (!scanNotice) return;
+      try {{
+        const r = await fetch(`${{actionApiBase}}/overview`, {{ cache: "no-store" }});
+        const p = await r.json();
+        if (!r.ok || !p.ok || !p.overview) return;
+        const proc = p.overview.processes || {{}};
+        if (!proc.scan_active) {{
+          scanNotice.style.display = "none";
+          scanNotice.textContent = "";
+          return;
+        }}
+        const nextId = Number(proc.scan_next_user_id || 0);
+        const total = Number(proc.scan_total_users_hint || 0);
+        const checked = Math.max(0, nextId > 0 ? nextId - 1 : 0);
+        const progress = total > 0 ? `${{checked}}/${{total}}` : `${{checked}}`;
+        scanNotice.style.display = "block";
+        scanNotice.textContent = `Скан запущен: проверено ${{progress}}`;
+      }} catch (e) {{
+        // ignore transient polling errors
+      }}
+    }}
+
     async function loadActionsLog() {{
       if (!actionsLog) return;
       try {{
@@ -7040,11 +7065,13 @@ def build_live_root_panel_html() -> str:
     setupConsoleTab();
     renderList();
     renderMeta();
+    refreshScanNotice();
     loadActionsLog();
     loadErrorsLog();
     setInterval(() => {{
       if (activeTab === "services") loadServices();
       if (activeTab === "state") loadState();
+      refreshScanNotice();
       loadActionsLog();
       loadErrorsLog();
     }}, 15000);
@@ -7627,6 +7654,7 @@ async def dashboard_execute_job(job_id: str) -> None:
             if action == "scan_new":
                 clear_scan_checkpoint()
                 reset_scan_database()
+                clear_scan_outputs()
 
             active_scan_cancel_event = asyncio.Event()
             active_scan_owner_id = 0
@@ -8261,6 +8289,24 @@ def reset_database(conn: sqlite3.Connection) -> None:
 def reset_scan_database() -> None:
     with connect_database() as conn:
         reset_database(conn)
+
+
+def clear_scan_outputs() -> None:
+    report_dir = reports_dir()
+    patterns = ("scan-*.txt", "scan-*.json", "scan-*-dashboard.html", "latest-scan-dashboard.html")
+    for pattern in patterns:
+        for path in report_dir.glob(pattern):
+            try:
+                path.unlink()
+            except OSError:
+                logging.exception("Failed to remove scan output: %s", path)
+    public_dir = dashboard_public_dir()
+    for pattern in ("scan-*.html", "latest-scan-dashboard.html", "latest-scan-dashboard-loader.html"):
+        for path in public_dir.glob(pattern):
+            try:
+                path.unlink()
+            except OSError:
+                logging.exception("Failed to remove public dashboard output: %s", path)
 
 
 def ensure_database_file() -> None:
@@ -10254,6 +10300,16 @@ def extract_registration_date(text: str) -> datetime | None:
         if found and 2000 <= found.year <= datetime.now().year + 1:
             return found
     return None
+
+
+def user_card_has_zero_subscriptions(text: str) -> bool:
+    normalized = sanitize_outgoing_text(str(text or "")).casefold()
+    patterns = (
+        r"(?:подпис|vpn)\D{0,20}0\s*шт",
+        r"0\s*шт\D{0,20}(?:подпис|vpn)",
+        r"(?:subscriptions?)\D{0,20}0\b",
+    )
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in patterns)
 
 
 def parse_profile_text_features(text: str) -> dict[str, object]:
@@ -12973,6 +13029,36 @@ async def collect_user_record_via_search(
         if not has_button_text(users_page_message, settings.find_user_button_text):
             users_page_message = await open_users_page(conv, bot)
         return None, users_page_message
+
+    if user_card_has_zero_subscriptions(result_message.raw_text or ""):
+        await emit_collect_progress(f"ID {user_id}: на карточке 0 шт подписок, пропускаю вход в раздел подписок.")
+        back_button = get_back_page_button(result_message)
+        if back_button:
+            users_page_message = await click_button_position_and_read(
+                bot,
+                result_message,
+                int(back_button["row"]),
+                int(back_button["column"]),
+                str(back_button["text"]),
+            )
+        elif has_button_text(result_message, settings.cancel_button_text):
+            users_page_message = await click_and_read(bot, result_message, settings.cancel_button_text)
+        else:
+            users_page_message = await open_users_page(conv, bot)
+        if not has_button_text(users_page_message, settings.find_user_button_text):
+            users_page_message = await open_users_page(conv, bot)
+        return {
+            "user_id": str(user_id),
+            "username": extract_username_from_text(result_message.raw_text or ""),
+            "user_button_text": f"ID {user_id}",
+            "user_text": result_message.raw_text or "",
+            "registration_date": (
+                extract_registration_date(result_message.raw_text or "").strftime("%Y-%m-%d")
+                if extract_registration_date(result_message.raw_text or "")
+                else None
+            ),
+            "subscriptions": [],
+        }, users_page_message
 
     await emit_collect_progress("РљР°СЂС‚РѕС‡РєР° РЅР°Р№РґРµРЅР°. Р§РёС‚Р°СЋ РїРѕРґРїРёСЃРєРё.")
     subscriptions_message = await click_and_read(
@@ -15817,8 +15903,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         if scan_action == "new":
             clear_scan_checkpoint()
             reset_scan_database()
+            clear_scan_outputs()
         start_text = (
-            "Р—Р°РїСѓСЃРєР°СЋ РЅРѕРІС‹Р№ scan СЃ РїРµСЂРІРѕР№ СЃС‚СЂР°РЅРёС†С‹."
+            "Запускаю новый scan: очистил базу и старые отчёты, начинаю с первого пользователя."
             if scan_action == "new"
             else "РџСЂРѕРґРѕР»Р¶Р°СЋ scan СЃ СЃРѕС…СЂР°РЅРµРЅРЅРѕРіРѕ РјРµСЃС‚Р°. Р•СЃР»Рё checkpoint РїСѓСЃС‚РѕР№, РЅР°С‡РЅСѓ СЃ РїРµСЂРІРѕР№ СЃС‚СЂР°РЅРёС†С‹."
         )
