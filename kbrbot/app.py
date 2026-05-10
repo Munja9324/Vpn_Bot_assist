@@ -2717,11 +2717,270 @@ NON_REQUESTER_PROFILE_ID_HELP_KEYWORDS = (
 )
 
 
+# Clean Russian intent layer. It intentionally duplicates some legacy mojibake
+# tuples above so user-facing recognition keeps working even when old literals
+# in the file were saved with a broken console encoding.
+RU_OPERATOR_REQUEST_PHRASES = (
+    "позови оператора",
+    "позовите оператора",
+    "нужен оператор",
+    "живой оператор",
+    "нужен человек",
+    "позови человека",
+    "соедини с оператором",
+    "соедините с оператором",
+    "свяжи с поддержкой",
+    "свяжите с поддержкой",
+    "нужна поддержка",
+    "админ",
+    "администратор",
+    "позови админа",
+    "оператор",
+    "человек",
+    "хочу поговорить",
+)
+
+RU_GREETING_PHRASES = (
+    "привет",
+    "здравствуйте",
+    "добрый день",
+    "добрый вечер",
+    "доброе утро",
+    "доброй ночи",
+    "салам",
+    "салам алейкум",
+    "ку",
+    "дарова",
+    "здарова",
+    "хай",
+    "hello",
+    "hi",
+    "hey",
+)
+
+RU_THANKS_PHRASES = (
+    "спасибо",
+    "спс",
+    "благодарю",
+    "спасибо большое",
+    "огромное спасибо",
+    "от души",
+    "все ок",
+    "всё ок",
+    "все работает",
+    "всё работает",
+    "получилось",
+    "решилось",
+    "thanks",
+    "thx",
+)
+
+RU_VPN_SETUP_PHRASES = (
+    "как подключить",
+    "как подключить vpn",
+    "как подключить впн",
+    "как настроить",
+    "как настроить vpn",
+    "как настроить впн",
+    "как включить",
+    "как включить vpn",
+    "как пользоваться",
+    "как пользоваться vpn",
+    "инструкция",
+    "инструкция по подключению",
+    "инструкция vpn",
+    "где инструкция",
+    "пришлите инструкцию",
+    "дай инструкцию",
+    "мануал",
+    "гайд",
+    "setup vpn",
+    "vpn setup",
+    "как добавить ключ",
+    "куда вставить ключ",
+    "куда ввести ключ",
+    "как импортировать ключ",
+    "как установить",
+    "какое приложение",
+    "какой клиент",
+    "где скачать приложение",
+    "v2rayng",
+    "streisand",
+    "hiddify",
+    "ios подключить",
+    "iphone подключить",
+    "android подключить",
+    "windows подключить",
+    "mac подключить",
+)
+
+RU_PROFILE_ID_PHRASES = (
+    "где id",
+    "где айди",
+    "где мой id",
+    "где мой айди",
+    "как узнать id",
+    "как узнать айди",
+    "как найти id",
+    "как найти айди",
+    "как посмотреть id",
+    "покажи id",
+    "покажи айди",
+    "мой id",
+    "мой айди",
+    "нужен id",
+    "нужен айди",
+    "номер пользователя",
+    "мой номер пользователя",
+    "id пользователя",
+    "id в профиле",
+    "айди в профиле",
+)
+
+RU_SELF_INFO_PHRASES = (
+    "моя подписка",
+    "мои подписки",
+    "мой статус",
+    "мой профиль",
+    "моя инфа",
+    "информация обо мне",
+    "покажи мою подписку",
+    "покажи мои подписки",
+    "какая у меня подписка",
+    "когда закончится",
+    "когда истекает",
+    "сколько осталось",
+    "до какого числа",
+    "мой баланс",
+    "мой vpn",
+)
+
+RU_KEY_ISSUE_PHRASES = (
+    "ключ не работает",
+    "ключ плохо работает",
+    "ключ не подходит",
+    "ключ не открывается",
+    "ключ не подключается",
+    "ключ слетел",
+    "ключ пропал",
+    "ключ устарел",
+    "ключ истек",
+    "ключ истёк",
+    "невалидный ключ",
+    "invalid key",
+    "конфиг не работает",
+    "конфигурация не работает",
+    "ссылка не работает",
+    "не импортируется",
+    "не добавляется ключ",
+    "не копируется ключ",
+    "vless не работает",
+    "vmess не работает",
+)
+
+RU_PAYMENT_ISSUE_PHRASES = (
+    "оплата не прошла",
+    "платеж не прошел",
+    "платеж не прошёл",
+    "платёж не прошел",
+    "платёж не прошёл",
+    "деньги списали",
+    "списали деньги",
+    "оплатил но не работает",
+    "оплатил а подписки нет",
+    "оплатила а подписки нет",
+    "чек есть",
+    "есть чек",
+    "транзакция",
+    "не пришла оплата",
+    "не зачислилось",
+    "баланс не пополнился",
+    "пополнение не пришло",
+    "промокод не работает",
+    "promo не работает",
+)
+
+RU_CONNECTION_ISSUE_PHRASES = (
+    "vpn не работает",
+    "впн не работает",
+    "не работает vpn",
+    "не работает впн",
+    "не подключается",
+    "не соединяется",
+    "подключение не удалось",
+    "connection failed",
+    "не открывает сайты",
+    "не открывается",
+    "не грузит",
+    "не заходит",
+    "нет доступа",
+    "нет интернета",
+    "пропал интернет",
+    "ошибка сети",
+    "таймаут",
+    "timeout",
+    "timed out",
+    "отвалился",
+    "обрывается",
+    "постоянно отключается",
+    "не пускает",
+    "не проходит подключение",
+)
+
+RU_SPEED_ISSUE_PHRASES = (
+    "медленно",
+    "очень медленно",
+    "низкая скорость",
+    "скорость низкая",
+    "тормозит",
+    "лагает",
+    "пинг высокий",
+    "большой пинг",
+    "плохо грузит",
+    "ютуб тормозит",
+    "youtube тормозит",
+    "инстаграм не грузит",
+    "telegram не грузит",
+    "телеграм не грузит",
+)
+
+RU_SUBSCRIPTION_ISSUE_PHRASES = (
+    "подписка пропала",
+    "подписка не активна",
+    "подписка истекла",
+    "подписка истёкла",
+    "не вижу подписку",
+    "нет подписки",
+    "продление не прошло",
+    "не продлилась",
+    "не активировалась",
+    "доступ закончился",
+)
+
+RU_PROBLEM_PHRASES = (
+    *RU_KEY_ISSUE_PHRASES,
+    *RU_PAYMENT_ISSUE_PHRASES,
+    *RU_CONNECTION_ISSUE_PHRASES,
+    *RU_SPEED_ISSUE_PHRASES,
+    *RU_SUBSCRIPTION_ISSUE_PHRASES,
+    "проблема",
+    "ошибка",
+    "не могу",
+    "не получается",
+    "помогите",
+    "нужна помощь",
+    "что делать",
+    "сломалось",
+)
+
+
 def looks_like_problem_report(text: str) -> bool:
     cleaned = (text or "").strip().casefold()
     if len(cleaned) < 6:
         return False
-    return any(keyword in cleaned for keyword in PROBLEM_REPORT_KEYWORDS)
+    return any(keyword in cleaned for keyword in PROBLEM_REPORT_KEYWORDS) or any(
+        phrase in cleaned for phrase in RU_PROBLEM_PHRASES
+    )
 
 
 def is_operator_request_text(text: str) -> bool:
@@ -2737,7 +2996,7 @@ def is_operator_request_text(text: str) -> bool:
         "СЃРІСЏР¶Рё СЃ РѕРїРµСЂР°С‚РѕСЂРѕРј",
         "РѕРїРµСЂР°С‚РѕСЂ",
     )
-    return any(marker in cleaned for marker in markers)
+    return any(marker in cleaned for marker in markers) or any(phrase in cleaned for phrase in RU_OPERATOR_REQUEST_PHRASES)
 
 
 def support_operator_contact_text() -> str:
@@ -2751,14 +3010,18 @@ def is_vpn_setup_request_text(text: str) -> bool:
     cleaned = (text or "").strip().casefold()
     if not cleaned:
         return False
-    return any(keyword in cleaned for keyword in NON_REQUESTER_VPN_SETUP_KEYWORDS)
+    return any(keyword in cleaned for keyword in NON_REQUESTER_VPN_SETUP_KEYWORDS) or any(
+        phrase in cleaned for phrase in RU_VPN_SETUP_PHRASES
+    )
 
 
 def is_profile_id_help_text(text: str) -> bool:
     cleaned = (text or "").strip().casefold()
     if not cleaned:
         return False
-    return any(keyword in cleaned for keyword in NON_REQUESTER_PROFILE_ID_HELP_KEYWORDS)
+    return any(keyword in cleaned for keyword in NON_REQUESTER_PROFILE_ID_HELP_KEYWORDS) or any(
+        phrase in cleaned for phrase in RU_PROFILE_ID_PHRASES
+    )
 
 
 def vpn_setup_help_message() -> str:
@@ -2799,9 +3062,15 @@ def detect_non_requester_intent(text: str) -> str:
     if detect_support_issue_types(cleaned) or looks_like_problem_report(cleaned):
         return "support_issue"
     words_count = len(re.findall(r"\S+", cleaned))
-    if words_count <= 3 and any(keyword in cleaned for keyword in NON_REQUESTER_GREETING_KEYWORDS):
+    if words_count <= 3 and (
+        any(keyword in cleaned for keyword in NON_REQUESTER_GREETING_KEYWORDS)
+        or any(phrase in cleaned for phrase in RU_GREETING_PHRASES)
+    ):
         return "greeting"
-    if words_count <= 4 and any(keyword in cleaned for keyword in NON_REQUESTER_THANKS_KEYWORDS):
+    if words_count <= 5 and (
+        any(keyword in cleaned for keyword in NON_REQUESTER_THANKS_KEYWORDS)
+        or any(phrase in cleaned for phrase in RU_THANKS_PHRASES)
+    ):
         return "thanks"
     return "unknown"
 
@@ -3084,10 +3353,18 @@ def is_support_issue_too_vague(text: str) -> bool:
 def detect_support_issue_types(text: str) -> list[str]:
     cleaned = (text or "").casefold()
     issue_types: list[str] = []
-    if any(keyword in cleaned for keyword in SUPPORT_KEY_ISSUE_KEYWORDS):
+    if any(keyword in cleaned for keyword in SUPPORT_KEY_ISSUE_KEYWORDS) or any(
+        phrase in cleaned for phrase in RU_KEY_ISSUE_PHRASES
+    ):
         issue_types.append("РїСЂРѕР±Р»РµРјР° СЃ РєР»СЋС‡РѕРј/РєРѕРЅС„РёРіРѕРј")
-    if any(keyword in cleaned for keyword in SUPPORT_PAYMENT_ISSUE_KEYWORDS):
+    if any(keyword in cleaned for keyword in SUPPORT_PAYMENT_ISSUE_KEYWORDS) or any(
+        phrase in cleaned for phrase in RU_PAYMENT_ISSUE_PHRASES
+    ):
         issue_types.append("РїСЂРѕР±Р»РµРјР° СЃ РѕРїР»Р°С‚РѕР№/РїР»Р°С‚РµР¶РѕРј")
+    if any(phrase in cleaned for phrase in RU_SPEED_ISSUE_PHRASES):
+        issue_types.append("проблема со скоростью/стабильностью")
+    if any(phrase in cleaned for phrase in RU_SUBSCRIPTION_ISSUE_PHRASES):
+        issue_types.append("проблема с подпиской/доступом")
     if not issue_types and looks_like_problem_report(text):
         issue_types.append("РѕР±С‰Р°СЏ С‚РµС…РЅРёС‡РµСЃРєР°СЏ РїСЂРѕР±Р»РµРјР°")
     return issue_types
@@ -3198,7 +3475,9 @@ def is_non_requester_self_info_text(text: str) -> bool:
     cleaned = (text or "").strip().casefold()
     if not cleaned:
         return False
-    return any(marker in cleaned for marker in NON_REQUESTER_SELF_INFO_KEYWORDS)
+    return any(marker in cleaned for marker in NON_REQUESTER_SELF_INFO_KEYWORDS) or any(
+        phrase in cleaned for phrase in RU_SELF_INFO_PHRASES
+    )
 
 
 def is_non_requester_restricted_action_text(text: str) -> bool:
