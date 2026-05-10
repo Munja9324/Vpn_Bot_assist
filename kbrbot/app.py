@@ -855,10 +855,10 @@ def sanitize_outgoing_payload(value):
 def assistant_user_message(text: str) -> str:
     body = sanitize_outgoing_text(text).strip()
     if not body:
-        return VIRTUAL_ASSISTANT_INTRO
+        return "Чем могу помочь?"
     if body.startswith(VIRTUAL_ASSISTANT_INTRO):
-        return body
-    return f"{VIRTUAL_ASSISTANT_INTRO}\n{body}"
+        return body[len(VIRTUAL_ASSISTANT_INTRO):].strip() or "Чем могу помочь?"
+    return body
 
 
 def assistant_compact_reply(headline: str, detail: str = "") -> str:
@@ -3092,7 +3092,7 @@ def assistant_capabilities_message() -> str:
         [
             "РџРѕРјРѕС‡СЊ РїРѕРґРєР»СЋС‡РёС‚СЊ VPN Рё РЅР°Р№С‚Рё ID РІ СЂР°Р·РґРµР»Рµ В«РџСЂРѕС„РёР»СЊВ».",
             "Р Р°Р·РѕР±СЂР°С‚СЊ РїСЂРѕР±Р»РµРјСѓ СЃ РєР»СЋС‡РѕРј, РѕРїР»Р°С‚РѕР№, СЃРєРѕСЂРѕСЃС‚СЊСЋ РёР»Рё РїРѕРґРєР»СЋС‡РµРЅРёРµРј.",
-            "Р•СЃР»Рё РІРѕРїСЂРѕСЃ РїСЂРѕСЃС‚РѕР№, РѕС‚РІРµС‡Р°СЋ СЃСЂР°Р·Сѓ Р±РµР· РѕР¶РёРґР°РЅРёСЏ KBR_GPT.",
+            "РџРѕРґСЃРєР°Р·Р°С‚СЊ РїРѕ С‡Р°СЃС‚С‹Рј РІРѕРїСЂРѕСЃР°Рј Рё РїРµСЂРµРґР°С‚СЊ СЃР»РѕР¶РЅС‹Р№ СЃР»СѓС‡Р°Р№ РѕРїРµСЂР°С‚РѕСЂСѓ.",
             "Р•СЃР»Рё РЅСѓР¶РЅР° РїРѕРґРґРµСЂР¶РєР°, РїРѕРґРіРѕС‚РѕРІР»СЋ РѕР±СЂР°С‰РµРЅРёРµ РёР»Рё РґР°Рј РєРѕРЅС‚Р°РєС‚ РѕРїРµСЂР°С‚РѕСЂР°.",
             "Р”Р»СЏ Р·Р°РїСЂРѕСЃРЅРёРєРѕРІ РґРѕСЃС‚СѓРїРЅС‹ РєРѕРјР°РЅРґС‹: РїРѕР»СЊР·РѕРІР°С‚РµР»Рё, РїРѕРґРїРёСЃРєРё, wizard, СЂР°СЃСЃС‹Р»РєРё, РїСЂРѕРјРѕРєРѕРґС‹, scan, Р»РѕРіРё Рё dashboard.",
         ],
@@ -5153,13 +5153,6 @@ def build_command_menu_text() -> str:
             "/unresolved - РѕР±СЂР°С‰РµРЅРёСЏ, РЅР° РєРѕС‚РѕСЂС‹Рµ Р±РѕС‚ РЅРµ РѕС‚РІРµС‚РёР» СЃР°Рј",
             "/tail [СЃС‚СЂРѕРє] - РїРѕСЃР»РµРґРЅРёРµ СЃС‚СЂРѕРєРё userbot.log",
             "/version - РІРµСЂСЃРёСЏ, commit Рё РґР°С‚Р° Р·Р°РїСѓСЃРєР°",
-            "",
-            "KBR_GPT:",
-            "/gpt <РІРѕРїСЂРѕСЃ> - СЃРїСЂРѕСЃРёС‚СЊ KBR_GPT Рё СЃРѕС…СЂР°РЅРёС‚СЊ РєРѕРЅС‚РµРєСЃС‚ РґРёР°Р»РѕРіР°",
-            "/gpt - РЅР°РїРёСЃР°С‚СЊ РІРѕРїСЂРѕСЃ СЃР»РµРґСѓСЋС‰РёРј СЃРѕРѕР±С‰РµРЅРёРµРј",
-            "/gpt reset - РѕС‡РёСЃС‚РёС‚СЊ РєРѕРЅС‚РµРєСЃС‚ KBR_GPT",
-            "Р“РѕР»РѕСЃРѕРІРѕРµ Р±РµР· РєРѕРјР°РЅРґС‹ - СЂР°СЃРїРѕР·РЅР°С‚СЊ, РїРѕРЅСЏС‚СЊ Рё РІС‹РїРѕР»РЅРёС‚СЊ Р±РµР·РѕРїР°СЃРЅРѕРµ РґРµР№СЃС‚РІРёРµ",
-            "РЎРІРѕР±РѕРґРЅС‹Р№ С‚РµРєСЃС‚ Р±РµР· РєРѕРјР°РЅРґС‹ - РѕР±С‹С‡РЅС‹Р№ KBR_GPT РёР»Рё СѓРјРЅР°СЏ РєРѕРјР°РЅРґР°",
             "",
             "РџРѕР»СЊР·РѕРІР°С‚РµР»Рё:",
             "/user <id|username> - РєСЂР°С‚РєР°СЏ РєР°СЂС‚РѕС‡РєР° С‡РµСЂРµР· Р°РґРјРёРЅ-Р±РѕС‚",
@@ -14346,13 +14339,7 @@ async def handle_gpt_prompt(
     compact_status: bool = False,
     reveal_unavailable: bool = True,
 ) -> None:
-    await safe_event_reply(
-        event,
-        assistant_compact_reply(
-            "Функция KBR_GPT отключена.",
-            "Используйте команды бота и инструменты поддержки.",
-        ),
-    )
+    await safe_event_reply(event, support_operator_contact_text())
     return
 
     log_action_event(
@@ -14916,6 +14903,14 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
     sender_id = int(event.sender_id or 0)
     incoming_text = (event.raw_text or "").strip()
     requester_allowed = is_requester_allowed(sender_id, sender)
+    simulate_public_mode = False
+    simulated_text = incoming_text
+    if requester_allowed and incoming_text:
+        lowered = incoming_text.casefold()
+        if lowered == "-p" or lowered.startswith("-p "):
+            simulate_public_mode = True
+            simulated_text = incoming_text[2:].strip()
+
     log_action_event(
         "incoming_message",
         sender_id=sender_id,
@@ -14923,9 +14918,25 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         username=sender_username(sender),
         full_name=sender_full_name(sender),
         is_requester=requester_allowed,
+        simulate_public_mode=simulate_public_mode,
         is_voice=is_voice_or_audio_message(event),
         text=incoming_text,
     )
+
+    if simulate_public_mode:
+        if not simulated_text:
+            await safe_event_reply(
+                event,
+                assistant_compact_reply(
+                    "Режим -p активирован.",
+                    "Напишите после -p текст пользователя, например: -p не работает впн",
+                ),
+            )
+            return
+        log_action_event("route", sender_id=sender_id, route="simulate_non_requester", text=simulated_text)
+        await handle_non_requester_message(event, sender, sender_id, simulated_text)
+        return
+
     roots_command = is_roots_command(incoming_text)
     roots_empty = requester_count() == 0
     if roots_command and (roots_empty or requester_allowed):
