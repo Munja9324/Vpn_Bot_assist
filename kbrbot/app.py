@@ -7660,7 +7660,7 @@ async def dashboard_execute_job(job_id: str) -> None:
             active_scan_owner_id = 0
             active_scan_reset_requested = False
             active_scan_base_delay_seconds = max(
-                0.08,
+                0.05,
                 min(settings.scan_action_delay_seconds, settings.scan_turbo_delay_seconds),
             )
             active_scan_action_delay_seconds = active_scan_base_delay_seconds
@@ -13285,6 +13285,8 @@ async def scan_all_users_in_admin_bot(
         consecutive_failures = 0
         session_restarts = 0
         current_user_id = start_user_id
+        user_failures: dict[str, int] = {}
+        skipped_users: set[str] = set()
 
         def remember_scan_error(user_id: str, stage: str, error: Exception) -> None:
             scan_errors.append(
@@ -13377,17 +13379,38 @@ async def scan_all_users_in_admin_bot(
                             await emit_progress(text)
 
                         try:
-                            record, users_page_message = await collect_user_record_via_search(
-                                conv,
-                                bot,
-                                users_page_message,
-                                user_id,
-                                progress_callback=emit_user_progress,
-                                progress_context=f"ID {user_id}",
-                            )
+                            last_user_error: Exception | None = None
+                            record = None
+                            for attempt in range(1, 3):
+                                try:
+                                    record, users_page_message = await collect_user_record_via_search(
+                                        conv,
+                                        bot,
+                                        users_page_message,
+                                        user_id,
+                                        progress_callback=emit_user_progress,
+                                        progress_context=f"ID {user_id}",
+                                    )
+                                    last_user_error = None
+                                    break
+                                except Exception as user_error:
+                                    last_user_error = user_error
+                                    remember_scan_error(user_id, f"collect_user_record_attempt_{attempt}", user_error)
+                                    if attempt < 2:
+                                        await emit_progress(
+                                            f"ID {user_id}: локальная ошибка, повтор попытки {attempt + 1}/2.",
+                                            force=True,
+                                        )
+                                        users_page_message = await retry_async(
+                                            "recover users page before user retry",
+                                            lambda: open_users_page(conv, bot),
+                                        )
+                                    else:
+                                        raise user_error
                         except Exception as error:
                             logging.exception("Failed to collect user_id=%s via search; resetting users page", user_id)
                             consecutive_failures += 1
+                            user_failures[user_id] = int(user_failures.get(user_id) or 0) + 1
                             remember_scan_error(user_id, "collect_user_record_via_search", error)
                             save_scan_checkpoint_best_effort(
                                 current_user_id,
@@ -13407,6 +13430,15 @@ async def scan_all_users_in_admin_bot(
                                 ),
                                 force=True,
                             )
+                            if user_failures.get(user_id, 0) >= 3:
+                                skipped_users.add(user_id)
+                                seen_users.add(user_id)
+                                await emit_progress(
+                                    f"ID {user_id}: пропускаю после {user_failures[user_id]} неудачных попыток.",
+                                    force=True,
+                                )
+                                current_user_id += 1
+                                continue
                             if consecutive_failures >= SCAN_MAX_CONSECUTIVE_FAILURES:
                                 logging.warning(
                                     "Restarting admin conversation after %s consecutive failures at user_id=%s",
@@ -13437,6 +13469,7 @@ async def scan_all_users_in_admin_bot(
                         if record:
                             records.append(record)
                             seen_users.add(user_id)
+                            user_failures.pop(user_id, None)
                             try:
                                 upsert_latest_record(record)
                             except Exception:
@@ -13556,6 +13589,7 @@ async def scan_all_users_in_admin_bot(
             admin_statistics=admin_statistics_snapshot,
         )
         stats["scan_errors"] = scan_errors
+        stats["scan_skipped_users"] = sorted(skipped_users)
         detailed_text = build_detailed_scan_report(records_for_reports)
         txt_path, json_path, detailed_txt_path, dashboard_path = save_scan_report(summary_text, detailed_text, stats)
         logging.info(
@@ -13683,7 +13717,7 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
         active_scan_owner_id = owner_id or None
         active_scan_reset_requested = False
         active_scan_base_delay_seconds = max(
-            0.08,
+            0.05,
             min(settings.scan_action_delay_seconds, settings.scan_turbo_delay_seconds),
         )
         active_scan_action_delay_seconds = active_scan_base_delay_seconds
