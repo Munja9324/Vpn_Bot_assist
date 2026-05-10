@@ -14983,39 +14983,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             schedule_scan_auto_resume(scan_interruption)
         return
 
-    pending_gpt = pending_gpt_requests.get(sender_id)
-    if pending_gpt:
-        log_action_event("route", sender_id=sender_id, route="pending_gpt", text=incoming_text)
-        if incoming_text.strip().casefold() in {"0", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
-            pending_gpt_requests.pop(sender_id, None)
-            status_message = pending_gpt.get("status_message")
-            cancel_text = build_process_status(
-                "KBR_GPT",
-                GPT_STEPS,
-                1,
-                extra_lines=["Р—Р°РїСЂРѕСЃ РѕС‚РјРµРЅРµРЅ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
-                done=True,
-            )
-            if status_message:
-                await edit_status_message(status_message, cancel_text, force=True)
-            else:
-                await safe_event_reply(event, cancel_text)
-            return
-
-        prompt = incoming_text.strip()
-        if not prompt:
-            await safe_event_reply(event, "РџСЂРёС€Р»Рё РІРѕРїСЂРѕСЃ РґР»СЏ `/gpt` РёР»Рё `0 РѕС‚РјРµРЅР°`.")
-            return
-
-        pending_gpt_requests.pop(sender_id, None)
-        await handle_gpt_prompt(
-            event,
-            sender_id,
-            prompt,
-            pending_gpt.get("status_message"),
-            compact_status=True,
-        )
-        return
+    pending_gpt_requests.pop(sender_id, None)
 
     pending_direct_mail = pending_direct_mail_requests.get(sender_id)
     if pending_direct_mail:
