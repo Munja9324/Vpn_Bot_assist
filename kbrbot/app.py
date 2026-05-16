@@ -29,6 +29,10 @@ from urllib.request import ProxyHandler, Request, build_opener, urlopen
 from dotenv import load_dotenv
 from telethon.errors import FloodWaitError, MediaCaptionTooLongError, MessageNotModifiedError, MessageTooLongError
 from telethon import Button, TelegramClient, events
+from kbrbot.core import text_sanitize as ts
+from kbrbot.messages_ru import msg
+from kbrbot.db.repositories import dedup_subscriptions_count
+from kbrbot.features.dashboard_stats import consistent_totals
 
 
 load_dotenv()
@@ -126,6 +130,8 @@ class Settings:
     dashboard_intro_enabled: bool
     dashboard_intro_seconds: float
     dashboard_intro_template_path: str
+    dashboard_api_cache_enabled: bool
+    dashboard_api_cache_ttl_seconds: float
 
 
 @dataclass(frozen=True)
@@ -158,6 +164,10 @@ def env_text(name: str, default: str) -> str:
 
     # Windows consoles sometimes save Cyrillic .env values as mojibake.
     if any(marker in value for marker in ("\u0420\u00a0", "\u0420\u040e", "\u0420\u040f", "\u0421\u20ac", "\u0421\u2039")):
+        return default
+    if re.search(r"(?:Ð.|Ñ.){2,}", value):
+        return default
+    if re.search(r"(?:Ã.|â.){2,}", value):
         return default
 
     return value
@@ -461,6 +471,13 @@ def load_settings() -> Settings:
             "DASHBOARD_INTRO_TEMPLATE_PATH",
             "remotion-plugin-remotion-openai-curated-vpn/index.html",
         ).strip(),
+        dashboard_api_cache_enabled=env_bool("DASHBOARD_API_CACHE_ENABLED", True),
+        dashboard_api_cache_ttl_seconds=normalized_positive_float(
+            "DASHBOARD_API_CACHE_TTL_SECONDS",
+            8.0,
+            minimum=1.0,
+            maximum=120.0,
+        ),
     )
 
 
@@ -523,6 +540,8 @@ dashboard_intro_template_cache: tuple[Path, float, str] | None = None
 dashboard_action_jobs: dict[str, dict[str, object]] = {}
 dashboard_action_jobs_lock = threading.Lock()
 DASHBOARD_ACTION_JOBS_LIMIT = 300
+dashboard_api_cache_lock = threading.Lock()
+dashboard_api_cache: dict[str, tuple[float, dict[str, object]]] = {}
 STATUS_EDIT_MIN_INTERVAL_SECONDS = max(0.25, env_float("STATUS_EDIT_MIN_INTERVAL_SECONDS", 0.7))
 status_edit_state: dict[int, tuple[float, str]] = {}
 ADMIN_CONVERSATION_MAX_MESSAGES = max(5000, env_int("ADMIN_CONVERSATION_MAX_MESSAGES", 120000))
@@ -792,64 +811,31 @@ MOJIBAKE_MARKERS = (
 
 
 def cyrillic_letters_count(text: str) -> int:
-    return sum(1 for char in text if ("Рђ" <= char <= "СЏ") or char in {"РЃ", "С‘"})
+    return ts.cyrillic_letters_count(text)
 
 
 def mojibake_score(text: str) -> int:
-    return sum(text.count(marker) for marker in MOJIBAKE_MARKERS)
+    return ts.mojibake_score(text)
 
 
 def looks_like_mojibake_text(text: str) -> bool:
-    sample = str(text or "")
-    return mojibake_score(sample) >= 2 or "\u0420\u00a7\u0420\u00b5\u0420\u0458" in sample or "\u0432\u0402\u201d" in sample
+    return ts.looks_like_mojibake_text(text)
 
 
 def repair_mojibake_text(text: str) -> str:
-    original = str(text or "")
-    if not original or not looks_like_mojibake_text(original):
-        return original
-
-    def repair_piece(piece: str) -> str:
-        candidates = [piece]
-        for encoding in ("cp1251", "latin1"):
-            try:
-                candidate = piece.encode(encoding, errors="ignore").decode("utf-8", errors="ignore")
-            except Exception:
-                continue
-            if candidate:
-                candidates.append(candidate)
-
-        best = piece
-        best_value = (cyrillic_letters_count(piece) * 2) - (mojibake_score(piece) * 8)
-        for candidate in candidates[1:]:
-            value = (cyrillic_letters_count(candidate) * 2) - (mojibake_score(candidate) * 8)
-            if value > best_value:
-                best = candidate
-                best_value = value
-        return best
-
-    repaired_lines = []
-    for line in original.splitlines(keepends=True):
-        repaired_lines.append(repair_piece(line) if looks_like_mojibake_text(line) else line)
-    repaired = "".join(repaired_lines)
-    return repair_piece(repaired) if looks_like_mojibake_text(repaired) else repaired
+    return ts.repair_mojibake_text(text)
 
 
 def sanitize_outgoing_text(text: str) -> str:
-    repaired = repair_mojibake_text(str(text or ""))
-    return repaired.replace("\r\n", "\n").replace("\r", "\n")
+    return ts.sanitize_outgoing_text(text)
+
+
+def sanitize_buttons(buttons):
+    return ts.sanitize_buttons(buttons)
 
 
 def sanitize_outgoing_payload(value):
-    if isinstance(value, str):
-        return sanitize_outgoing_text(value)
-    if isinstance(value, list):
-        return [sanitize_outgoing_payload(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(sanitize_outgoing_payload(item) for item in value)
-    if isinstance(value, dict):
-        return {key: sanitize_outgoing_payload(item) for key, item in value.items()}
-    return value
+    return ts.sanitize_outgoing_payload(value)
 
 
 def assistant_user_message(text: str) -> str:
@@ -1267,6 +1253,7 @@ async def edit_status_message(message, text: str, *, buttons=None, parse_mode=No
     if not message:
         return False
     text = sanitize_outgoing_text(text)
+    buttons = sanitize_buttons(buttons)
     key = int(getattr(message, "id", 0) or id(message))
     now_monotonic = loop.time()
     last_at, last_text = status_edit_state.get(key, (0.0, ""))
@@ -1333,6 +1320,8 @@ async def safe_event_reply(event, *args, **kwargs):
     text_arg = sanitize_outgoing_text(args[0]) if args and isinstance(args[0], str) else ""
     if args and isinstance(args[0], str):
         args = (text_arg, *args[1:])
+    if "buttons" in kwargs:
+        kwargs["buttons"] = sanitize_buttons(kwargs.get("buttons"))
     if args and isinstance(args[0], str) and len(args[0]) > TELEGRAM_SAFE_TEXT_LIMIT and "file" not in kwargs:
         log_action_event(
             "reply",
@@ -1418,6 +1407,14 @@ async def safe_event_reply(event, *args, **kwargs):
             result="error",
         )
         return None
+
+
+async def safe_client_send_message(entity, *args, **kwargs):
+    if args and isinstance(args[0], str):
+        args = (sanitize_outgoing_text(args[0]), *args[1:])
+    if "buttons" in kwargs:
+        kwargs["buttons"] = sanitize_buttons(kwargs.get("buttons"))
+    return await client.send_message(entity, *args, **kwargs)
 
 
 def remove_file_quietly(path: Path) -> bool:
@@ -1520,7 +1517,7 @@ async def reply_with_text_file(event, text: str, **kwargs):
         preview = preview[:520].rstrip() + "..."
     short_text = "\n".join(
         (
-            "\u041f\u043e\u043b\u043d\u044b\u0439 \u0442\u0435\u043a\u0441\u0442 \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u0431\u043e\u043b\u044c\u0448\u043e\u0439 \u0434\u043b\u044f Telegram. \u041e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u044e \u0444\u0430\u0439\u043b\u043e\u043c.",
+            msg("status.long_text_as_file"),
             f"\u0424\u0430\u0439\u043b: {path.name}",
             "",
             preview,
@@ -4893,31 +4890,41 @@ def parse_wizard_command(text: str) -> str | None:
 
 def parse_wizard_reply_choice(text: str) -> str | None:
     cleaned = text.strip().casefold()
+    repaired = sanitize_outgoing_text(cleaned).strip().casefold()
+    variants = {cleaned, repaired}
     first_token = cleaned.split(maxsplit=1)[0] if cleaned else ""
+    first_token_repaired = repaired.split(maxsplit=1)[0] if repaired else ""
     if first_token == "1":
         return "send_now"
     if first_token == "2":
         return "add_text"
     if first_token == "0":
         return "cancel"
-    if cleaned in {"1", "РЅРµС‚", "no", "n", "РѕС‚РїСЂР°РІРёС‚СЊ", "send"}:
+    if first_token_repaired == "1":
         return "send_now"
-    if cleaned in {"2", "РґР°", "yes", "y", "РґРѕР±Р°РІРёС‚СЊ", "add"}:
+    if first_token_repaired == "2":
         return "add_text"
-    if cleaned in {"0", "РѕС‚РјРµРЅР°", "cancel", "/cancel"}:
+    if first_token_repaired == "0":
+        return "cancel"
+    if variants & {"1", "нет", "no", "n", "отправить", "send"}:
+        return "send_now"
+    if variants & {"2", "да", "yes", "y", "добавить", "add"}:
+        return "add_text"
+    if variants & {"0", "отмена", "cancel", "/cancel"}:
         return "cancel"
     return None
 
 
 def is_control_reply_text(text: str) -> bool:
     cleaned = str(text or "").strip().casefold()
+    repaired = sanitize_outgoing_text(cleaned).strip().casefold()
     if not cleaned:
         return False
-    if re.fullmatch(r"\d{1,3}", cleaned):
+    if re.fullmatch(r"\d{1,3}", cleaned) or re.fullmatch(r"\d{1,3}", repaired):
         return True
     return cleaned in {
-        "РґР°",
-        "РЅРµС‚",
+        "да",
+        "нет",
         "yes",
         "no",
         "y",
@@ -4925,9 +4932,22 @@ def is_control_reply_text(text: str) -> bool:
         "send",
         "cancel",
         "/cancel",
-        "РѕС‚РјРµРЅР°",
-        "РІС‹РїРѕР»РЅРёС‚СЊ",
-        "РѕС‚РїСЂР°РІРёС‚СЊ",
+        "отмена",
+        "выполнить",
+        "отправить",
+    } or repaired in {
+        "да",
+        "нет",
+        "yes",
+        "no",
+        "y",
+        "n",
+        "send",
+        "cancel",
+        "/cancel",
+        "отмена",
+        "выполнить",
+        "отправить",
     }
 
 
@@ -6610,7 +6630,7 @@ def build_live_root_panel_html() -> str:
     }}
     function filteredUsers() {{
       const q = String(search.value || "").trim().toLowerCase();
-      const qDigits = q.replace(/\D+/g, "");
+      const qDigits = q.replace(/\\D+/g, "");
 
       // Exact ID/username lookup should not be blocked by status filter.
       if (q) {{
@@ -6714,6 +6734,18 @@ def build_live_root_panel_html() -> str:
       while (eventLog.childElementCount > 12) {{
         eventLog.removeChild(eventLog.lastChild);
       }}
+    }}
+
+    function hideDeprecatedButtons() {{
+      const isDeprecated = (text) => /приказ/i.test(String(text || ""));
+      document.querySelectorAll("button, a, [role='button']").forEach((node) => {{
+        const label = (node.textContent || "").trim();
+        const aria = (node.getAttribute("aria-label") || "").trim();
+        const title = (node.getAttribute("title") || "").trim();
+        if (isDeprecated(label) || isDeprecated(aria) || isDeprecated(title)) {{
+          node.remove();
+        }}
+      }});
     }}
 
     function renderList() {{
@@ -7069,12 +7101,14 @@ def build_live_root_panel_html() -> str:
     setupConsoleTab();
     renderList();
     renderMeta();
+    hideDeprecatedButtons();
     refreshScanNotice();
     loadActionsLog();
     loadErrorsLog();
     setInterval(() => {{
       if (activeTab === "services") loadServices();
       if (activeTab === "state") loadState();
+      hideDeprecatedButtons();
       refreshScanNotice();
       loadActionsLog();
       loadErrorsLog();
@@ -7378,12 +7412,68 @@ def dashboard_update_job(job_id: str, **fields: object) -> dict[str, object] | N
             result_text=str(snapshot.get("result_text") or ""),
             error_text=str(snapshot.get("error_text") or ""),
         )
+        if status_changed_to in {"done", "failed"}:
+            action_name = str(snapshot.get("action") or "").strip().casefold()
+            if action_name in {
+                "mail",
+                "broadcast",
+                "promo",
+                "replace_key",
+                "delete_access",
+                "wizard_card",
+                "wizard_text",
+                "scan_new",
+                "scan_continue",
+                "scan_reset",
+                "scan_pause",
+                "pause_scan",
+                "stop_mail2",
+            }:
+                dashboard_api_cache_invalidate(("admin-api::overview::", "root-api::users::", "root-api::user::"))
     return snapshot
 
 
 def dashboard_get_job(job_id: str) -> dict[str, object] | None:
     with dashboard_action_jobs_lock:
         return dashboard_job_snapshot(dashboard_action_jobs.get(job_id))
+
+
+def dashboard_api_cache_get(key: str) -> dict[str, object] | None:
+    if not settings.dashboard_api_cache_enabled:
+        return None
+    now_ts = now_timestamp()
+    with dashboard_api_cache_lock:
+        item = dashboard_api_cache.get(key)
+        if not item:
+            return None
+        expires_at, payload = item
+        if now_ts >= expires_at:
+            dashboard_api_cache.pop(key, None)
+            return None
+        return dict(payload)
+
+
+def dashboard_api_cache_set(key: str, payload: dict[str, object]) -> None:
+    if not settings.dashboard_api_cache_enabled:
+        return
+    ttl = max(1.0, float(settings.dashboard_api_cache_ttl_seconds))
+    with dashboard_api_cache_lock:
+        dashboard_api_cache[key] = (now_timestamp() + ttl, dict(payload))
+
+
+def dashboard_api_cache_invalidate(prefixes: tuple[str, ...] | None = None) -> None:
+    with dashboard_api_cache_lock:
+        if not prefixes:
+            dashboard_api_cache.clear()
+            return
+        for key in list(dashboard_api_cache.keys()):
+            if any(key.startswith(prefix) for prefix in prefixes):
+                dashboard_api_cache.pop(key, None)
+
+
+def dashboard_api_cache_key(api_name: str, api_parts: list[str], query: str = "") -> str:
+    joined = "/".join(part.strip().casefold() for part in api_parts)
+    return f"{api_name.strip().casefold()}::{joined}::{query.strip().casefold()}"
 
 
 def dashboard_log_action_event(
@@ -7898,11 +7988,12 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 )
                 return True
             if len(api_parts) == 1 and api_parts[0] == "overview":
-                self.send_json(
-                    {"ok": True, "overview": dashboard_live_overview_payload()},
-                    HTTPStatus.OK,
-                    send_body=send_body,
-                )
+                cache_key = dashboard_api_cache_key(api_name, api_parts)
+                payload = dashboard_api_cache_get(cache_key)
+                if payload is None:
+                    payload = {"ok": True, "overview": dashboard_live_overview_payload()}
+                    dashboard_api_cache_set(cache_key, payload)
+                self.send_json(payload, HTTPStatus.OK, send_body=send_body)
                 return True
             if len(api_parts) == 1 and api_parts[0] == "services":
                 self.send_json(
@@ -7915,19 +8006,25 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 query_text = str(urlsplit(self.path).query or "")
                 query_match = re.search(r"(?:^|&)q=([^&]*)", query_text)
                 query_value = unquote(query_match.group(1)) if query_match else ""
-                self.send_json(
-                    {"ok": True, "payload": dashboard_root_users_payload(query_value)},
-                    HTTPStatus.OK,
-                    send_body=send_body,
-                )
+                cache_key = dashboard_api_cache_key(api_name, api_parts, query_value)
+                payload = dashboard_api_cache_get(cache_key)
+                if payload is None:
+                    payload = {"ok": True, "payload": dashboard_root_users_payload(query_value)}
+                    dashboard_api_cache_set(cache_key, payload)
+                self.send_json(payload, HTTPStatus.OK, send_body=send_body)
                 return True
             if api_name == "root-api" and len(api_parts) == 2 and api_parts[0] == "user":
                 lookup = str(api_parts[1] or "").strip()
-                detail = dashboard_root_user_detail_payload(lookup)
-                if not detail:
-                    self.send_json({"ok": False, "error": "user_not_found"}, HTTPStatus.NOT_FOUND, send_body=send_body)
-                    return True
-                self.send_json({"ok": True, "user": detail}, HTTPStatus.OK, send_body=send_body)
+                cache_key = dashboard_api_cache_key(api_name, api_parts, lookup)
+                payload = dashboard_api_cache_get(cache_key)
+                if payload is None:
+                    detail = dashboard_root_user_detail_payload(lookup)
+                    if not detail:
+                        self.send_json({"ok": False, "error": "user_not_found"}, HTTPStatus.NOT_FOUND, send_body=send_body)
+                        return True
+                    payload = {"ok": True, "user": detail}
+                    dashboard_api_cache_set(cache_key, payload)
+                self.send_json(payload, HTTPStatus.OK, send_body=send_body)
                 return True
             if api_name == "root-api" and len(api_parts) == 1 and api_parts[0] == "actions":
                 self.send_json(
@@ -8293,6 +8390,7 @@ def reset_database(conn: sqlite3.Connection) -> None:
 def reset_scan_database() -> None:
     with connect_database() as conn:
         reset_database(conn)
+    dashboard_api_cache_invalidate(("admin-api::overview::", "root-api::users::", "root-api::user::"))
 
 
 def clear_scan_outputs() -> None:
@@ -8907,7 +9005,18 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
         run_id = int(cursor.lastrowid)
 
         for record in records:
-            subscriptions = list(record.get("subscriptions") or [])
+            raw_subscriptions = list(record.get("subscriptions") or [])
+            subscriptions: list[dict] = []
+            seen_sub_keys: set[str] = set()
+            for sub in raw_subscriptions:
+                sub_id = str(sub.get("subscription_id") or "").strip()
+                btn = str(sub.get("button_text") or "").strip()
+                loc = str(sub.get("location") or "").strip()
+                key = sub_id or f"{btn}|{loc}"
+                if not key or key in seen_sub_keys:
+                    continue
+                seen_sub_keys.add(key)
+                subscriptions.append(sub)
             username = extract_username_from_record(record)
             parsed_profile = parse_profile_text_features(str(record.get("user_text") or ""))
             user_cursor = conn.execute(
@@ -9007,6 +9116,7 @@ def save_scan_data_to_database(summary_text: str, detailed_text: str, stats: dic
             )
 
         conn.commit()
+        dashboard_api_cache_invalidate(("admin-api::overview::", "root-api::users::", "root-api::user::"))
         return run_id
 
 
@@ -9020,6 +9130,40 @@ def load_latest_scan_stats_from_database() -> dict | None:
             try:
                 data = json.loads(str(row["stats_json"]))
                 if isinstance(data, dict):
+                    latest_records = load_latest_records_from_database()
+                    if latest_records:
+                        def _dedup_sub_count(items: list[dict]) -> int:
+                            total = 0
+                            for rec in items:
+                                seen: set[str] = set()
+                                for sub in list(rec.get("subscriptions") or []):
+                                    sub_id = str(sub.get("subscription_id") or "").strip()
+                                    btn = str(sub.get("button_text") or "").strip()
+                                    loc = str(sub.get("location") or "").strip()
+                                    key = sub_id or f"{btn}|{loc}"
+                                    if not key or key in seen:
+                                        continue
+                                    seen.add(key)
+                                    total += 1
+                            return total
+
+                        stats_users = int(data.get("users_total") or 0)
+                        stats_subs = int(data.get("subscriptions_total") or 0)
+                        db_users = len(latest_records)
+                        db_subs = _dedup_sub_count(latest_records)
+                        if stats_users != db_users or stats_subs != db_subs:
+                            summary_text, rebuilt = build_scan_report(
+                                latest_records,
+                                pages_total=int(data.get("pages_total") or 0),
+                                admin_statistics=dict(data.get("admin_statistics") or {}),
+                            )
+                            rebuilt["generated_at"] = data.get("generated_at") or datetime.now().isoformat(timespec="seconds")
+                            rebuilt["database"] = {
+                                "path": str(database_path()),
+                                "source": "latest_tables_reconciled",
+                            }
+                            rebuilt["summary_preview"] = summary_text[:500]
+                            return rebuilt
                     return data
             except json.JSONDecodeError:
                 logging.exception("Failed to parse latest scan stats from database")
@@ -9123,6 +9267,7 @@ def upsert_latest_record(record: dict, *, observed_at: str | None = None) -> Non
         initialize_database(conn)
         upsert_latest_record_with_conn(conn, record, observed_at=observed_at)
         conn.commit()
+    dashboard_api_cache_invalidate(("admin-api::overview::", "root-api::users::", "root-api::user::"))
 
 
 def load_latest_records_from_database() -> list[dict]:
@@ -10016,12 +10161,12 @@ async def send_admin_and_get_menu(conv, bot):
 
 async def send_conv_message_with_retry(bot, payload):
     try:
-        await client.send_message(bot, payload)
+        await safe_client_send_message(bot, payload)
         note_success_action()
     except ValueError as error:
         if "too many incoming messages" in str(error).casefold():
             logging.warning("Ignored stale conversation overflow while sending admin payload directly")
-            await client.send_message(bot, payload)
+            await safe_client_send_message(bot, payload)
             note_success_action()
             return
         raise
@@ -10030,7 +10175,7 @@ async def send_conv_message_with_retry(bot, payload):
         note_floodwait(wait_seconds)
         logging.warning("FloodWait on client.send_message: waiting %ss before retry", wait_seconds)
         await asyncio.sleep(wait_seconds + 1)
-        await client.send_message(bot, payload)
+        await safe_client_send_message(bot, payload)
         note_success_action()
 
 
@@ -12725,7 +12870,7 @@ async def send_latest_dashboard_to_chat_id(chat_id: int) -> bool:
         if not dashboard_url:
             _, dashboard_url = publish_dashboard_file(dashboard_path, latest_name="latest-scan-dashboard.html")
         admin_url = live_admin_dashboard_url()
-        await client.send_message(
+        await safe_client_send_message(
             chat_id,
             dashboard_message_text("Admin system:", dashboard_url, dashboard_path, admin_url=admin_url),
             buttons=dashboard_link_buttons(dashboard_url, dashboard_path, admin_url=admin_url),
@@ -13762,7 +13907,7 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
         active_scan_action_delay_seconds = active_scan_base_delay_seconds
 
         progress_interval_seconds = max(0.25, env_float("SCAN_PROGRESS_INTERVAL_SECONDS", 0.5))
-        progress_message = await client.send_message(
+        progress_message = await safe_client_send_message(
             chat_id,
             build_scan_status(
                 f"РџСЂРѕРґРѕР»Р¶Р°СЋ scan РїРѕСЃР»Рµ РєРѕРјР°РЅРґС‹ `{command_name}`.",
@@ -13803,12 +13948,12 @@ async def run_scan_auto_resume_after_priority_command(interruption: dict) -> Non
             await update_auto_scan_progress("Scan СЃР±СЂРѕС€РµРЅ. РЎРѕС…СЂР°РЅРµРЅРЅС‹Р№ РїСЂРѕРіСЂРµСЃСЃ РѕС‡РёС‰РµРЅ.", done=True)
         else:
             await update_auto_scan_progress("Scan Р·Р°РІРµСЂС€РµРЅ. С‚РѕРіРѕРІС‹Р№ РѕС‚С‡РµС‚ РіРѕС‚РѕРІ.", done=True)
-        await client.send_message(chat_id, result)
+        await safe_client_send_message(chat_id, result)
         await send_latest_dashboard_to_chat_id(chat_id)
     except Exception:
         logging.exception("Scan auto-resume failed after priority command=%s", command_name)
         try:
-            await client.send_message(
+            await safe_client_send_message(
                 chat_id,
                 "РќРµ СѓРґР°Р»РѕСЃСЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РїСЂРѕРґРѕР»Р¶РёС‚СЊ scan. РћС‚РїСЂР°РІСЊ `scan continue`, С‡С‚РѕР±С‹ РїСЂРѕРґРѕР»Р¶РёС‚СЊ РІСЂСѓС‡РЅСѓСЋ.",
             )
@@ -14366,9 +14511,10 @@ async def send_mail_to_user_in_admin_bot(
 
 
 async def send_to_wizard_target(text: str) -> None:
+    text = sanitize_outgoing_text(text)
     try:
         target = await get_wizard_target_entity()
-        await client.send_message(target, text)
+        await safe_client_send_message(target, text)
         note_success_action()
     except FloodWaitError as error:
         wait_seconds = int(getattr(error, "seconds", 1) or 1)
@@ -14376,7 +14522,7 @@ async def send_to_wizard_target(text: str) -> None:
         logging.warning("FloodWait on wizard send: waiting %ss before retry", wait_seconds)
         await asyncio.sleep(wait_seconds + 1)
         target = await get_wizard_target_entity()
-        await client.send_message(target, text)
+        await safe_client_send_message(target, text)
         note_success_action()
 
 
@@ -14406,19 +14552,19 @@ async def ask_wizard_confirmation(
             user_id=user_id,
             target=wizard_target,
             extra_lines=[
-                "РљР°СЂС‚РѕС‡РєР° РїРѕРґРіРѕС‚РѕРІР»РµРЅР°",
-                "РџСЂРѕРІРµСЂСЊ С‚РµРєСЃС‚ РїРµСЂРµРґ РѕС‚РїСЂР°РІРєРѕР№",
-                "РћС‚РІРµС‚СЊ: 1 - РѕС‚РїСЂР°РІРёС‚СЊ, 2 - РґРѕРїРёСЃР°С‚СЊ, 0 - РѕС‚РјРµРЅР°",
+                msg("wizard.prepared"),
+                msg("wizard.review_before_send"),
+                msg("wizard.await_choice_hint"),
             ],
         )
     )
-    await safe_event_reply(event, f"РџСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ wizard:\n\n{base_text}")
+    await safe_event_reply(event, f"{msg('wizard.preview_title')}\n\n{base_text}")
     await safe_event_reply(
         event,
-        "РћС‚РїСЂР°РІР»СЏС‚СЊ РІ wizard?",
+        msg("wizard.send_variant_prompt"),
         buttons=[
-            [Button.text("1 РѕС‚РїСЂР°РІРёС‚СЊ"), Button.text("2 РґРѕРїРёСЃР°С‚СЊ")],
-            [Button.text("0 РѕС‚РјРµРЅР°")],
+            [Button.text("1 отправить"), Button.text("2 дописать")],
+            [Button.text("0 отмена")],
         ],
     )
 
@@ -15028,7 +15174,7 @@ async def handle_poc_callback(event: events.CallbackQuery.Event) -> None:
 
     logging.info("Process callback data=%r sender_id=%s changed=%s", data, event.sender_id, changed)
     try:
-        await event.edit(build_poc_text(), buttons=build_poc_buttons())
+        await event.edit(sanitize_outgoing_text(build_poc_text()), buttons=sanitize_buttons(build_poc_buttons()))
     except MessageNotModifiedError:
         pass
     except FloodWaitError as error:
@@ -15160,7 +15306,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РћС‚РїСЂР°РІРєР° РѕС‚РјРµРЅРµРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                        extra_lines=[msg("wizard.cancelled")],
                         done=True,
                     )
                 )
@@ -15174,7 +15320,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                             7,
                             user_id=pending_wizard_user_id,
                             target=wizard_target,
-                            extra_lines=["РћС‚РїСЂР°РІР»СЏСЋ РїРѕРґРіРѕС‚РѕРІР»РµРЅРЅСѓСЋ РєР°СЂС‚РѕС‡РєСѓ Р±РµР· РґРѕРїРѕР»РЅРµРЅРёСЏ"],
+                            extra_lines=[msg("wizard.sending_without_extra")],
                         )
                     )
                     await send_to_wizard_target(str(pending_wizard.get("final_text") or pending_wizard["base_text"]))
@@ -15186,7 +15332,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                             7,
                             user_id=pending_wizard_user_id,
                             target=wizard_target,
-                            extra_lines=["РљР°СЂС‚РѕС‡РєР° РѕС‚РїСЂР°РІР»РµРЅР°"],
+                            extra_lines=[msg("wizard.sent")],
                             done=True,
                         )
                     )
@@ -15199,11 +15345,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                             7,
                             user_id=pending_wizard_user_id,
                             target=wizard_target,
-                            extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РєР°СЂС‚РѕС‡РєСѓ", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                            extra_lines=[msg("wizard.failed"), "Подробности записаны в лог"],
                             failed=True,
                         )
                     )
-                    await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РІ wizard. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ Р»РѕРіРµ.")
+                    await safe_event_reply(event, msg("wizard.send_failed_log"))
                 return
             if choice == "add_text":
                 pending_wizard["stage"] = "await_extra_text"
@@ -15215,9 +15361,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
                         extra_lines=[
-                            "РћР¶РёРґР°СЋ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Р№ С‚РµРєСЃС‚",
-                            "РЎР»РµРґСѓСЋС‰РµРµ СЃРѕРѕР±С‰РµРЅРёРµ Р±СѓРґРµС‚ РґРѕР±Р°РІР»РµРЅРѕ Рє РєР°СЂС‚РѕС‡РєРµ",
-                            "Р”Р»СЏ РѕС‚РјРµРЅС‹ РѕС‚РїСЂР°РІСЊС‚Рµ 0",
+                            msg("wizard.await_extra"),
+                            msg("wizard.await_extra_note"),
+                            msg("wizard.cancel_hint"),
                         ],
                     )
                 )
@@ -15229,7 +15375,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     6,
                     user_id=pending_wizard_user_id,
                     target=wizard_target,
-                    extra_lines=["РќРµ РїРѕРЅСЏР» РѕС‚РІРµС‚. РќР°РїРёС€РёС‚Рµ 1, 2 РёР»Рё 0"],
+                    extra_lines=[msg("wizard.choice_help")],
                 )
             )
             return
@@ -15244,7 +15390,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РћС‚РїСЂР°РІРєР° РѕС‚РјРµРЅРµРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                        extra_lines=[msg("wizard.cancelled")],
                         done=True,
                     )
                 )
@@ -15254,7 +15400,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
             full_text = "\n\n".join(
                 (
                     str(pending_wizard["base_text"]),
-                    f"Р”РѕРїРѕР»РЅРµРЅРёРµ:\n{extra_text}",
+                    f"{msg('wizard.extra_title')}\n{extra_text}",
                 )
             )
             pending_wizard["extra_text"] = extra_text
@@ -15268,19 +15414,19 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                     user_id=pending_wizard_user_id,
                     target=wizard_target,
                     extra_lines=[
-                        "Р”РѕРїРѕР»РЅРµРЅРёРµ РґРѕР±Р°РІР»РµРЅРѕ",
-                        "РџСЂРѕРІРµСЂСЊ РёС‚РѕРіРѕРІС‹Р№ С‚РµРєСЃС‚",
-                        "РћС‚РІРµС‚СЊ: 1 - РѕС‚РїСЂР°РІРёС‚СЊ, 2 - РёР·РјРµРЅРёС‚СЊ РґРѕРїРёСЃРєСѓ, 0 - РѕС‚РјРµРЅР°",
+                        msg("wizard.extra_added"),
+                        msg("wizard.final_review"),
+                        msg("wizard.await_final_choice_hint"),
                     ],
                 )
             )
-            await safe_event_reply(event, f"С‚РѕРіРѕРІС‹Р№ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ wizard:\n\n{full_text}")
+            await safe_event_reply(event, f"{msg('wizard.final_preview_title')}\n\n{full_text}")
             await safe_event_reply(
                 event,
-                "РћС‚РїСЂР°РІР»СЏС‚СЊ СЌС‚РѕС‚ РІР°СЂРёР°РЅС‚?",
+                msg("wizard.send_variant_prompt"),
                 buttons=[
-                    [Button.text("1 РѕС‚РїСЂР°РІРёС‚СЊ"), Button.text("2 РёР·РјРµРЅРёС‚СЊ РґРѕРїРёСЃРєСѓ")],
-                    [Button.text("0 РѕС‚РјРµРЅР°")],
+                    [Button.text("1 отправить"), Button.text("2 изменить дописку")],
+                    [Button.text("0 отмена")],
                 ],
             )
             return
@@ -15296,7 +15442,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РћС‚РїСЂР°РІРєР° РѕС‚РјРµРЅРµРЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј"],
+                        extra_lines=[msg("wizard.cancelled")],
                         done=True,
                     )
                 )
@@ -15311,9 +15457,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
                         extra_lines=[
-                            "РћР¶РёРґР°СЋ РЅРѕРІС‹Р№ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Р№ С‚РµРєСЃС‚",
-                            "РЎР»РµРґСѓСЋС‰РµРµ СЃРѕРѕР±С‰РµРЅРёРµ Р·Р°РјРµРЅРёС‚ РїСЂРѕС€Р»СѓСЋ РґРѕРїРёСЃРєСѓ",
-                            "Р”Р»СЏ РѕС‚РјРµРЅС‹ РѕС‚РїСЂР°РІСЊС‚Рµ 0",
+                            msg("wizard.await_new_extra"),
+                            msg("wizard.replace_extra_note"),
+                            msg("wizard.cancel_hint"),
                         ],
                     )
                 )
@@ -15326,7 +15472,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         6,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РќРµ РїРѕРЅСЏР» РѕС‚РІРµС‚. РќР°РїРёС€РёС‚Рµ 1, 2 РёР»Рё 0"],
+                        extra_lines=[msg("wizard.choice_help")],
                     )
                 )
                 return
@@ -15340,9 +15486,9 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
                         extra_lines=[
-                            "РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РїРѕР»СѓС‡РµРЅРѕ",
-                            f"Р”Р»РёРЅР° РёС‚РѕРіРѕРІРѕРіРѕ С‚РµРєСЃС‚Р°: {len(str(pending_wizard.get('final_text') or ''))} СЃРёРјРІРѕР»РѕРІ",
-                            "РћС‚РїСЂР°РІР»СЏСЋ РІ wizard",
+                            msg("wizard.confirmation_received"),
+                            msg("wizard.final_text_length", length=len(str(pending_wizard.get("final_text") or ""))),
+                            msg("wizard.sending_now"),
                         ],
                     )
                 )
@@ -15355,7 +15501,7 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         7,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РљР°СЂС‚РѕС‡РєР° РѕС‚РїСЂР°РІР»РµРЅР° РїРѕСЃР»Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ"],
+                        extra_lines=[msg("wizard.sent_after_confirm")],
                         done=True,
                     )
                 )
@@ -15368,11 +15514,11 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
                         7,
                         user_id=pending_wizard_user_id,
                         target=wizard_target,
-                        extra_lines=["РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РєР°СЂС‚РѕС‡РєСѓ СЃ РґРѕРїРѕР»РЅРµРЅРёРµРј", "РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё Р·Р°РїРёСЃР°РЅС‹ РІ Р»РѕРі"],
+                        extra_lines=[msg("wizard.send_extra_failed"), "Подробности записаны в лог"],
                         failed=True,
                     )
                 )
-                await safe_event_reply(event, "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РІ wizard. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ Р»РѕРіРµ.")
+                await safe_event_reply(event, msg("wizard.send_failed_log"))
             return
 
     pending_mail2 = pending_mail2_requests.get(sender_id)

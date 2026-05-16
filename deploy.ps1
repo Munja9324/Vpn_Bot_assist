@@ -9,11 +9,55 @@ $Remote = "origin"
 $Branch = "main"
 $Server = "root@176.124.222.183"
 $KeyPath = Join-Path $env:USERPROFILE ".ssh\codex_kvm_ed25519"
+$PrecheckLog = Join-Path $Repo "deploy-precheck.log"
 
 Set-Location -LiteralPath $Repo
 
-$Python = "C:\Users\VOL29\AppData\Local\Programs\Python\Python314\python.exe"
-& $Python -m py_compile "$Repo\vpn_kbr.py"
+function Resolve-PythonExe {
+    $candidates = @(
+        "C:\Users\VOL29\AppData\Local\Programs\Python\Python314\python.exe",
+        "C:\Users\VOL29\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+    throw "Python executable not found."
+}
+
+function Run-PrecheckStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][scriptblock]$Script,
+        [Parameter(Mandatory = $true)][string]$CommandLabel
+    )
+
+    Add-Content -LiteralPath $PrecheckLog -Value "[$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))] STEP: $Name"
+    Add-Content -LiteralPath $PrecheckLog -Value "CMD: $CommandLabel"
+
+    & $Script *>> $PrecheckLog
+    if ($LASTEXITCODE -ne 0) {
+        throw "Predeploy check failed on step: $Name. See $PrecheckLog"
+    }
+}
+
+if (Test-Path -LiteralPath $PrecheckLog) {
+    Remove-Item -LiteralPath $PrecheckLog -Force
+}
+"Predeploy checks started at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Set-Content -LiteralPath $PrecheckLog -Encoding UTF8
+
+$Python = Resolve-PythonExe
+
+Run-PrecheckStep -Name "Compile package" -CommandLabel "$Python -c <py_compile>" -Script {
+    & $Python -c "import pathlib,py_compile; [py_compile.compile(str(p), doraise=True) for p in pathlib.Path('kbrbot').rglob('*.py')]; py_compile.compile('vpn_kbr.py', doraise=True)"
+}
+Run-PrecheckStep -Name "Pytest smoke" -CommandLabel "$Python -m pytest -q" -Script {
+    & $Python -m pytest -q
+}
+Run-PrecheckStep -Name "Mojibake guard" -CommandLabel "$Python tools/check_mojibake.py" -Script {
+    & $Python tools/check_mojibake.py
+}
 
 function Test-SensitivePath {
     param([string]$Path)
