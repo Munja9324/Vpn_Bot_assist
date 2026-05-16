@@ -1,8 +1,8 @@
-# vpn_kbr Remotion loader
+# VPN KBR Remotion Loader
 
-Короткая 5-секундная анимация загрузки для бота `vpn_kbr`: защитный знак, сканер, вращающиеся сетевые кольца, прогресс и финальный статус.
+Короткая загрузочная анимация для dashboard/админ-интерфейса.
 
-## Запуск
+## Запуск превью
 
 ```bash
 npm install
@@ -15,4 +15,8 @@ npm run start
 npm run render
 ```
 
-Композиция: `VpnKbrLoader`, 1080x1080, 30 fps, 150 frames.
+Параметры композиции:
+- `VpnKbrLoader`
+- `1080x1080`
+- `30 fps`
+- `150 frames`
