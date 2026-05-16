@@ -523,6 +523,7 @@ pending_gpt_requests: dict[int, dict[str, object]] = {}
 pending_smart_actions: dict[int, dict[str, object]] = {}
 pending_support_requests: dict[int, dict[str, object]] = {}
 pending_direct_mail_requests: dict[int, dict[str, object]] = {}
+non_requester_help_attempts: dict[int, dict[str, object]] = {}
 last_reply_sent_at_by_chat: dict[int, float] = {}
 last_reply_sent_at_lock = asyncio.Lock()
 active_gpt_requests: dict[int, dict[str, object]] = {}
@@ -2739,6 +2740,19 @@ RU_OPERATOR_REQUEST_PHRASES = (
     "оператор",
     "человек",
     "хочу поговорить",
+    "нужен живой человек",
+    "переведи на оператора",
+    "переключи на оператора",
+    "соедини с человеком",
+    "дайте оператора",
+    "дай оператора",
+    "саппорт",
+    "поддержка",
+    "хочу в поддержку",
+    "позовите поддержку",
+    "передай оператору",
+    "свяжи с админом",
+    "эскалация",
 )
 
 RU_GREETING_PHRASES = (
@@ -2757,6 +2771,14 @@ RU_GREETING_PHRASES = (
     "hello",
     "hi",
     "hey",
+    "здорово",
+    "добрейший вечерочек",
+    "доброго времени суток",
+    "алло",
+    "на связи",
+    "хеллоу",
+    "хай!",
+    "приветствую",
 )
 
 RU_THANKS_PHRASES = (
@@ -2774,6 +2796,14 @@ RU_THANKS_PHRASES = (
     "решилось",
     "thanks",
     "thx",
+    "благодарочка",
+    "спасиб",
+    "признателен",
+    "окей спасибо",
+    "спасибо, помогло",
+    "благодарствую",
+    "респект",
+    "топ",
 )
 
 RU_VPN_SETUP_PHRASES = (
@@ -2813,6 +2843,26 @@ RU_VPN_SETUP_PHRASES = (
     "android подключить",
     "windows подключить",
     "mac подключить",
+    "как подключиться",
+    "как войти через впн",
+    "подключение vpn пошагово",
+    "пошаговая инструкция vpn",
+    "как импортировать конфиг",
+    "как добавить конфиг",
+    "как загрузить ключ",
+    "где взять приложение",
+    "какое приложение выбрать",
+    "какой клиент для iphone",
+    "какой клиент для android",
+    "как подключить на айфоне",
+    "как подключить на андроиде",
+    "как подключить на windows",
+    "как подключить на mac",
+    "как подключить на роутере",
+    "как использовать ключ",
+    "как открыть ссылку подписки",
+    "не понимаю как подключить",
+    "нужна инструкция по настройке",
 )
 
 RU_PROFILE_ID_PHRASES = (
@@ -2836,6 +2886,15 @@ RU_PROFILE_ID_PHRASES = (
     "id пользователя",
     "id в профиле",
     "айди в профиле",
+    "где взять id",
+    "как получить id",
+    "как узнать номер в боте",
+    "где посмотреть номер пользователя",
+    "мой id в боте",
+    "какой у меня id",
+    "покажи номер пользователя",
+    "какой мой айди",
+    "мой айди в профиле",
 )
 
 RU_SELF_INFO_PHRASES = (
@@ -2854,6 +2913,16 @@ RU_SELF_INFO_PHRASES = (
     "до какого числа",
     "мой баланс",
     "мой vpn",
+    "мой тариф",
+    "мой план",
+    "статус моей подписки",
+    "проверь мою подписку",
+    "сколько дней осталось",
+    "до какого числа подписка",
+    "мой срок подписки",
+    "покажи мой статус",
+    "мои данные",
+    "инфа по моему аккаунту",
 )
 
 RU_KEY_ISSUE_PHRASES = (
@@ -2877,6 +2946,18 @@ RU_KEY_ISSUE_PHRASES = (
     "не копируется ключ",
     "vless не работает",
     "vmess не работает",
+    "trojan не работает",
+    "реальность не работает",
+    "reality не работает",
+    "конфиг не импортируется",
+    "не открывается ключ",
+    "ключ невалидный",
+    "не читается ключ",
+    "ссылка на ключ битая",
+    "ошибка при импорте ключа",
+    "cannot import config",
+    "invalid config",
+    "bad config",
 )
 
 RU_PAYMENT_ISSUE_PHRASES = (
@@ -2899,6 +2980,18 @@ RU_PAYMENT_ISSUE_PHRASES = (
     "пополнение не пришло",
     "промокод не работает",
     "promo не работает",
+    "перевел деньги",
+    "перевела деньги",
+    "оплата зависла",
+    "платеж завис",
+    "платеж в обработке",
+    "чек отправил",
+    "чек отправила",
+    "оплата есть подписки нет",
+    "оплата прошла но доступа нет",
+    "деньги ушли",
+    "не вижу оплату",
+    "не пришло продление",
 )
 
 RU_CONNECTION_ISSUE_PHRASES = (
@@ -2926,6 +3019,20 @@ RU_CONNECTION_ISSUE_PHRASES = (
     "постоянно отключается",
     "не пускает",
     "не проходит подключение",
+    "error connection",
+    "ошибка подключения",
+    "connection timeout",
+    "tls handshake error",
+    "dns error",
+    "нет соединения",
+    "не коннектится",
+    "не соединяет",
+    "впн отвалился",
+    "разрывы соединения",
+    "подключается и сразу отключается",
+    "крутится но не подключает",
+    "сайт не открывается через vpn",
+    "не грузятся мессенджеры",
 )
 
 RU_SPEED_ISSUE_PHRASES = (
@@ -2943,6 +3050,16 @@ RU_SPEED_ISSUE_PHRASES = (
     "инстаграм не грузит",
     "telegram не грузит",
     "телеграм не грузит",
+    "скорость просела",
+    "сильно режет скорость",
+    "очень высокий пинг",
+    "скачет пинг",
+    "потери пакетов",
+    "видео тормозит",
+    "стрим тормозит",
+    "страницы открываются долго",
+    "соединение нестабильное",
+    "частые лаги",
 )
 
 RU_SUBSCRIPTION_ISSUE_PHRASES = (
@@ -2956,6 +3073,136 @@ RU_SUBSCRIPTION_ISSUE_PHRASES = (
     "не продлилась",
     "не активировалась",
     "доступ закончился",
+    "подписка не отображается",
+    "не вижу активную подписку",
+    "пропал доступ",
+    "слетел доступ",
+    "статус неактивен",
+    "не активна подписка после оплаты",
+    "подписка есть но не работает",
+    "не подтянулась подписка",
+    "не появилось продление",
+)
+
+RU_PAYMENT_HELP_PHRASES = (
+    "как оплатить",
+    "как оплатить подписку",
+    "как продлить",
+    "как продлить подписку",
+    "как продление сделать",
+    "как пополнить",
+    "как пополнить баланс",
+    "куда отправить чек",
+    "где чек",
+    "как купить",
+    "где купить подписку",
+    "как активировать после оплаты",
+    "после оплаты что делать",
+    "как оплатить через карту",
+    "как оплатить через перевод",
+    "как оплатить и активировать",
+    "как купить доступ",
+    "как пополнить счет",
+    "как подтвердить оплату",
+    "куда скинуть чек",
+    "куда отправлять чек",
+    "как проверить оплату",
+    "что если платеж не прошел",
+    "как сделать оплату",
+    "как оплатить vpn",
+)
+
+RU_SUBSCRIPTION_HELP_PHRASES = (
+    "какая у меня подписка",
+    "какой у меня тариф",
+    "какой тариф",
+    "какие тарифы",
+    "сколько стоит",
+    "цена подписки",
+    "стоимость подписки",
+    "на сколько дней подписка",
+    "сколько осталось дней",
+    "когда закончится подписка",
+    "когда истекает подписка",
+    "покажи мои подписки",
+    "мои подписки",
+    "мой срок",
+    "мой статус подписки",
+    "какой у меня доступ",
+    "сколько у меня подписок",
+    "какие подписки активны",
+    "какой период подписки",
+    "дата окончания подписки",
+    "когда заканчивается доступ",
+    "покажи тариф",
+    "какая цена",
+    "цены и тарифы",
+    "какие варианты подписки",
+)
+
+RU_KEY_HELP_PHRASES = (
+    "как заменить ключ",
+    "как обновить ключ",
+    "как восстановить ключ",
+    "где взять ключ",
+    "где мой ключ",
+    "как получить ключ",
+    "как переустановить ключ",
+    "как заново добавить ключ",
+    "куда вставить ключ",
+    "как импортировать ключ",
+    "как поменять ключ",
+    "как перевыпустить ключ",
+    "как получить новый ключ",
+    "как скопировать ключ",
+    "куда вставить ссылку ключа",
+    "как добавить vless",
+    "как добавить vmess",
+    "как добавить trojan",
+    "как загрузить ключ заново",
+    "как починить ключ",
+    "как заменить конфиг",
+)
+
+RU_SPEED_HELP_PHRASES = (
+    "как ускорить vpn",
+    "как повысить скорость",
+    "как улучшить скорость",
+    "как уменьшить пинг",
+    "почему медленно работает",
+    "как сделать быстрее",
+    "как улучшить пинг",
+    "как стабилизировать соединение",
+    "как убрать лаги",
+    "как ускорить подключение",
+    "как выбрать лучший сервер",
+    "как снизить задержку",
+    "как сделать интернет быстрее через vpn",
+    "как исправить низкую скорость",
+)
+
+RU_CAPABILITIES_PHRASES = (
+    "что ты умеешь",
+    "что умеешь",
+    "что можешь",
+    "твои возможности",
+    "возможности бота",
+    "что умеет бот",
+    "чем можешь помочь",
+    "что ты можешь сделать",
+    "помощь по командам",
+    "какие команды есть",
+    "что ты можешь делать",
+    "какой функционал",
+    "покажи функционал",
+    "что доступно сейчас",
+    "чем ты полезен",
+    "что у тебя есть",
+    "список команд",
+    "помощь",
+    "help",
+    "menu",
+    "меню",
 )
 
 RU_PROBLEM_PHRASES = (
@@ -3004,6 +3251,13 @@ def support_operator_contact_text() -> str:
     return assistant_compact_reply(
         "РџРѕРґРєР»СЋС‡Р°СЋ РѕРїРµСЂР°С‚РѕСЂР° РїРѕРґРґРµСЂР¶РєРё.",
         f"Р•СЃР»Рё РЅСѓР¶РЅРѕ СЃСЂРѕС‡РЅРѕ, РЅР°РїРёС€РёС‚Рµ @{SUPPORT_OPERATOR_USERNAME}.",
+    )
+
+
+def wizard_requester_only_message() -> str:
+    return assistant_compact_reply(
+        "\u041f\u0435\u0440\u0435\u0434\u0430\u0447\u0430 \u0432 wizard \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430 \u0442\u043e\u043b\u044c\u043a\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u043d\u0438\u043a\u0430\u043c.",
+        f"\u0415\u0441\u043b\u0438 \u043d\u0443\u0436\u0435\u043d \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440, \u043d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 @{SUPPORT_OPERATOR_USERNAME}.",
     )
 
 
@@ -3056,10 +3310,20 @@ def detect_non_requester_intent(text: str) -> str:
         return "empty"
     if is_operator_request_text(cleaned):
         return "operator"
+    if any(phrase in cleaned for phrase in RU_CAPABILITIES_PHRASES):
+        return "capabilities"
     if is_vpn_setup_request_text(cleaned):
         return "vpn_setup_help"
     if is_profile_id_help_text(cleaned):
         return "profile_id_help"
+    if any(phrase in cleaned for phrase in RU_PAYMENT_HELP_PHRASES):
+        return "payment_help"
+    if any(phrase in cleaned for phrase in RU_SUBSCRIPTION_HELP_PHRASES):
+        return "subscription_help"
+    if any(phrase in cleaned for phrase in RU_KEY_HELP_PHRASES):
+        return "key_help"
+    if any(phrase in cleaned for phrase in RU_SPEED_HELP_PHRASES):
+        return "speed_help"
     if detect_support_issue_types(cleaned) or looks_like_problem_report(cleaned):
         return "support_issue"
     words_count = len(re.findall(r"\S+", cleaned))
@@ -3199,6 +3463,91 @@ REQUESTER_ACTION_HINT_KEYWORDS = (
 )
 
 
+ADDITIONAL_REQUESTER_ACTION_HINT_KEYWORDS = (
+    "root",
+    "/root",
+    "открой root",
+    "покажи root",
+    "открой админку",
+    "открой админ панель",
+    "покажи админ панель",
+    "покажи сводку",
+    "покажи статистику",
+    "общая статистика",
+    "покажи пользователей",
+    "список пользователей",
+    "найти по id",
+    "найди по id",
+    "найти по username",
+    "найди по username",
+    "чекни пользователя",
+    "проверь пользователя",
+    "карточка пользователя",
+    "покажи подписки",
+    "проверь подписку",
+    "проверь подписки",
+    "написать пользователю",
+    "напиши юзеру",
+    "напиши пользователю",
+    "отправь юзеру",
+    "создай промо",
+    "сделай промокод",
+    "подготовь промокод",
+    "купон пользователю",
+    "рассылка без подписки",
+    "пауза скан",
+    "продолжи скан",
+    "новый скан",
+    "результаты скана",
+    "состояние скана",
+    "очередь задач",
+    "покажи очереди",
+    "открой логи",
+    "последние логи",
+    "покажи ошибки",
+    "покажи процессы",
+    "останови процесс",
+    "поставь на паузу процесс",
+    "продолжи процесс",
+    "какие процессы запущены",
+    "посмотри процессы",
+    "обнови статус",
+    "покажи статус",
+    "проверка сервиса",
+    "сводка по боту",
+    "покажи ошибки в логах",
+    "дай последние ошибки",
+    "покажи необработанные",
+    "unresolved list",
+    "пользователь по id",
+    "подписки по id",
+    "карточка по username",
+    "подписки по username",
+    "отправить карточку в wizard",
+    "собери карточку",
+    "создать купон",
+    "создать промо",
+    "сделай купон",
+    "письмо пользователю",
+    "мейл пользователю",
+    "массовая рассылка",
+    "рассылка юзерам без подписки",
+    "скан заново",
+    "перезапусти скан",
+    "остановить скан",
+    "пауза процесса скан",
+    "возобнови скан",
+    "показать результаты скана",
+    "сбросить скан",
+    "проверить очереди",
+    "очистить pending",
+    "покажи requesters",
+    "список запросников",
+    "добавь запросника",
+    "удали запросника",
+)
+
+
 def looks_like_requester_action_text(text: str) -> bool:
     cleaned = (text or "").strip().casefold()
     if not cleaned:
@@ -3207,7 +3556,9 @@ def looks_like_requester_action_text(text: str) -> bool:
         return True
     if detect_direct_smart_action(cleaned) is not None:
         return True
-    return any(keyword in cleaned for keyword in REQUESTER_ACTION_HINT_KEYWORDS)
+    return any(keyword in cleaned for keyword in REQUESTER_ACTION_HINT_KEYWORDS) or any(
+        keyword in cleaned for keyword in ADDITIONAL_REQUESTER_ACTION_HINT_KEYWORDS
+    )
 
 
 def support_clarification_message() -> str:
@@ -3471,6 +3822,45 @@ NON_REQUESTER_RESTRICTED_ACTION_KEYWORDS = (
     "СЃС‚Р°С‚СѓСЃ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
 )
 
+ADDITIONAL_NON_REQUESTER_RESTRICTED_ACTION_KEYWORDS = (
+    "/root",
+    "root",
+    "/dashboard",
+    "/adminsite",
+    "/processes",
+    "/diag",
+    "/tail",
+    "/logs",
+    "отправь пользователю",
+    "напиши пользователю",
+    "рассылка",
+    "сделай рассылку",
+    "создай промокод",
+    "сделай промокод",
+    "купон",
+    "wizard",
+    "отправь в wizard",
+    "карточка в wizard",
+    "запусти scan",
+    "скан пользователей",
+    "покажи пользователя",
+    "проверь пользователя",
+    "найди пользователя",
+    "покажи подписки пользователя",
+    "карточка пользователя",
+    "отправь в визард",
+    "отправь в wizard",
+    "сделай промо",
+    "создай купон",
+    "открой админку",
+    "админ панель",
+    "покажи логи",
+    "покажи процессы",
+    "запусти скан",
+    "останови скан",
+    "сброс скана",
+)
+
 
 def is_non_requester_self_info_text(text: str) -> bool:
     cleaned = (text or "").strip().casefold()
@@ -3487,7 +3877,9 @@ def is_non_requester_restricted_action_text(text: str) -> bool:
         return False
     if is_non_requester_self_info_text(cleaned):
         return False
-    return any(marker in cleaned for marker in NON_REQUESTER_RESTRICTED_ACTION_KEYWORDS)
+    return any(marker in cleaned for marker in NON_REQUESTER_RESTRICTED_ACTION_KEYWORDS) or any(
+        marker in cleaned for marker in ADDITIONAL_NON_REQUESTER_RESTRICTED_ACTION_KEYWORDS
+    )
 
 
 def resolve_non_requester_self_record(text: str, sender) -> tuple[dict | None, str]:
@@ -3537,6 +3929,32 @@ def non_requester_self_info_not_found_message() -> str:
 def non_requester_self_info_message(record: dict) -> str:
     return assistant_user_message(
         "РЅС„РѕСЂРјР°С†РёСЏ РїРѕ РІР°С€РµРјСѓ РїСЂРѕС„РёР»СЋ:\n" + format_user_summary_from_record(record)
+    )
+
+
+def clear_non_requester_help_attempt(sender_id: int) -> None:
+    non_requester_help_attempts.pop(int(sender_id or 0), None)
+
+
+def register_non_requester_help_attempt(sender_id: int, text: str) -> bool:
+    now_ts = now_timestamp()
+    key = str(text or "").strip().casefold()
+    slot = non_requester_help_attempts.get(int(sender_id or 0)) or {}
+    prev_key = str(slot.get("key") or "")
+    prev_at = float(slot.get("at") or 0.0)
+    prev_count = int(slot.get("count") or 0)
+    if key and key == prev_key and now_ts - prev_at <= 900:
+        count = prev_count + 1
+    else:
+        count = 1
+    non_requester_help_attempts[int(sender_id or 0)] = {"key": key, "count": count, "at": now_ts}
+    return count >= 2
+
+
+def non_requester_clarify_before_operator_message() -> str:
+    return assistant_compact_reply(
+        "\u041f\u043e\u043a\u0430 \u043d\u0435 \u0434\u043e \u043a\u043e\u043d\u0446\u0430 \u043f\u043e\u043d\u044f\u043b \u0437\u0430\u043f\u0440\u043e\u0441.",
+        "\u041d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 ID \u0438\u0437 \u00ab\u041f\u0440\u043e\u0444\u0438\u043b\u044f\u00bb \u0438 \u0447\u0442\u043e \u0438\u043c\u0435\u043d\u043d\u043e \u043d\u0435 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442. \u0415\u0441\u043b\u0438 \u043d\u0435 \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u0441\u044f, \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0443 \u043e\u043f\u0435\u0440\u0430\u0442\u043e\u0440\u0430.",
     )
 
 
@@ -3655,7 +4073,11 @@ async def forward_support_issue_to_wizard(
     record: dict | None,
     lookup_used: str,
     selected_subscriptions: list[dict] | None,
-) -> None:
+) -> bool:
+    if not is_requester_allowed(sender_id, sender):
+        logging.info("Wizard forward denied for non-requester sender_id=%s", sender_id)
+        return False
+
     sender_username_value = sender_username(sender)
     sender_full_name_value = sender_full_name(sender)
     report_text = build_support_wizard_report(
@@ -3668,6 +4090,7 @@ async def forward_support_issue_to_wizard(
         selected_subscriptions=selected_subscriptions,
     )
     await send_to_wizard_target(report_text)
+    return True
 
 
 async def update_or_reply_text(event, status_message, text: str, *, force: bool = True) -> None:
@@ -3700,7 +4123,7 @@ async def handle_pending_support_request(event, sender, sender_id: int, incoming
             )
             return True
         pending_support_requests.pop(sender_id, None)
-        await forward_support_issue_to_wizard(
+        forwarded = await forward_support_issue_to_wizard(
             sender=sender,
             sender_id=sender_id,
             issue_text=incoming_text,
@@ -3712,7 +4135,12 @@ async def handle_pending_support_request(event, sender, sender_id: int, incoming
                 else []
             ),
         )
-        await safe_event_reply(event, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+        await safe_event_reply(
+            event,
+            SUPPORT_TICKET_ACCEPTED_MESSAGE
+            if forwarded
+            else (support_operator_contact_text() if pending_support.get("self_only") else wizard_requester_only_message()),
+        )
         return True
 
     record = dict(pending_support.get("record") or {})
@@ -3735,7 +4163,7 @@ async def handle_pending_support_request(event, sender, sender_id: int, incoming
         return True
 
     pending_support_requests.pop(sender_id, None)
-    await forward_support_issue_to_wizard(
+    forwarded = await forward_support_issue_to_wizard(
         sender=sender,
         sender_id=sender_id,
         issue_text=original_issue_text,
@@ -3743,7 +4171,12 @@ async def handle_pending_support_request(event, sender, sender_id: int, incoming
         lookup_used=str(pending_support.get("lookup") or ""),
         selected_subscriptions=selected_subscriptions,
     )
-    await safe_event_reply(event, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+    await safe_event_reply(
+        event,
+        SUPPORT_TICKET_ACCEPTED_MESSAGE
+        if forwarded
+        else (support_operator_contact_text() if pending_support.get("self_only") else wizard_requester_only_message()),
+    )
     return True
 
 
@@ -3774,6 +4207,7 @@ async def handle_support_issue_flow(
                 "issue_text": issue_text,
                 "stage": "await_subscription",
                 "created_at": now_timestamp(),
+                "self_only": self_only,
             }
             await update_or_reply_text(event, status_message, support_subscriptions_question(record))
             return
@@ -3788,6 +4222,7 @@ async def handle_support_issue_flow(
                 "issue_text": issue_text,
                 "stage": "await_issue_details",
                 "created_at": now_timestamp(),
+                "self_only": self_only,
             }
             await update_or_reply_text(event, status_message, quick_template)
             return
@@ -3800,6 +4235,7 @@ async def handle_support_issue_flow(
                     "selected_subscriptions": selected_subscriptions,
                     "stage": "await_issue_details",
                     "created_at": now_timestamp(),
+                    "self_only": self_only,
                 }
             await update_or_reply_text(event, status_message, support_issue_clarification_message(issue_text))
             return
@@ -3821,7 +4257,7 @@ async def handle_support_issue_flow(
                 ],
             },
         )
-        await forward_support_issue_to_wizard(
+        forwarded = await forward_support_issue_to_wizard(
             sender=sender,
             sender_id=sender_id,
             issue_text=issue_text,
@@ -3829,7 +4265,11 @@ async def handle_support_issue_flow(
             lookup_used=lookup_used,
             selected_subscriptions=selected_subscriptions,
         )
-        await update_or_reply_text(event, status_message, SUPPORT_TICKET_ACCEPTED_MESSAGE)
+        await update_or_reply_text(
+            event,
+            status_message,
+            SUPPORT_TICKET_ACCEPTED_MESSAGE if forwarded else (support_operator_contact_text() if self_only else wizard_requester_only_message()),
+        )
         return
 
     lookup_guess = extract_problem_lookup(issue_text)
@@ -3866,11 +4306,26 @@ async def handle_non_requester_voice_message(event, sender, sender_id: int, inco
         if voice_intent == "greeting":
             await update_or_reply_text(event, status_message, support_intake_message())
             return
+        if voice_intent == "capabilities":
+            await update_or_reply_text(event, status_message, assistant_capabilities_message())
+            return
         if voice_intent == "vpn_setup_help":
             await update_or_reply_text(event, status_message, vpn_setup_help_message())
             return
         if voice_intent == "profile_id_help":
             await update_or_reply_text(event, status_message, profile_id_help_message())
+            return
+        if voice_intent == "payment_help":
+            await update_or_reply_text(event, status_message, payment_help_message())
+            return
+        if voice_intent == "subscription_help":
+            await update_or_reply_text(event, status_message, subscription_help_message())
+            return
+        if voice_intent == "key_help":
+            await update_or_reply_text(event, status_message, key_problem_help_message())
+            return
+        if voice_intent == "speed_help":
+            await update_or_reply_text(event, status_message, speed_problem_help_message())
             return
         if voice_intent == "thanks":
             await update_or_reply_text(event, status_message, support_thanks_message())
@@ -3919,23 +4374,49 @@ async def handle_non_requester_voice_message(event, sender, sender_id: int, inco
 
 async def handle_non_requester_text_message(event, sender, sender_id: int, incoming_text: str) -> None:
     if not incoming_text:
+        clear_non_requester_help_attempt(sender_id)
         await safe_event_reply(event, support_intake_message())
         return
 
     text_intent = detect_non_requester_intent(incoming_text)
     if text_intent == "greeting":
+        clear_non_requester_help_attempt(sender_id)
         await safe_event_reply(event, support_intake_message())
         return
+    if text_intent == "capabilities":
+        clear_non_requester_help_attempt(sender_id)
+        await safe_event_reply(event, assistant_capabilities_message())
+        return
     if text_intent == "vpn_setup_help":
+        clear_non_requester_help_attempt(sender_id)
         await safe_event_reply(event, vpn_setup_help_message())
         return
     if text_intent == "profile_id_help":
+        clear_non_requester_help_attempt(sender_id)
         await safe_event_reply(event, profile_id_help_message())
         return
+    if text_intent == "payment_help":
+        clear_non_requester_help_attempt(sender_id)
+        await safe_event_reply(event, payment_help_message())
+        return
+    if text_intent == "subscription_help":
+        clear_non_requester_help_attempt(sender_id)
+        await safe_event_reply(event, subscription_help_message())
+        return
+    if text_intent == "key_help":
+        clear_non_requester_help_attempt(sender_id)
+        await safe_event_reply(event, key_problem_help_message())
+        return
+    if text_intent == "speed_help":
+        clear_non_requester_help_attempt(sender_id)
+        await safe_event_reply(event, speed_problem_help_message())
+        return
     if text_intent == "thanks":
+        clear_non_requester_help_attempt(sender_id)
         await safe_event_reply(event, support_thanks_message())
         return
     if is_non_requester_self_info_text(incoming_text):
+        clear_non_requester_help_attempt(sender_id)
         record, _ = resolve_non_requester_self_record(incoming_text, sender)
         await safe_event_reply(
             event,
@@ -3943,6 +4424,7 @@ async def handle_non_requester_text_message(event, sender, sender_id: int, incom
         )
         return
     if text_intent == "support_issue":
+        clear_non_requester_help_attempt(sender_id)
         status_message = await safe_event_reply(
             event,
             support_processing_message(),
@@ -3957,10 +4439,16 @@ async def handle_non_requester_text_message(event, sender, sender_id: int, incom
         )
         return
     if is_non_requester_restricted_action_text(incoming_text):
+        clear_non_requester_help_attempt(sender_id)
         await safe_event_reply(event, non_requester_restricted_action_message())
         return
 
-    await safe_event_reply(event, support_operator_contact_text())
+    should_escalate = register_non_requester_help_attempt(sender_id, incoming_text)
+    if should_escalate:
+        clear_non_requester_help_attempt(sender_id)
+        await safe_event_reply(event, support_operator_contact_text())
+        return
+    await safe_event_reply(event, non_requester_clarify_before_operator_message())
 
 
 async def handle_non_requester_message(event, sender, sender_id: int, incoming_text: str) -> bool:
@@ -3980,10 +4468,12 @@ async def handle_non_requester_message(event, sender, sender_id: int, incoming_t
     )
     if is_operator_request_text(incoming_text):
         log_action_event("non_requester_route", sender_id=sender_id, route="operator_contact")
+        clear_non_requester_help_attempt(sender_id)
         await safe_event_reply(event, support_operator_contact_text())
         return True
     if await handle_pending_support_request(event, sender, sender_id, incoming_text):
         log_action_event("non_requester_route", sender_id=sender_id, route="pending_support")
+        clear_non_requester_help_attempt(sender_id)
         return True
     if is_voice_or_audio_message(event):
         log_action_event("non_requester_route", sender_id=sender_id, route="voice")
@@ -4036,6 +4526,10 @@ async def forward_problem_report_to_wizard(event, sender, text: str) -> bool:
         return False
 
     sender_id = int(event.sender_id or 0)
+    if not is_requester_allowed(sender_id, sender):
+        logging.info("Problem report wizard forward denied for non-requester sender_id=%s", sender_id)
+        return False
+
     lookup = extract_problem_lookup(text)
     if not lookup:
         return False
@@ -4204,19 +4698,44 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
         return None
 
     lowered = raw_text.casefold()
+    if any(
+        marker in lowered
+        for marker in (
+            "/root",
+            " root",
+            "root ",
+            "покажи root",
+            "открой root",
+            "админ панель",
+            "админка",
+            "панель управления",
+        )
+    ):
+        return {
+            "action": "dashboard",
+            "query": "",
+            "user_id": "",
+            "text": "",
+            "use_database": False,
+            "lines": 0,
+            "confidence": 0.98,
+            "explanation": "Локально распознан запрос открытия административной панели.",
+        }
 
     simple_keyword_actions = (
         (("menu", "РјРµРЅСЋ", "РєРѕРјР°РЅРґС‹", "РїРѕРєР°Р¶Рё РєРѕРјР°РЅРґС‹"), "menu", "", "", False, 0),
         (("dashboard", "РґР°С€Р±РѕСЂРґ", "РѕС‚С‡РµС‚", "РѕС‚С‡С‘С‚"), "dashboard", "", "", False, 0),
         (("adminsite", "admin site", "Р°РґРјРёРЅ СЃР°Р№С‚", "Р°РґРјРёРЅ РїР°РЅРµР»СЊ", "Р°РґРјРёРЅРєР°"), "dashboard", "", "", False, 0),
+        (("root", "/root", "requesters", "запросники", "roots"), "dashboard", "", "", False, 0),
         (("processes", "РїСЂРѕС†РµСЃСЃС‹", "РїСЂРѕС†РµСЃСЃС‹ Р±РѕС‚Р°"), "processes", "", "", False, 0),
         (("diag", "РґРёР°РіРЅРѕСЃС‚РёРєР°", "РґРёР°РіРЅРѕСЃС‚РёРєСѓ"), "diag", "", "", False, 0),
+        (("status", "статус", "сводка"), "diag", "", "", False, 0),
         (("version", "РІРµСЂСЃРёСЏ", "РєР°РєР°СЏ РІРµСЂСЃРёСЏ"), "version", "", "", False, 0),
         (("scan results", "СЂРµР·СѓР»СЊС‚Р°С‚С‹ scan", "СЂРµР·СѓР»СЊС‚Р°С‚С‹ СЃРєР°РЅР°"), "scan_results", "", "", False, 0),
         (("scan continue", "РїСЂРѕРґРѕР»Р¶РёС‚СЊ scan", "РїСЂРѕРґРѕР»Р¶РёС‚СЊ СЃРєР°РЅ"), "scan_continue", "", "", False, 0),
-        (("scan new", "РЅРѕРІС‹Р№ scan", "РЅРѕРІС‹Р№ СЃРєР°РЅ", "Р·Р°РїСѓСЃС‚Рё scan"), "scan_new", "", "", False, 0),
+        (("scan new", "РЅРѕРІС‹Р№ scan", "РЅРѕРІС‹Р№ СЃРєР°РЅ", "Р·Р°РїСѓСЃС‚Рё scan", "запусти скан", "перезапусти скан", "скан заново"), "scan_new", "", "", False, 0),
         (("scan reset", "СЃР±СЂРѕСЃ scan", "СЃР±СЂРѕСЃ СЃРєР°РЅР°"), "scan_reset", "", "", False, 0),
-        (("stop scan", "pause scan", "СЃС‚РѕРї СЃРєР°РЅ", "РїР°СѓР·Р° scan", "РїР°СѓР·Р° СЃРєР°РЅ"), "scan_pause", "", "", False, 0),
+        (("stop scan", "pause scan", "СЃС‚РѕРї СЃРєР°РЅ", "РїР°СѓР·Р° scan", "РїР°СѓР·Р° СЃРєР°РЅ", "останови скан"), "scan_pause", "", "", False, 0),
         (("gpt reset", "СЃР±СЂРѕСЃ gpt", "РѕС‡РёСЃС‚Рё gpt", "РѕС‡РёСЃС‚Рё РєРѕРЅС‚РµРєСЃС‚ gpt"), "gpt_reset", "", "", False, 0),
     )
     for keywords, action_name, query, action_text, use_database, lines in simple_keyword_actions:
@@ -4255,6 +4774,11 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
         (r"^(?:wizard|РІРёР·Р°СЂРґ)\s+(?P<query>\d{1,20})\s*$", "wizard"),
         (r"^(?:РїРѕРєР°Р¶Рё|РЅР°Р№РґРё|РѕС‚РєСЂРѕР№)?\s*(?:РїРѕРґРїРёСЃРє(?:Сѓ|Рё)?|subs|РёРЅС„Рѕ(?:СЂРјР°С†РёСЋ)?)\s+(?:РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ|РїРѕР»СЊР·Р°РєСѓ|СЋР·РµСЂР°|user)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_subs"),
         (r"^(?:РїРѕРєР°Р¶Рё|РЅР°Р№РґРё|РѕС‚РєСЂРѕР№)?\s*(?:РїРѕРґРїРёСЃРє(?:Сѓ|Рё)?|subs|РёРЅС„Рѕ(?:СЂРјР°С†РёСЋ)?)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_subs"),
+        (r"^(?:проверь|чекни|глянь)\s+(?:пользователя|юзера|user)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_summary"),
+        (r"^(?:проверь|чекни|глянь)\s+(?:подписки|подписку|subs)\s+(?:пользователя|юзера|user)?\s*(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_subs"),
+        (r"^(?:найди|покажи|открой)\s+(?:по\s+)?(?:id|айди|username|юзернейму)\s+(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_summary"),
+        (r"^(?:дай|скинь)\s+(?:карту|карточку|сводку)\s+(?:по\s+)?(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_summary"),
+        (r"^(?:дай|скинь)\s+(?:подписки|подписку|инфо)\s+(?:по\s+)?(?P<query>@?[A-Za-z0-9_]{3,32}|\d{1,20})\s*$", "user_subs"),
     )
     for pattern, action_name in user_lookup_patterns:
         match = re.match(pattern, raw_text, flags=re.IGNORECASE)
@@ -4277,6 +4801,7 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
         r"^(?:РѕС‚РїСЂР°РІ(?:СЊ|РёС‚СЊ)|РїРѕС€Р»Рё|РЅР°РїРёС€Рё)\s+(?:РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ|СЋР·РµСЂСѓ|user)\s+(?P<user_id>\d{1,20})\s*(?:СЃ\s+С‚РµРєСЃС‚РѕРј)?\s*[,:\-]?\s*(?P<text>.+)$",
         r"^(?:РЅР°РїРёС€Рё|РѕС‚РїСЂР°РІ(?:СЊ|РёС‚СЊ)|РїРѕС€Р»Рё)\s+(?:СЋР·РµСЂСѓ|РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ|user)\s+(?P<user_id>\d{1,20})\s+(?P<text>.+)$",
         r"^(?:РѕС‚РїСЂР°РІ(?:СЊ|РёС‚СЊ)|РїРѕС€Р»Рё)\s+(?P<user_id>\d{1,20})\s*(?:СЃ\s+С‚РµРєСЃС‚РѕРј)?\s*[,:\-]?\s*(?P<text>.+)$",
+        r"^(?:напиши|отправь)\s+(?:в\s+лс\s+)?(?P<user_id>\d{1,20})\s*[,:\-]?\s*(?P<text>.+)$",
     )
     for pattern in mail_patterns:
         match = re.match(pattern, raw_text, flags=re.IGNORECASE)
@@ -4299,6 +4824,7 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
 
     broadcast_patterns = (
         r"^(?:СЃРґРµР»Р°Р№|Р·Р°РїСѓСЃС‚Рё|РѕС‚РїСЂР°РІСЊ)?\s*(?:СЂР°СЃСЃС‹Р»РєСѓ|broadcast|mail2)\s*(?:РІСЃРµРј\s+Р±РµР·\s+РїРѕРґРїРёСЃРєРё)?\s*[,:\-]?\s*(?P<text>.+)$",
+        r"^(?:сделай|запусти|включи)?\s*(?:массовую\s+рассылку|общую\s+рассылку)\s*[,:\-]?\s*(?P<text>.+)$",
     )
     for pattern in broadcast_patterns:
         match = re.match(pattern, raw_text, flags=re.IGNORECASE)
@@ -4340,6 +4866,7 @@ def detect_direct_smart_action(text: str) -> dict[str, object] | None:
     wizard_patterns = (
         r"^(?:РѕС‚РїСЂР°РІ(?:СЊ|РёС‚СЊ)|СЃРґРµР»Р°Р№|СЃРѕР·РґР°Р№|РїРѕРґРіРѕС‚РѕРІСЊ)\s+(?:РІ\s+)?(?:wizard|РІРёР·Р°СЂРґ|РІРёР·Р°РґСЂ)\s+(?:СЋР·РµСЂР°|РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ|user)?\s*(?P<user_id>\d{1,20})\s*(?P<text>.*)$",
         r"^(?:wizard|РІРёР·Р°СЂРґ|РІРёР·Р°РґСЂ)\s+(?:СЋР·РµСЂР°|РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ|user)?\s*(?P<user_id>\d{1,20})\s*(?P<text>.*)$",
+        r"^(?:карточк(?:у|а)|заявк(?:у|а))\s+(?:пользователя|юзера|user)?\s*(?P<user_id>\d{1,20})\s*(?P<text>.*)$",
     )
     for pattern in wizard_patterns:
         match = re.match(pattern, raw_text, flags=re.IGNORECASE)
@@ -5093,14 +5620,26 @@ def local_gpt_answer(prompt: str) -> str | None:
         return None
 
     intent = detect_non_requester_intent(cleaned)
+    if any(phrase in lowered for phrase in RU_CAPABILITIES_PHRASES):
+        return assistant_capabilities_message()
     if any(phrase in lowered for phrase in ("С‡С‚Рѕ С‚С‹ СѓРјРµРµС€СЊ", "С‡С‚Рѕ СѓРјРµРµС€СЊ", "РєРѕРјР°РЅРґС‹", "РєР°Рє РїРѕР»СЊР·РѕРІР°С‚СЊСЃСЏ", "РїРѕРјРѕС‰СЊ", "help")):
         return assistant_capabilities_message()
     if intent == "operator":
         return support_operator_contact_text()
+    if intent == "capabilities":
+        return assistant_capabilities_message()
     if intent == "vpn_setup_help":
         return vpn_setup_help_message()
     if intent == "profile_id_help":
         return profile_id_help_message()
+    if intent == "payment_help":
+        return payment_help_message()
+    if intent == "subscription_help":
+        return subscription_help_message()
+    if intent == "key_help":
+        return key_problem_help_message()
+    if intent == "speed_help":
+        return speed_problem_help_message()
     if any(word in lowered for word in ("РѕРїР»Р°С‚Р°", "РѕРїР»Р°С‚РёР»", "РїР»Р°С‚РµР¶", "РїР»Р°С‚С‘Р¶", "РґРµРЅСЊРіРё", "С‡РµРє", "РЅРµ РїСЂРѕС€Р»Р° РѕРїР»Р°С‚Р°")):
         return payment_help_message()
     if any(phrase in lowered for phrase in ("РєР»СЋС‡ РЅРµ СЂР°Р±РѕС‚Р°РµС‚", "РЅРµ СЂР°Р±РѕС‚Р°РµС‚ РєР»СЋС‡", "РЅРµС‚ РёРЅС‚РµСЂРЅРµС‚Р°", "РЅРµ РїРѕРґРєР»СЋС‡Р°РµС‚СЃСЏ", "vpn РЅРµ СЂР°Р±РѕС‚Р°РµС‚", "РІРїРЅ РЅРµ СЂР°Р±РѕС‚Р°РµС‚")):
@@ -5224,14 +5763,19 @@ def is_requester_capabilities_question(text: str) -> bool:
     if not cleaned:
         return False
     patterns = (
-        "С‡С‚Рѕ С‚С‹ СѓРјРµРµС€СЊ",
-        "С‡С‚Рѕ СѓРјРµРµС€СЊ",
-        "С‡С‚Рѕ РјРѕР¶РµС€СЊ",
-        "С‚РІРѕРё РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё",
-        "РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё Р±РѕС‚Р°",
-        "С‡С‚Рѕ С‚С‹ РјРѕР¶РµС€СЊ",
-        "С‡С‚Рѕ СѓРјРµРµС‚ Р±РѕС‚",
-        "РїРѕРєР°Р¶Рё РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё",
+        "что ты умеешь",
+        "что умеешь",
+        "что можешь",
+        "что ты можешь",
+        "твои возможности",
+        "возможности бота",
+        "что умеет бот",
+        "покажи возможности",
+        "что доступно",
+        "какие есть команды",
+        "команды",
+        "help",
+        "функции",
     )
     return any(marker in cleaned for marker in patterns)
 
