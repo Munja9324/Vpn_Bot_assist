@@ -3626,29 +3626,24 @@ def build_support_wizard_report(
     selected_text = ""
     selected_items = list(selected_subscriptions or [])
     if selected_items:
-        selected_lines = ["Р’С‹Р±СЂР°РЅРЅС‹Рµ РїРѕРґРїРёСЃРєРё:"]
+        selected_lines = ["\u0412\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438:"]
         for item in selected_items:
             selected_lines.append(
                 f"- ID: {str(item.get('subscription_id') or '').strip() or '-'}"
-                f" | Р›РѕРєР°С†РёСЏ: {str(item.get('location') or '').strip() or '-'}"
-                f" | РљРЅРѕРїРєР°: {str(item.get('button_text') or '').strip() or '-'}"
+                f" | \u041b\u043e\u043a\u0430\u0446\u0438\u044f: {str(item.get('location') or '').strip() or '-'}"
+                f" | \u041a\u043d\u043e\u043f\u043a\u0430: {str(item.get('button_text') or '').strip() or '-'}"
             )
         selected_text = "\n".join(selected_lines)
     report_lines = [
-        "Р—Р°СЏРІРєР° РїРѕРґРґРµСЂР¶РєРё VPN_KBR",
-        f"Р’СЂРµРјСЏ: {datetime.now().isoformat(timespec='seconds')}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ Telegram ID: {sender_id}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ username: @{sender_username_value}" if sender_username_value else "РћС‚РїСЂР°РІРёС‚РµР»СЊ username: РЅРµС‚",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: {sender_full_name}" if sender_full_name else "РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: РЅРµС‚",
-        f"Lookup: {lookup_used or 'РЅРµ РѕРїСЂРµРґРµР»РµРЅ'}",
+        "\u0417\u0430\u044f\u0432\u043a\u0430 VPN_KBR",
         "",
-        "РўРµРєСЃС‚ РѕР±СЂР°С‰РµРЅРёСЏ:",
-        issue_text.strip() or "[РїСѓСЃС‚Рѕ]",
+        "\u041f\u0440\u043e\u0431\u043b\u0435\u043c\u0430:",
+        issue_text.strip() or "[\u043f\u0443\u0441\u0442\u043e]",
     ]
     if selected_text:
         report_lines.extend(("", selected_text))
     if card_text:
-        report_lines.extend(("", "РљР°СЂС‚РѕС‡РєР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ:", card_text))
+        report_lines.extend(("", "\u041a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f:", card_text))
     return "\n".join(report_lines)
 
 
@@ -4024,18 +4019,15 @@ def build_problem_report_text(
     problem_text: str,
 ) -> str:
     lines = [
-        "РџСЂРѕР±Р»РµРјР° РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ",
-        f"Р’СЂРµРјСЏ: {datetime.now().isoformat(timespec='seconds')}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ ID: {sender_id}",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ username: @{sender_username_value}" if sender_username_value else "РћС‚РїСЂР°РІРёС‚РµР»СЊ username: РЅРµС‚",
-        f"РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: {sender_full_name}" if sender_full_name else "РћС‚РїСЂР°РІРёС‚РµР»СЊ РёРјСЏ: РЅРµС‚",
-        f"РџРѕРёСЃРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ: {user_lookup or 'РЅРµ СѓРєР°Р·Р°РЅ'}",
+        "\u0417\u0430\u044f\u0432\u043a\u0430 VPN_KBR",
         "",
-        "РўРµРєСЃС‚ РїСЂРѕР±Р»РµРјС‹:",
-        problem_text.strip() or "[РїСѓСЃС‚Рѕ]",
+        "\u041f\u0440\u043e\u0431\u043b\u0435\u043c\u0430:",
+        problem_text.strip() or "[\u043f\u0443\u0441\u0442\u043e]",
     ]
+    if not user_card and user_lookup:
+        lines.extend(("", f"\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c: {user_lookup}"))
     if user_card:
-        lines.extend(("", "РљР°СЂС‚РѕС‡РєР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ:", user_card))
+        lines.extend(("", "\u041a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f:", user_card))
     return "\n".join(lines)
 
 
@@ -15207,6 +15199,39 @@ async def handle_private_message(event: events.NewMessage.Event) -> None:
         return
     sender_id = int(event.sender_id or 0)
     incoming_text = (event.raw_text or "").strip()
+    sender_username_value = sender_username(sender)
+    wizard_username = normalize_username(settings.wizard_target_username)
+    if sender_username_value and sender_username_value == wizard_username:
+        log_action_event(
+            "incoming_ignored",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            reason="wizard_sender_username",
+            username=sender_username_value,
+        )
+        return
+    if wizard_target_entity_cache is not None and sender_id == int(getattr(wizard_target_entity_cache, "id", 0) or 0):
+        log_action_event(
+            "incoming_ignored",
+            sender_id=sender_id,
+            chat_id=getattr(event, "chat_id", None),
+            reason="wizard_sender_id_cached",
+        )
+        return
+    if wizard_target_entity_cache is None:
+        try:
+            wizard_entity = await get_wizard_target_entity()
+        except Exception:
+            wizard_entity = None
+        if wizard_entity is not None and sender_id == int(getattr(wizard_entity, "id", 0) or 0):
+            log_action_event(
+                "incoming_ignored",
+                sender_id=sender_id,
+                chat_id=getattr(event, "chat_id", None),
+                reason="wizard_sender_id_resolved",
+            )
+            return
+
     requester_allowed = is_requester_allowed(sender_id, sender)
     simulate_public_mode = False
     simulated_text = incoming_text

@@ -2,22 +2,26 @@ from __future__ import annotations
 
 import re
 import subprocess
-import sys
-from pathlib import Path
 
 
+# Detect classic mojibake markers only.
+# 1) UTF-8 text decoded as cp1251: "РџСЂ..."
+# 2) UTF-8 text decoded as latin1/cp1252: "ÐÑ..."
+# 3) cp1252 artifact tails: "Ã", "â" sequences.
 PATTERNS = (
-    re.compile(r"(?:\u0420.|\u0421.){3,}"),  # РџРѕРјРѕ... style
-    re.compile(r"(?:Ð.|Ñ.){2,}"),            # Ð¢ÐµÐºÑÑ‚ style
-    re.compile(r"(?:Ã.|â.){2,}"),            # cp1252/latin1 noise
+    re.compile(r"(?:\u0420.|\u0421.){3,}"),
+    re.compile(r"(?:Ð.|Ñ.){2,}"),
+    re.compile(r"(?:Ã.|â.){2,}"),
 )
 
 
 def _is_suspicious(text: str) -> bool:
-    stripped = text.strip()
-    if not stripped:
+    sample = text.strip()
+    if not sample:
         return False
-    return any(pattern.search(stripped) for pattern in PATTERNS)
+    if sample.startswith("#"):
+        return False
+    return any(pattern.search(sample) for pattern in PATTERNS)
 
 
 def _iter_git_added_lines() -> list[tuple[str, int, str]]:
@@ -26,17 +30,15 @@ def _iter_git_added_lines() -> list[tuple[str, int, str]]:
     if result.returncode not in (0, 1):
         raise RuntimeError(result.stderr.strip() or "git diff failed")
 
-    lines = result.stdout.splitlines()
     out: list[tuple[str, int, str]] = []
     current_file = ""
     current_line = 0
 
-    for line in lines:
+    for line in result.stdout.splitlines():
         if line.startswith("+++ b/"):
             current_file = line[6:]
             continue
         if line.startswith("@@"):
-            # @@ -a,b +c,d @@
             match = re.search(r"\+(\d+)", line)
             if match:
                 current_line = int(match.group(1))
@@ -72,7 +74,8 @@ def main() -> int:
 
     print("[mojibake-check] ERROR: suspicious mojibake in newly added lines:")
     for file_path, lineno, text in problems[:120]:
-        print(f" - {file_path}:{lineno}: {text[:200]}")
+        preview = text[:200].encode("unicode_escape", errors="backslashreplace").decode("ascii", errors="replace")
+        print(f" - {file_path}:{lineno}: {preview}")
     if len(problems) > 120:
         print(f" ... and {len(problems) - 120} more")
     return 1
